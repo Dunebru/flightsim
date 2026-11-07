@@ -103,7 +103,13 @@ run_on_sim() {
   w=$(sips -g pixelWidth "$OUT/$label-hud.png" | awk '/pixelWidth/ {print $2}')
   h=$(sips -g pixelHeight "$OUT/$label-hud.png" | awk '/pixelHeight/ {print $2}')
   if [ "$h" -gt "$w" ]; then sips -r 270 "$OUT/$label-hud.png" >/dev/null; fi
-  echo "    ok: HUD running on $name"
+  # A frozen simulator display returns the same stale frame for every capture while the app
+  # process looks healthy (seen 2026-11-07). The menu and the HUD are different screens, so
+  # identical captures mean the evidence is invalid.
+  if cmp -s "$OUT/$label.png" "$OUT/$label-hud.png"; then
+    echo "    FAILED: menu and HUD screenshots on $name are identical (stale simulator display?)"; exit 1
+  fi
+  echo "    ok: HUD running on $name (screenshots differ)"
 }
 
 device_udid() {
@@ -113,9 +119,14 @@ device_udid() {
   /usr/bin/python3 -I - "$json" <<'PY'
 import json, sys
 devices = json.load(open(sys.argv[1]))["result"]["devices"]
+# Physical iPhones only: a booted simulator also reports tunnelState "connected" (this picked
+# the iPhone 17 Pro simulator as "the device" until 2026-11-07). A paired phone on Wi-Fi reports
+# "disconnected" until devicectl connects on demand; "unavailable" means unreachable.
 for d in devices:
     hw, conn = d.get("hardwareProperties", {}), d.get("connectionProperties", {})
-    if hw.get("deviceType") == "iPhone" and conn.get("tunnelState") == "connected":
+    if (hw.get("deviceType") == "iPhone" and hw.get("reality") == "physical"
+            and conn.get("tunnelState") in ("connected", "disconnected")
+            and conn.get("transportType") not in (None, "")):
         print(hw["udid"]); break
 else:
     sys.exit(1)
@@ -153,8 +164,24 @@ if [ "$WITH_DEVICE" -eq 1 ]; then
   run_logged app-build-device xcodebuild -project Flight.xcodeproj -scheme "$SCHEME" \
     -destination "id=$UDID" -derivedDataPath "$DERIVED" \
     -allowProvisioningUpdates -allowProvisioningDeviceRegistration build
-  run_logged install-device xcrun devicectl device install app --device "$UDID" \
-    "$DERIVED/Build/Products/Debug-iphoneos/Flight.app"
+  APP_PATH="$DERIVED/Build/Products/Debug-iphoneos/Flight.app"
+  # The bundle must be a fresh device build, not a stale one or a simulator slice.
+  if ! vtool -show-build "$APP_PATH/Flight" 2>/dev/null | grep -q "platform IOS$"; then
+    echo "    FAILED: $APP_PATH/Flight is not an iOS device binary"; exit 1
+  fi
+  if [ "$(stat -f %m "$APP_PATH/Flight.debug.dylib" 2>/dev/null || stat -f %m "$APP_PATH/Flight")" -lt "$START" ]; then
+    echo "    FAILED: device build at $APP_PATH is older than this run (stale product)"; exit 1
+  fi
+  echo "    device: $(xcrun devicectl list devices 2>/dev/null | grep "$UDID" | awk '{print $1, $(NF-3), $(NF-2), $(NF-1)}' | head -1)"
+  # An interrupted install can leave the phone refusing updates ("needs to be updated by the
+  # developer"); seen 2026-11-07. Uninstall our own app and retry once, and say so.
+  if ! xcrun devicectl device install app --device "$UDID" "$APP_PATH" >"$OUT/install-device.log" 2>&1; then
+    echo "    install failed; uninstalling com.shreyas.flightsim and retrying once"
+    xcrun devicectl device uninstall app --device "$UDID" "$BUNDLE_ID" >>"$OUT/install-device.log" 2>&1 || true
+    run_logged install-device-retry xcrun devicectl device install app --device "$UDID" "$APP_PATH"
+  else
+    echo "    ok: install-device"
+  fi
   run_logged launch-device xcrun devicectl device process launch --terminate-existing \
     --device "$UDID" "$BUNDLE_ID"
   settle "$LAUNCH_SETTLE_SECONDS"

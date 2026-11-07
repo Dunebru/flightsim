@@ -7,51 +7,44 @@ import Observation
 /// only. M2 connects it to the flight model and M3 replaces the demo values with live ones.
 @Observable
 final class HUDModel {
-    enum Panel: String, CaseIterable, Identifiable {
-        case autopilot = "AP"
-        case map = "MAP"
-        case atc = "ATC"
-        case camera = "CAM"
-        case lights = "LTS"
-        case settings = "SET"
+    nonisolated enum Panel: String, CaseIterable, Identifiable {
+        case autopilot, lights, map, atc, settings
         var id: String { rawValue }
 
         var title: String {
             switch self {
             case .autopilot: "Autopilot"
+            case .lights: "Lights"
             case .map: "Map"
             case .atc: "ATC"
-            case .camera: "Camera"
-            case .lights: "Lights"
             case .settings: "Settings"
             }
         }
     }
 
-    enum Camera: String, CaseIterable, Identifiable {
+    nonisolated enum Camera: String, CaseIterable, Identifiable {
         case cockpit = "Cockpit", chase = "Chase", tower = "Tower", wing = "Wing", orbit = "Free orbit"
         var id: String { rawValue }
     }
 
-    enum Light: String, CaseIterable, Identifiable {
+    nonisolated enum Light: String, CaseIterable, Identifiable {
         case nav = "NAV", beacon = "BCN", strobe = "STRB", landing = "LAND", taxi = "TAXI", logo = "LOGO"
         var id: String { rawValue }
     }
 
     // MARK: Controls
 
-    /// Thrust lever, -0.25 (full reverse) ... 0 (idle) ... 1 (max).
+    /// Thrust lever, 0 (idle) ... 1 (max). With `reverse` on, it sets reverse thrust instead.
     var throttle: Double = 0.72
-    static let throttleRange: ClosedRange<Double> = -0.25...1
-    /// Below idle, how far the lever must be pulled before reverse engages (the idle gate).
-    static let reverseGate: Double = 0.06
+    /// Reverse thrust armed: the same slider then commands reverse, shown in orange.
+    var reverse = false
 
     let flapDetents = ["UP", "1", "2", "3", "FULL"]
     var flapIndex = 1
     let spoilerDetents = ["RET", "ARM", "½", "FULL"]
     var spoilerIndex = 0
 
-    enum Gear: Equatable { case up, transit(toDown: Bool), down }
+    nonisolated enum Gear: Equatable { case up, transit(toDown: Bool), down }
     var gear: Gear = .down
     /// Time for the gear to travel, seconds.
     static let gearTravelTime: Duration = .seconds(6)
@@ -88,18 +81,15 @@ final class HUDModel {
 
     // MARK: Behavior
 
-    /// Applies a lever position from a drag, enforcing the idle gate: from forward thrust the
-    /// lever stops at idle unless pulled past the gate into reverse.
-    func setThrottle(_ proposed: Double) {
-        let clamped = min(max(proposed, Self.throttleRange.lowerBound), Self.throttleRange.upperBound)
-        if throttle >= 0, clamped < 0, clamped > -Self.reverseGate {
-            throttle = 0
-        } else {
-            throttle = clamped
-        }
+    func setThrottle(_ value: Double) {
+        throttle = min(max(value, 0), 1)
     }
 
-    var isReverse: Bool { throttle < 0 }
+    /// Arming or disarming reverse brings the lever to idle first, as on the real aircraft.
+    func toggleReverse() {
+        throttle = 0
+        reverse.toggle()
+    }
 
     func toggleGear() {
         let toDown: Bool

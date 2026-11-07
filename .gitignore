@@ -40,3 +40,6 @@ artifacts/
 *.swp
 .vscode/
 .idea/
+
+# Design tooling scratch (decision pages, mocks, review captures)
+.impeccable/

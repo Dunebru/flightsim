@@ -31,13 +31,12 @@ var targets: [Target] = [
     .target(name: "CJSBSim", path: "Sources/CJSBSim"),
 ]
 for module in modules {
-    // UI is the only UI-facing module: it gets main-actor-by-default isolation and its fonts.
+    // UI is the only UI-facing module: it gets main-actor-by-default isolation.
     // Engine modules stay nonisolated so callers choose where their work runs.
     let isUI = module.name == "UI"
     targets.append(.target(
         name: module.name,
         dependencies: module.deps.map { .target(name: $0) },
-        resources: isUI ? [.copy("Resources/Fonts")] : nil,
         swiftSettings: isUI ? swiftSettings + [.defaultIsolation(MainActor.self)] : swiftSettings
     ))
     targets.append(.testTarget(

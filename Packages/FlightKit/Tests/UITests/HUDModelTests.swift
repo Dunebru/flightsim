@@ -1,34 +1,32 @@
 import Testing
 @testable import UI
+#if canImport(AppKit)
+import AppKit
+#endif
 
 @MainActor
 struct HUDModelTests {
-    @Test func throttleStopsAtIdleGate() {
-        let model = HUDModel()
-        model.setThrottle(0.5)
-        model.setThrottle(-0.03)          // inside the gate: holds at idle
-        #expect(model.throttle == 0)
-        #expect(!model.isReverse)
-    }
-
-    @Test func throttleEntersReversePastGate() {
-        let model = HUDModel()
-        model.setThrottle(0.5)
-        model.setThrottle(-0.10)          // pulled through the gate
-        #expect(model.throttle == -0.10)
-        #expect(model.isReverse)
-    }
-
     @Test func throttleClampsToRange() {
         let model = HUDModel()
         model.setThrottle(3)
-        #expect(model.throttle == HUDModel.throttleRange.upperBound)
-        model.setThrottle(-0.2)
-        model.setThrottle(-9)
-        #expect(model.throttle == HUDModel.throttleRange.lowerBound)
+        #expect(model.throttle == 1)
+        model.setThrottle(-2)
+        #expect(model.throttle == 0)
     }
 
-    @Test func panelKeyTogglesAndSwitches() {
+    @Test func reverseBringsLeverToIdle() {
+        let model = HUDModel()
+        model.setThrottle(0.8)
+        model.toggleReverse()
+        #expect(model.reverse)
+        #expect(model.throttle == 0)
+        model.setThrottle(0.6)
+        model.toggleReverse()
+        #expect(!model.reverse)
+        #expect(model.throttle == 0)
+    }
+
+    @Test func panelButtonsToggleAndSwitch() {
         let model = HUDModel()
         model.toggle(.autopilot)
         #expect(model.openPanel == .autopilot)
@@ -45,7 +43,15 @@ struct HUDModelTests {
         #expect(model.gear == .transit(toDown: false))
     }
 
-    @Test func fontsRegister() {
-        #expect(Typeface.registerBundledFonts() == 0)
+    #if canImport(AppKit)
+    /// A misspelled SF Symbol renders as nothing, silently. Every name the HUD uses must resolve.
+    @Test(arguments: [
+        "video", "map", "antenna.radiowaves.left.and.right", "lightbulb", "gearshape", "pause.fill",
+        "play.fill", "parkingsign", "flame.fill", "xmark", "minus", "plus", "airplane",
+        "airplane.departure", "point.topleft.down.to.point.bottomright.curvepath", "book.closed",
+    ] + HUDModel.Light.allCases.map(\.symbol))
+    func symbolExists(_ name: String) {
+        #expect(NSImage(systemSymbolName: name, accessibilityDescription: nil) != nil, "missing SF Symbol \(name)")
     }
+    #endif
 }

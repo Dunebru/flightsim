@@ -7,11 +7,6 @@ struct FlightApp: App {
     /// (used by scripts/verify.sh to screenshot it).
     @State private var inFlight = UserDefaults.standard.string(forKey: "FlightStartScreen") == "hud"
 
-    init() {
-        let failures = Typeface.registerBundledFonts()
-        assert(failures == 0, "B612 fonts failed to register")
-    }
-
     var body: some Scene {
         WindowGroup {
             Group {
