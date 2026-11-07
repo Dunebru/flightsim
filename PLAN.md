@@ -200,19 +200,15 @@ Navigraph's developer terms say they cannot license nav data to a developer, onl
 
 ## 8. UI
 
-**Decision (2026-11-07):** an original design that combines the ergonomics of the two sims you named, with a visual identity taken from real avionics rather than from either app. Nothing is extracted from, traced from, or replicated one to one from Infinite Flight or Microsoft Flight Simulator.
+**Decision (2026-11-07, owner):** the UI is what Apple would ship if it made a flight sim, arranged the way the owner flies in Infinite Flight. Apple's own platform language (iOS 27 Liquid Glass, SF Pro Rounded, SF Symbols, Control Center-style controls, native menus and switches); arrangement following the mobile-sim convention; nothing extracted from or traced from Infinite Flight. The first "glass cockpit" prototype was rejected as looking generated and is gone. `DESIGN.md` records the shipped system; the HUD surface brief lives in `.impeccable/surfaces/`.
 
-**Ergonomics borrowed (conventions, not looks):** thrust lever under the left thumb with trim beside it; aircraft controls (gear, brake, spoilers, flaps) under the right thumb; the numbers you fly by in a strip along the bottom; a slim top bar of keys that opens panels, which drop down as windows with a header and close key and never cover the thumb controls.
+**Arrangement:** flight data capsule across the top center (autopilot status under it while engaged); a glass button bar at the bottom center (camera menu, map, ATC, autopilot, lights, settings) whose panels rise between the thumb columns without moving them; thrust as a tall Control Center slider on the left edge with a reverse toggle; gear and parking brake circles above spoiler and flap sliders on the right edge, the levers extending downward like the real ones with every detent named; pause top-left.
 
-**Visual identity: "glass cockpit".**
-- Color follows the avionics convention pilots already read: cyan for values the pilot selected (autopilot targets), green for engaged modes and healthy states (gear down, A/THR), magenta for the route, amber for caution (reverse thrust, parking brake, spoilers out), red for warning (gear in transit, stall). White for live state, grays for labels.
-- Type is B612 (SIL Open Font License), designed by Airbus for cockpit displays. Its figures are tabular (measured: every digit 0.65 em), so values never jitter; labels are uppercase with open tracking.
-- Bezels: near-black at about 60 percent opacity with 1 pt hairlines and 6 pt corners, separate floating groups rather than full-width bars so the outside view stays open. Panel windows are near-opaque because on small phones they can sit over other controls.
-- Top bar carries a flight mode annunciator styled like the one on a primary flight display (engaged mode on top in green, armed mode below in cyan).
-- Keys are labeled soft keys (AP, MAP, ATC, CAM, LTS, SET), like the keys around a cockpit display, with a cyan bar when selected. No decorative gradients, glows or icons where a word is clearer.
-- Haptics: detent clicks on flaps and spoilers, a heavier click on the gear handle and when the thrust lever crosses into reverse.
+**Colors with fixed meanings:** green engaged, orange caution, red warning, cyan for pilot-selected values, white fill for "on". Glass carries a light smoke tint so small labels hold 4.5:1 over bright sky.
 
-**Status:** HUD prototype built 2026-11-07 (controls work by touch on demo data; the world behind it is a flat stand-in). M3 adds tilt, yoke, joystick and controller input, cameras, the free flight setup screens, settings, and wires everything to the flight model.
+**Process:** designed with the Impeccable skill; a separate reviewer audited the screenshots (contrast measured, touch targets, layout stability) and returned "ship" after two fix rounds. Open ideas: panels morphing out of their button, and the HUD receding during cruise.
+
+**Status:** prototype on demo data. M1 puts the real 3D world behind it; M3 wires every control to the flight model and adds tilt, stick and controller input, cameras, free flight setup and settings.
 
 ---
 

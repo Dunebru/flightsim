@@ -1,0 +1,147 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-07T00:00:00Z",
+  "title": "Design System: Flight",
+  "extensions": {
+    "colorMeta": {
+      "engaged-green": { "role": "primary", "displayName": "Engaged Green", "canonical": "SwiftUI Color.green (dark appearance)", "tonalRamp": ["#0B3A18", "#13562A", "#1C733B", "#25914C", "#30D158", "#5FDC7E", "#95E8A8", "#CDF5D6"] },
+      "caution-orange": { "role": "secondary", "displayName": "Caution Orange", "canonical": "SwiftUI Color.orange (dark appearance)", "tonalRamp": ["#3D2502", "#5E3903", "#804E05", "#B06B07", "#FF9F0A", "#FFB547", "#FFCD85", "#FFE6C2"] },
+      "selected-cyan": { "role": "secondary", "displayName": "Selected Cyan", "canonical": "SwiftUI Color.cyan (dark appearance)", "tonalRamp": ["#0C3140", "#124A60", "#196380", "#2289B0", "#64D2FF", "#8ADDFF", "#B1E9FF", "#D8F4FF"] },
+      "warning-red": { "role": "tertiary", "displayName": "Warning Red", "canonical": "SwiftUI Color.red (dark appearance); declared, not yet used on a surface", "tonalRamp": ["#40110E", "#611A15", "#82231C", "#B33026", "#FF453A", "#FF7369", "#FFA29B", "#FFD0CD"] },
+      "fill-white": { "role": "neutral", "displayName": "Fill White", "canonical": "Color.white" },
+      "label-secondary": { "role": "neutral", "displayName": "Secondary Label", "canonical": "Color.white.opacity(0.9)" },
+      "smoke-tint": { "role": "neutral", "displayName": "Smoke Tint", "canonical": "Glass.regular.tint(Color.black.opacity(0.28))" },
+      "inset-fill": { "role": "neutral", "displayName": "Inset Fill", "canonical": "Color.white.opacity(0.16)" },
+      "inset-fill-quiet": { "role": "neutral", "displayName": "Inset Fill Quiet", "canonical": "Color.white.opacity(0.12)" },
+      "ink-on-fill": { "role": "neutral", "displayName": "Ink on Fill", "canonical": "Color.black.opacity(0.85)" }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "App name on the placeholder main menu only." },
+      "headline": { "displayName": "Headline", "purpose": "Modal state titles such as Paused." },
+      "title": { "displayName": "Title", "purpose": "Glass panel titles." },
+      "metric": { "displayName": "Metric", "purpose": "Primary flight data and autopilot target chips; HUDStyle.metric defaults to 22pt, slider readout 17pt." },
+      "metric-small": { "displayName": "Metric Small", "purpose": "Autopilot status targets and increment buttons." },
+      "body": { "displayName": "Body", "purpose": "SF Symbols in the tool bar and pause button; prominent button labels." },
+      "label-strong": { "displayName": "Label Strong", "purpose": "Mode buttons, autopilot status text, current slider detent." },
+      "caption": { "displayName": "Caption", "purpose": "Metric labels above values." },
+      "unit": { "displayName": "Unit", "purpose": "Units on the value's baseline in secondary white." }
+    },
+    "shadows": [
+      { "name": "over-world-legibility", "value": "0 1px 2px rgba(0,0,0,0.35)", "purpose": "Only on white content directly over the world inside a slider. Legibility aid, not elevation." }
+    ],
+    "motion": [
+      { "name": "spring-panel", "value": "spring(duration: 0.35, bounce: 0.15)", "purpose": "Panels opening and closing, autopilot capsule appearing." },
+      { "name": "spring-toggle", "value": "spring(duration: 0.3)", "purpose": "Pause and reverse thrust state changes." },
+      { "name": "spring-rubber-band", "value": "spring(duration: 0.35, bounce: 0.4)", "purpose": "Slider returning from overshoot past either end (capped at 12%)." },
+      { "name": "pulse-transit", "value": "easeInOut(duration: 0.45), opacity 1.0 to 0.35", "purpose": "Gear glyph while gear is in transit." },
+      { "name": "panel-enter", "value": "scale 0.92 anchored bottom + opacity", "purpose": "Glass card rising from the tool bar." },
+      { "name": "numeric-roll", "value": "contentTransition(.numericText())", "purpose": "Every changing number." }
+    ],
+    "breakpoints": [
+      { "name": "phone-landscape", "value": "iPhone landscape; data capsule drops N1 then GS before compressing" },
+      { "name": "tablet", "value": "iPad landscape; same arrangement with more air" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Flight Data Capsule",
+      "kind": "custom",
+      "refersTo": "metrics-capsule",
+      "description": "Top center glass capsule of live flight data: caption over a rounded tabular value with a small unit.",
+      "html": "<div class=\"ds-metrics\"><div class=\"ds-metric\"><span class=\"ds-cap\">IAS</span><span class=\"ds-val\">142<small>kt</small></span></div><div class=\"ds-metric\"><span class=\"ds-cap\">ALT</span><span class=\"ds-val\">2,350<small>ft</small></span></div><div class=\"ds-metric\"><span class=\"ds-cap\">V/S</span><span class=\"ds-val\">+1200<small>fpm</small></span></div><div class=\"ds-metric\"><span class=\"ds-cap\">HDG</span><span class=\"ds-val\">271&deg;</span></div></div>",
+      "css": ".ds-metrics { display: inline-flex; gap: 20px; align-items: center; height: 52px; padding: 0 22px; border-radius: 9999px; background: rgba(0,0,0,0.28); backdrop-filter: blur(20px) saturate(1.6); -webkit-backdrop-filter: blur(20px) saturate(1.6); color: #fff; } .ds-metric { display: flex; flex-direction: column; } .ds-cap { font: 600 12px system-ui, -apple-system, sans-serif; color: rgba(255,255,255,0.9); } .ds-val { font: 600 20px ui-rounded, system-ui, sans-serif; font-variant-numeric: tabular-nums; } .ds-val small { font: 600 11px ui-rounded, system-ui, sans-serif; color: rgba(255,255,255,0.9); margin-left: 2px; }"
+    },
+    {
+      "name": "Autopilot Status Capsule",
+      "kind": "custom",
+      "refersTo": "autopilot-capsule",
+      "description": "Shown under the data capsule while the autopilot is engaged: green AP label and cyan selected targets.",
+      "html": "<div class=\"ds-ap\"><span class=\"ds-ap-on\"><i></i>AP &middot; A/THR</span><span class=\"ds-t\"><b>SPD</b>250</span><span class=\"ds-t\"><b>HDG</b>271</span><span class=\"ds-t\"><b>ALT</b>5,000</span></div>",
+      "css": ".ds-ap { display: inline-flex; gap: 14px; align-items: center; height: 34px; padding: 0 16px; border-radius: 9999px; background: rgba(0,0,0,0.28); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); } .ds-ap-on { display: inline-flex; gap: 6px; align-items: center; font: 700 13px ui-rounded, system-ui, sans-serif; color: #30D158; } .ds-ap-on i { width: 8px; height: 8px; border-radius: 50%; background: #30D158; } .ds-t { font: 600 15px ui-rounded, system-ui, sans-serif; font-variant-numeric: tabular-nums; color: #64D2FF; } .ds-t b { font: 600 12px system-ui, sans-serif; color: rgba(255,255,255,0.9); margin-right: 4px; }"
+    },
+    {
+      "name": "Tool Bar",
+      "kind": "nav",
+      "refersTo": "tool-bar",
+      "description": "Bottom center merged glass capsule; the open panel's button turns into a white circle with a black glyph.",
+      "html": "<nav class=\"ds-toolbar\"><button class=\"ds-tool\" aria-label=\"Map\"><svg viewBox=\"0 0 24 24\" width=\"18\" height=\"18\"><path fill=\"currentColor\" d=\"M3 5l6-2 6 2 6-2v16l-6 2-6-2-6 2z\"/></svg></button><button class=\"ds-tool ds-tool-open\" aria-label=\"Autopilot\">AP</button><button class=\"ds-tool\" aria-label=\"Settings\"><svg viewBox=\"0 0 24 24\" width=\"18\" height=\"18\"><circle cx=\"12\" cy=\"12\" r=\"8\" fill=\"currentColor\"/><circle cx=\"12\" cy=\"12\" r=\"3\" fill=\"#555\"/></svg></button></nav>",
+      "css": ".ds-toolbar { display: inline-flex; padding: 0 6px; border-radius: 9999px; background: rgba(0,0,0,0.28); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); } .ds-tool { width: 48px; height: 48px; display: grid; place-items: center; border: 0; background: transparent; color: #fff; font: 700 14px ui-rounded, system-ui, sans-serif; cursor: pointer; transition: transform 0.2s; } .ds-tool:hover { transform: scale(1.06); } .ds-tool:focus-visible { outline: 2px solid #64D2FF; outline-offset: -4px; border-radius: 50%; } .ds-tool-open { color: #000; background: radial-gradient(circle, #fff 0 20px, transparent 20.5px); }"
+    },
+    {
+      "name": "Circle Toggle",
+      "kind": "button",
+      "refersTo": "circle-toggle",
+      "description": "Control Center-style round toggle: glass with a white glyph when off, solid fill with a black glyph when on.",
+      "html": "<button class=\"ds-circle\" aria-pressed=\"false\">P</button> <button class=\"ds-circle ds-circle-on\" aria-pressed=\"true\">P</button> <button class=\"ds-circle ds-circle-engaged\" aria-pressed=\"true\">G</button> <button class=\"ds-circle ds-circle-caution\" aria-pressed=\"true\">REV</button>",
+      "css": ".ds-circle { width: 52px; height: 52px; border-radius: 50%; border: 0; background: rgba(0,0,0,0.28); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); color: #fff; font: 700 17px ui-rounded, system-ui, sans-serif; cursor: pointer; transition: transform 0.3s cubic-bezier(.3,1.4,.5,1), background 0.2s; } .ds-circle:hover { transform: scale(1.05); } .ds-circle:active { transform: scale(0.94); } .ds-circle:focus-visible { outline: 2px solid #64D2FF; outline-offset: 2px; } .ds-circle-on { background: #fff; color: #000; } .ds-circle-engaged { background: #30D158; color: #000; } .ds-circle-caution { background: #FF9F0A; color: #000; font-size: 12px; font-weight: 800; }"
+    },
+    {
+      "name": "Glass Slider (Flaps)",
+      "kind": "custom",
+      "refersTo": "glass-slider",
+      "description": "Control Center slider as a lever: fills white from the top, names every detent, content inverts to black under the fill.",
+      "html": "<div class=\"ds-slider\" role=\"slider\" aria-valuetext=\"1\"><div class=\"ds-slider-fill\"></div><ol><li>UP</li><li class=\"cur\">1</li><li>2</li><li>3</li><li>FULL</li></ol></div>",
+      "css": ".ds-slider { position: relative; width: 68px; height: 200px; border-radius: 22px; overflow: hidden; background: rgba(0,0,0,0.28); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); } .ds-slider-fill { position: absolute; inset: 0 0 auto 0; height: 37%; background: #fff; } .ds-slider ol { position: relative; list-style: none; margin: 0; padding: 40px 0 10px; height: 100%; box-sizing: border-box; display: flex; flex-direction: column; justify-content: space-between; text-align: center; font: 500 11px ui-rounded, system-ui, sans-serif; color: rgba(255,255,255,0.7); } .ds-slider li:nth-child(-n+2) { color: rgba(0,0,0,0.85); } .ds-slider li.cur { font-size: 13px; font-weight: 700; } .ds-slider:focus-visible { outline: 2px solid #64D2FF; outline-offset: 2px; }"
+    },
+    {
+      "name": "Glass Panel Card",
+      "kind": "card",
+      "refersTo": "panel-card",
+      "description": "Smoke glass card that rises from the tool bar: bold rounded title, close button, inset controls.",
+      "html": "<section class=\"ds-card\"><header><h3>Lights</h3><button class=\"ds-close\" aria-label=\"Close\">&times;</button></header><p>Content sits on inset fills one level above the glass.</p></section>",
+      "css": ".ds-card { display: inline-block; min-width: 280px; padding: 10px 8px 10px 18px; border-radius: 28px; background: rgba(0,0,0,0.28); backdrop-filter: blur(24px) saturate(1.6); -webkit-backdrop-filter: blur(24px) saturate(1.6); color: #fff; } .ds-card header { display: flex; align-items: center; justify-content: space-between; gap: 12px; } .ds-card h3 { margin: 0; font: 700 20px ui-rounded, system-ui, sans-serif; } .ds-card p { margin: 12px 10px 4px 0; font: 400 14px system-ui, sans-serif; color: rgba(255,255,255,0.9); } .ds-close { width: 30px; height: 30px; margin: 7px; border-radius: 50%; border: 0; background: rgba(255,255,255,0.18); color: #fff; font: 700 15px system-ui, sans-serif; cursor: pointer; } .ds-close:hover { background: rgba(255,255,255,0.26); } .ds-close:focus-visible { outline: 2px solid #64D2FF; outline-offset: 2px; }"
+    },
+    {
+      "name": "Target Chip",
+      "kind": "chip",
+      "refersTo": "target-chip",
+      "description": "Autopilot target selector: quiet inset fill with a cyan value; selected becomes solid cyan with black text.",
+      "html": "<button class=\"ds-chip\"><span>Speed</span><b>250<small>kt</small></b></button> <button class=\"ds-chip ds-chip-sel\" aria-pressed=\"true\"><span>Altitude</span><b>5,000<small>ft</small></b></button>",
+      "css": ".ds-chip { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 92px; min-height: 56px; padding: 6px 12px; border: 0; border-radius: 16px; background: rgba(255,255,255,0.12); color: #64D2FF; cursor: pointer; transition: background 0.2s; } .ds-chip span { font: 500 12px system-ui, sans-serif; color: rgba(255,255,255,0.9); } .ds-chip b { font: 600 20px ui-rounded, system-ui, sans-serif; font-variant-numeric: tabular-nums; } .ds-chip small { font: 600 11px ui-rounded, system-ui, sans-serif; color: rgba(255,255,255,0.9); margin-left: 2px; } .ds-chip:hover { background: rgba(255,255,255,0.18); } .ds-chip:focus-visible { outline: 2px solid #64D2FF; outline-offset: 2px; } .ds-chip-sel, .ds-chip-sel:hover { background: #64D2FF; color: #000; } .ds-chip-sel span, .ds-chip-sel small { color: rgba(0,0,0,0.7); }"
+    },
+    {
+      "name": "Panel and Mode Buttons",
+      "kind": "button",
+      "refersTo": "panel-button",
+      "description": "Full-width 44pt capsules inside a glass card; mode buttons turn Engaged Green with black text when on.",
+      "html": "<button class=\"ds-pbtn\">+100</button> <button class=\"ds-pbtn ds-mode ds-mode-on\" aria-pressed=\"true\">A/THR</button> <button class=\"ds-pbtn ds-mode\" aria-pressed=\"false\">LOC</button>",
+      "css": ".ds-pbtn { min-width: 96px; min-height: 44px; padding: 0 16px; border: 0; border-radius: 9999px; background: rgba(255,255,255,0.16); color: #fff; font: 600 15px ui-rounded, system-ui, sans-serif; font-variant-numeric: tabular-nums; cursor: pointer; transition: background 0.2s, transform 0.2s; } .ds-pbtn:hover { background: rgba(255,255,255,0.22); } .ds-pbtn:active { transform: scale(0.97); } .ds-pbtn:focus-visible { outline: 2px solid #64D2FF; outline-offset: 2px; } .ds-mode { font: 700 13px ui-rounded, system-ui, sans-serif; } .ds-mode-on, .ds-mode-on:hover { background: #30D158; color: #000; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "Control Center at Thirty Thousand Feet",
+    "overview": "The system is Apple's iOS 27 platform language applied to a cockpit. Every piece of chrome is a sheet of Liquid Glass with a light smoke tint, floating over a full-bleed world with no frame, toolbar background, or scrim around it. Controls borrow their behavior from Control Center: tall sliders that fill white as the value rises, round toggles that turn solid when on, a single merged capsule of buttons. Numbers are SF Pro Rounded semibold with tabular digits and small secondary units; icons are SF Symbols, plus three authored filled glyphs (landing gear, flaps, spoilers) drawn to sit beside them at matching weight.\n\nDensity follows the hands. Instruments cluster on the true center axis (data at the top, the tool bar at the bottom), and everything touched during takeoff and landing lives in two thumb columns on the left and right edges. Panels rise as glass cards between those columns without displacing them. Color is semantic and fixed: a hue on screen always reports state, never decorates.\n\nThe confirmed rejection is the first prototype's look: opaque dark boxed tiles and a cockpit costume typeface. The system also stays off any other flight sim's visual identity while borrowing Infinite Flight's arrangement.",
+    "keyCharacteristics": [
+      "Smoke-tinted Liquid Glass for every surface, with no strokes and no drawn shadows.",
+      "Capsules, circles, and continuous rounded rects only.",
+      "White fill means \"on\"; green, orange, red, and cyan each carry exactly one meaning.",
+      "SF Pro Rounded semibold numerals with tabular digits and numeric content transitions.",
+      "Springs for every state change, haptic selection feedback on every toggle and detent."
+    ],
+    "rules": [
+      { "name": "The White Is On Rule", "body": "A control that is on becomes a solid fill with a black glyph; off is plain glass with a white glyph. A state color replaces white only when the state itself is engaged, caution, or warning.", "section": "colors" },
+      { "name": "The One Meaning Rule", "body": "Green is engaged, orange is caution, red is warning, cyan is pilot-selected. No hue appears for brand, emphasis, or decoration.", "section": "colors" },
+      { "name": "The Smoke Glass Rule", "body": "Glass is always tinted with black at 28%. Untinted glass measured 2.98:1 for small white labels over sky in review; do not lighten the tint.", "section": "colors" },
+      { "name": "The Live Digit Rule", "body": "Every changing number uses tabular digits and a numeric content transition, so values roll rather than jump and columns never shift.", "section": "typography" },
+      { "name": "The Small Unit Rule", "body": "Units are always a separate, smaller, secondary-white run aligned to the value's baseline; never the same size as the number.", "section": "typography" },
+      { "name": "The Material Is the Depth Rule", "body": "No drop shadows on surfaces and no strokes on any shape. Separation comes from glass against the world and from inset fills against glass.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do put every surface on Liquid Glass with the 28% black smoke tint, and use the interactive variant for anything touchable.",
+      "Do show \"on\" as a solid fill with a black glyph: white by default, Engaged Green, Caution Orange, or Warning Red when the state demands it.",
+      "Do set every changing number in SF Pro Rounded semibold with tabular digits and a numeric content transition, unit smaller and secondary.",
+      "Do use SF Symbols first; draw a filled glyph only when no symbol exists, at matching weight and box.",
+      "Do keep touch targets at 44pt or more and attach a selection haptic to every toggle and detent.",
+      "Do animate state with springs (0.3 to 0.35s, bounce 0.15 for panels and capsules).",
+      "Do drop lower-priority values before any capsule would compress or wrap."
+    ],
+    "donts": [
+      "Don't use opaque dark tiles, boxed cards, or a cockpit costume typeface; that was the rejected first prototype.",
+      "Don't add strokes or drop shadows to any surface.",
+      "Don't use system blue for selected values; it disappears against sky. Use Selected Cyan.",
+      "Don't use any hue decoratively; each color reports exactly one kind of state.",
+      "Don't lighten or remove the smoke tint to make glass look clearer.",
+      "Don't copy the visual identity of Infinite Flight or Microsoft Flight Simulator; borrow only arrangement and conventions."
+    ]
+  }
+}

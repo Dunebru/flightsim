@@ -41,5 +41,7 @@ artifacts/
 .vscode/
 .idea/
 
-# Design tooling scratch (decision pages, mocks, review captures)
-.impeccable/
+# Design tooling: keep the surface briefs and design sidecar, ignore scratch
+.impeccable/*
+!.impeccable/surfaces/
+!.impeccable/design.json
