@@ -46,28 +46,33 @@ public struct FlightHUDView: View {
                 .padding(.horizontal, HUDStyle.edge)
                 .padding(.top, 10)
 
-            // Top center: flight data, then autopilot status while engaged.
-            VStack(spacing: 8) {
-                MetricsBar(model: model)
-                // The status is redundant while the autopilot panel itself is open.
-                if model.apMaster && model.openPanel != .autopilot {
-                    AutopilotStatus(model: model)
-                        .transition(.move(edge: .top).combined(with: .opacity))
+            // Top center: flight data, then autopilot status while engaged. Drawn as an overlay
+            // on an empty layer so its width can never push the thumb columns.
+            Color.clear
+                .overlay(alignment: .top) {
+                    VStack(spacing: 8) {
+                        MetricsBar(model: model)
+                        // The status is redundant while the autopilot panel itself is open.
+                        if model.apMaster && model.openPanel != .autopilot {
+                            AutopilotStatus(model: model)
+                                .transition(.move(edge: .top).combined(with: .opacity))
+                        }
+                        if model.openPanel == nil { demoTag }
+                    }
+                    .padding(.horizontal, Self.topCenterInset)
+                    .padding(.top, 10)
                 }
-                if model.openPanel == nil { demoTag }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .padding(.horizontal, Self.topCenterInset)
-            .padding(.top, 10)
 
-            // Bottom center: panels rise from the button bar.
-            VStack(spacing: 10) {
-                panel
-                ToolCluster(model: model)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-            .padding(.horizontal, Self.bottomCenterInset)
-            .padding(.bottom, 10)
+            // Bottom center: panels rise from the button bar. Overlay for the same reason.
+            Color.clear
+                .overlay(alignment: .bottom) {
+                    VStack(spacing: 10) {
+                        panel
+                        ToolCluster(model: model)
+                    }
+                    .padding(.horizontal, Self.bottomCenterInset)
+                    .padding(.bottom, 10)
+                }
 
             if model.paused { pausedOverlay }
         }
@@ -77,6 +82,12 @@ public struct FlightHUDView: View {
             // `-FlightOpenPanel autopilot` opens a panel at launch, so scripts can screenshot it.
             if let key = UserDefaults.standard.string(forKey: "FlightOpenPanel") {
                 model.openPanel = HUDModel.Panel(rawValue: key)
+            }
+            // `-FlightScenario caution` shows the caution states (brake set, reverse armed).
+            if UserDefaults.standard.string(forKey: "FlightScenario") == "caution" {
+                model.parkingBrake = true
+                model.toggleReverse()
+                model.setThrottle(0.4)
             }
         }
     }
@@ -209,9 +220,11 @@ public struct FlightHUDView: View {
 
     private var demoTag: some View {
         Text("Prototype · demo data · 3D world arrives in M1")
-            .font(.system(size: 11, weight: .medium))
-            .foregroundStyle(HUDStyle.secondaryText)
-            .overWorldLegibility()
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 10)
+            .frame(height: 22)
+            .glassEffect(HUDStyle.glass, in: .capsule)
     }
 
     /// Maps a detent index to a 0...1 slider value and back.

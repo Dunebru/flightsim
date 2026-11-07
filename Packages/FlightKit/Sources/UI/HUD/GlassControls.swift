@@ -54,7 +54,7 @@ struct GlassSlider: View {
             }
             .frame(width: width, height: h)
             .clipShape(shape)
-            .background { Color.clear.glassEffect(.regular.interactive(), in: shape) }
+            .background { Color.clear.glassEffect(HUDStyle.glassInteractive, in: shape) }
             .contentShape(shape)
             .scaleEffect(x: 1 - abs(overshoot) * 0.15, y: 1 + abs(overshoot) * 0.35,
                          anchor: (overshoot > 0) != fillsFromTop ? .bottom : .top)
@@ -175,7 +175,7 @@ struct GlassCircleToggle<Label: View>: View {
                 .frame(width: size, height: size)
                 .background {
                     ZStack {
-                        Color.clear.glassEffect(.regular.interactive(), in: .circle)
+                        Color.clear.glassEffect(HUDStyle.glassInteractive, in: .circle)
                         if isOn { Circle().fill(onColor) }
                     }
                 }

@@ -32,7 +32,7 @@ struct GlassPanel<Content: View>: View {
         .padding(.leading, 18)
         .padding(.trailing, 8)
         .padding(.vertical, 10)
-        .glassEffect(.regular, in: .rect(cornerRadius: 28, style: .continuous))
+        .glassEffect(HUDStyle.glass, in: .rect(cornerRadius: 28, style: .continuous))
     }
 }
 
@@ -253,7 +253,7 @@ nonisolated extension HUDModel.Light {
     /// One distinct silhouette per light.
     var symbol: String {
         switch self {
-        case .nav: "circle.lefthalf.filled"        // red/green wingtip pair
+        case .nav: "circle.grid.2x1.fill"          // the wingtip pair
         case .beacon: "light.beacon.max"
         case .strobe: "bolt.fill"
         case .landing: "headlight.high.beam"

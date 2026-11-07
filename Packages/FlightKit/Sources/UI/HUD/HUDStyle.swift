@@ -12,8 +12,13 @@ enum HUDStyle {
     /// Values the pilot selected (autopilot targets). Cyan, not system blue: it is the cockpit
     /// convention for selected targets (PRODUCT.md principle 4), and blue disappears against sky.
     static let selected = Color.cyan
-    /// Secondary labels over glass. Bright enough for 4.5:1 over a pale sky.
-    static let secondaryText = Color.white.opacity(0.82)
+    /// Secondary labels over glass.
+    static let secondaryText = Color.white.opacity(0.9)
+
+    /// HUD glass carries a light smoke tint: over a bright sky, untinted glass cannot hold
+    /// 4.5:1 for small white labels (measured 2.98:1 in review).
+    static let glass = Glass.regular.tint(Color.black.opacity(0.28))
+    static let glassInteractive = Glass.regular.tint(Color.black.opacity(0.28)).interactive()
 
     /// Fill of a Control Center-style slider.
     static let sliderFill = Color.white
@@ -28,7 +33,7 @@ enum HUDStyle {
     }
 
     static let unit = Font.system(size: 11, weight: .semibold, design: .rounded)
-    static let caption = Font.system(size: 11, weight: .medium)
+    static let caption = Font.system(size: 12, weight: .semibold)
 }
 
 extension View {

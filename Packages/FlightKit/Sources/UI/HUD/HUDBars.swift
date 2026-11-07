@@ -26,7 +26,7 @@ struct MetricsBar: View {
         .lineLimit(1)
         .padding(.horizontal, 22)
         .frame(height: 52)
-        .glassEffect(.regular, in: .capsule)
+        .glassEffect(HUDStyle.glass, in: .capsule)
         .fixedSize()
     }
 
@@ -78,7 +78,7 @@ struct ToolCluster: View {
             .font(.system(size: 17, weight: .semibold))
             .foregroundStyle(.white)
             .padding(.horizontal, 6)
-            .glassEffect(.regular.interactive(), in: .capsule)
+            .glassEffect(HUDStyle.glassInteractive, in: .capsule)
         }
     }
 
@@ -138,7 +138,7 @@ struct AutopilotStatus: View {
         .fixedSize()
         .padding(.horizontal, 16)
         .frame(height: 34)
-        .glassEffect(.regular, in: .capsule)
+        .glassEffect(HUDStyle.glass, in: .capsule)
     }
 
     private func target(_ label: String, _ value: String) -> some View {
