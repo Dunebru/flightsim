@@ -1,0 +1,30 @@
+# XcodeGen spec. The .xcodeproj is generated (scripts/verify.sh runs `xcodegen generate`) and gitignored.
+name: Flight
+options:
+  createIntermediateGroups: true
+  deploymentTarget:
+    iOS: "27.0"
+packages:
+  FlightKit:
+    path: Packages/FlightKit
+targets:
+  Flight:
+    type: application
+    platform: iOS
+    configFiles:
+      Debug: Config/Base.xcconfig
+      Release: Config/Base.xcconfig
+    sources:
+      - path: App
+    dependencies:
+      - package: FlightKit
+        product: FlightKit
+schemes:
+  Flight:
+    build:
+      targets:
+        Flight: all
+    run:
+      config: Debug
+    archive:
+      config: Release

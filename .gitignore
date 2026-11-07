@@ -1,0 +1,42 @@
+# ---- Secrets and signing: never commit ----
+Config/Local.xcconfig
+*.mobileprovision
+*.provisionprofile
+*.p12
+*.pfx
+*.cer
+*.certSigningRequest
+*.p8
+*.pem
+*.key
+*.keychain
+*.keychain-db
+.env
+.env.*
+*.secret
+*credentials*
+AuthKey_*
+
+# ---- Xcode / SwiftPM build products ----
+*.xcodeproj/
+*.xcworkspace/
+!Packages/**/*.xcworkspace/contents.xcworkspacedata
+xcuserdata/
+DerivedData/
+build/
+.build/
+.swiftpm/
+Package.resolved.bak
+*.xcresult
+
+# ---- Large or licensed data (reproducible via Tools, see ASSETS_NEEDED.md) ----
+Data/
+Purchased/
+Reference/
+artifacts/
+
+# ---- OS / editor ----
+.DS_Store
+*.swp
+.vscode/
+.idea/
