@@ -1,30 +1,31 @@
 import SwiftUI
 
-/// Bottom metrics: the numbers you fly by, in one glass capsule. Rounded semibold numerals with
-/// small units; labels are short and quiet because the units already say what each number is.
+/// Flight data across the top center: the numbers you fly by in one glass capsule. Rounded
+/// semibold numerals with small units. Drops the least essential values before it would squeeze.
 struct MetricsBar: View {
     let model: HUDModel
 
     var body: some View {
         ViewThatFits(in: .horizontal) {
-            bar(extended: true)
-            bar(extended: false)
+            bar(level: 2)
+            bar(level: 1)
+            bar(level: 0)
         }
     }
 
-    private func bar(extended: Bool) -> some View {
-        HStack(spacing: 22) {
+    /// level 2: six values; 1: five; 0: four.
+    private func bar(level: Int) -> some View {
+        HStack(spacing: 20) {
             metric("IAS", "\(model.indicatedAirspeed)", "kt")
-            metric("GS", "\(model.groundSpeed)", "kt")
+            if level >= 1 { metric("GS", "\(model.groundSpeed)", "kt") }
             metric("ALT", model.altitude.formatted(.number.locale(Locale(identifier: "en_US"))), "ft")
             metric("V/S", model.verticalSpeed > 0 ? "+\(model.verticalSpeed)" : "\(model.verticalSpeed)", "fpm")
             metric("HDG", String(format: "%03d°", model.heading), nil)
-            if extended {
-                metric("N1", String(format: "%.1f", model.n1), "%")
-            }
+            if level >= 2 { metric("N1", String(format: "%.1f", model.n1), "%") }
         }
-        .padding(.horizontal, 24)
-        .frame(height: 56)
+        .lineLimit(1)
+        .padding(.horizontal, 22)
+        .frame(height: 52)
         .glassEffect(.regular, in: .capsule)
         .fixedSize()
     }
@@ -33,16 +34,16 @@ struct MetricsBar: View {
         VStack(alignment: .leading, spacing: 0) {
             Text(label)
                 .font(HUDStyle.caption)
-                .foregroundStyle(.white.opacity(0.6))
+                .foregroundStyle(HUDStyle.secondaryText)
             HStack(alignment: .firstTextBaseline, spacing: 2) {
                 Text(value)
-                    .font(HUDStyle.metric(21))
+                    .font(HUDStyle.metric(20))
                     .foregroundStyle(.white)
                     .contentTransition(.numericText())
                 if let unit {
                     Text(unit)
                         .font(HUDStyle.unit)
-                        .foregroundStyle(.white.opacity(0.6))
+                        .foregroundStyle(HUDStyle.secondaryText)
                 }
             }
         }
@@ -50,8 +51,8 @@ struct MetricsBar: View {
     }
 }
 
-/// Top-right cluster: one merged glass capsule of icon buttons. Camera is a native menu;
-/// the rest open panels. The open panel's button takes the selection tint.
+/// Bottom center: one merged glass capsule of buttons. Camera is a native menu; the rest open
+/// panels, which rise from just above this bar. The open panel's button turns white.
 struct ToolCluster: View {
     @Bindable var model: HUDModel
 
@@ -63,16 +64,16 @@ struct ToolCluster: View {
                         ForEach(HUDModel.Camera.allCases) { Text($0.rawValue).tag($0) }
                     }
                 } label: {
-                    Image(systemName: "video")
+                    Image(systemName: "video.fill")
                         .frame(width: 48, height: 48)
                         .contentShape(.rect)
                 }
                 .accessibilityLabel("Camera")
-                panelButton(.map, symbol: "map")
+                panelButton(.map, symbol: "map.fill")
                 panelButton(.atc, symbol: "antenna.radiowaves.left.and.right")
-                panelButton(.lights, symbol: "lightbulb")
                 panelButton(.autopilot, text: "AP")
-                panelButton(.settings, symbol: "gearshape")
+                panelButton(.lights, symbol: "lightbulb.fill")
+                panelButton(.settings, symbol: "gearshape.fill")
             }
             .font(.system(size: 17, weight: .semibold))
             .foregroundStyle(.white)
@@ -105,7 +106,7 @@ struct ToolCluster: View {
     }
 }
 
-/// Autopilot status, shown only while the autopilot is engaged: what it is holding, at a glance.
+/// Autopilot status under the flight data while the autopilot is engaged: what it is holding.
 struct AutopilotStatus: View {
     let model: HUDModel
 
@@ -136,13 +137,13 @@ struct AutopilotStatus: View {
         .lineLimit(1)
         .fixedSize()
         .padding(.horizontal, 16)
-        .frame(height: 36)
+        .frame(height: 34)
         .glassEffect(.regular, in: .capsule)
     }
 
     private func target(_ label: String, _ value: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 4) {
-            Text(label).font(HUDStyle.caption).foregroundStyle(.white.opacity(0.6))
+            Text(label).font(HUDStyle.caption).foregroundStyle(HUDStyle.secondaryText)
             Text(value).font(HUDStyle.metric(15)).foregroundStyle(HUDStyle.selected)
         }
     }

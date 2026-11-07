@@ -17,107 +17,149 @@ enum SliderIcon {
 }
 
 /// A vertical slider in the manner of Control Center's brightness and volume controls: a tall
-/// glass shape that fills from the bottom. Dragging is relative, so a thumb can grab it anywhere
-/// without the value jumping. With `steps`, it snaps to detents and clicks on each one.
+/// glass shape that fills as the value grows. Dragging is relative, so a thumb can grab it
+/// anywhere without the value jumping, and it stretches slightly past its ends like Control
+/// Center does.
+///
+/// Thrust fills from the bottom (push up for more, like a throttle). Levers that extend
+/// downward in the cockpit, flaps and speedbrake, fill from the top and list every detent.
 struct GlassSlider: View {
     @Binding var value: Double          // 0...1
-    var steps: Int? = nil               // number of detents including both ends
+    var detents: [String]? = nil        // labels top-to-bottom order of travel; nil = continuous
+    var fillsFromTop = false
     var fill: Color = HUDStyle.sliderFill
     let icon: SliderIcon
-    let topText: String
+    var readout: String? = nil          // continuous sliders show their value at the far end
     var width: CGFloat = 64
     let accessibilityLabel: String
 
     @State private var dragStart: Double?
+    @State private var overshoot: Double = 0
 
     var body: some View {
         GeometryReader { geo in
             let h = geo.size.height
             let shape = RoundedRectangle(cornerRadius: HUDStyle.sliderCorner, style: .continuous)
-            ZStack(alignment: .bottom) {
-                // Fill
+            let fillAlignment: Alignment = fillsFromTop ? .top : .bottom
+            let filled = fillHeight(total: h)
+            ZStack(alignment: fillAlignment) {
                 Rectangle()
                     .fill(fill)
-                    .frame(height: h * value)
+                    .frame(height: filled)
                 // Content in white over glass, inverted to black where the fill covers it.
-                content(color: .white)
+                content(color: .white, height: h)
                     .overWorldLegibility()
-                content(color: .black.opacity(0.85))
-                    .mask(alignment: .bottom) { Rectangle().frame(height: h * value) }
-                if let steps, steps > 2 {
-                    detentMarks(steps: steps, height: h)
-                }
+                content(color: .black.opacity(0.85), height: h)
+                    .mask(alignment: fillAlignment) { Rectangle().frame(height: filled) }
             }
             .frame(width: width, height: h)
             .clipShape(shape)
-            .glassEffect(.regular, in: shape)
+            .background { Color.clear.glassEffect(.regular.interactive(), in: shape) }
             .contentShape(shape)
+            .scaleEffect(x: 1 - abs(overshoot) * 0.15, y: 1 + abs(overshoot) * 0.35,
+                         anchor: (overshoot > 0) != fillsFromTop ? .bottom : .top)
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { drag in
                         let start = dragStart ?? value
                         if dragStart == nil { dragStart = value }
-                        set(start - drag.translation.height / h)
+                        let direction: Double = fillsFromTop ? 1 : -1
+                        let proposed = start + direction * drag.translation.height / h
+                        set(proposed)
+                        // Rubber band past the ends, capped and eased.
+                        let past = proposed > 1 ? proposed - 1 : (proposed < 0 ? proposed : 0)
+                        overshoot = max(-0.12, min(0.12, past * 0.25))
                     }
-                    .onEnded { _ in dragStart = nil }
+                    .onEnded { _ in
+                        dragStart = nil
+                        withAnimation(.spring(duration: 0.35, bounce: 0.4)) { overshoot = 0 }
+                    }
             )
         }
         .frame(width: width)
-        .sensoryFeedback(.selection, trigger: steps == nil ? 0 : detent)
+        .sensoryFeedback(.selection, trigger: detents == nil ? 0 : detentIndex)
         .accessibilityElement()
         .accessibilityLabel(accessibilityLabel)
-        .accessibilityValue(topText)
+        .accessibilityValue(detents.map { $0[detentIndex] } ?? (readout ?? ""))
         .accessibilityAdjustableAction { direction in
-            let delta = steps.map { 1 / Double($0 - 1) } ?? 0.05
+            let delta = detents.map { 1 / Double($0.count - 1) } ?? 0.05
             set(value + (direction == .increment ? delta : -delta))
         }
     }
 
-    private var detent: Int {
-        guard let steps else { return 0 }
-        return Int((value * Double(steps - 1)).rounded())
+    /// Continuous sliders fill in proportion. Detented sliders fill down to just past the
+    /// current detent's name, so the named position is always the edge of the fill.
+    private func fillHeight(total h: CGFloat) -> CGFloat {
+        guard let detents, detents.count > 1 else { return h * value }
+        if detentIndex == 0 { return 0 }
+        if detentIndex == detents.count - 1 { return h }
+        let span = h - Self.detentInset - 22
+        return Self.detentInset + span * Double(detentIndex) / Double(detents.count - 1) + 12
+    }
+
+    private static let detentInset: CGFloat = 46
+
+    private var detentIndex: Int {
+        guard let detents else { return 0 }
+        return Int((value * Double(detents.count - 1)).rounded())
     }
 
     private func set(_ proposed: Double) {
         let clamped = min(max(proposed, 0), 1)
-        if let steps, steps > 1 {
-            let n = Double(steps - 1)
+        if let detents, detents.count > 1 {
+            let n = Double(detents.count - 1)
             value = (clamped * n).rounded() / n
         } else {
             value = clamped
         }
     }
 
-    private func content(color: Color) -> some View {
-        VStack {
-            Text(topText)
-                .font(HUDStyle.metric(width < 56 ? 13 : 17))
-                .contentTransition(.numericText())
-                .padding(.top, 14)
-            Spacer()
-            icon.view(size: width < 56 ? 18 : 22)
-                .padding(.bottom, 16)
+    @ViewBuilder
+    private func content(color: Color, height: CGFloat) -> some View {
+        if let detents {
+            detentScale(detents, color: color, height: height)
+        } else {
+            VStack {
+                if let readout {
+                    Text(readout)
+                        .font(HUDStyle.metric(17))
+                        .contentTransition(.numericText())
+                        .padding(.top, 14)
+                }
+                Spacer()
+                icon.view(size: 22).padding(.bottom, 16)
+            }
+            .foregroundStyle(color)
+            .frame(maxWidth: .infinity)
         }
-        .foregroundStyle(color)
-        .frame(maxWidth: .infinity)
     }
 
-    private func detentMarks(steps: Int, height: CGFloat) -> some View {
-        ZStack(alignment: .bottom) {
-            ForEach(1..<(steps - 1), id: \.self) { i in
-                Capsule()
-                    .fill(Color.white.opacity(0.35))
-                    .frame(width: 10, height: 2)
-                    .offset(y: -height * Double(i) / Double(steps - 1))
+    /// Every detent named down the slider; the current one in bold. The icon sits at the
+    /// stowed end so it is never covered by a small extension.
+    private func detentScale(_ labels: [String], color: Color, height: CGFloat) -> some View {
+        let inset = Self.detentInset
+        let span = height - inset - 22
+        return ZStack(alignment: .top) {
+            icon.view(size: width < 56 ? 18 : 20)
+                .padding(.top, 14)
+                .frame(maxWidth: .infinity)
+            ForEach(labels.indices, id: \.self) { i in
+                Text(labels[i])
+                    .font(.system(size: i == detentIndex ? 13 : 11,
+                                  weight: i == detentIndex ? .bold : .medium,
+                                  design: .rounded))
+                    .opacity(i == detentIndex ? 1 : 0.7)
+                    .frame(maxWidth: .infinity)
+                    .offset(y: inset + span * Double(i) / Double(max(labels.count - 1, 1)) - 7)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .trailing)
-        .padding(.trailing, 6)
+        .foregroundStyle(color)
+        .frame(maxHeight: .infinity, alignment: .top)
     }
 }
 
-/// A round glass toggle in the manner of Control Center's buttons: glass when off, filled with
-/// its state color when on.
+/// A round glass toggle in the manner of Control Center's buttons: glass when off, a solid
+/// state color when on with a dark glyph, so every "on" color keeps its true hue and contrast.
 struct GlassCircleToggle<Label: View>: View {
     let isOn: Bool
     var onColor: Color = .white
@@ -129,15 +171,17 @@ struct GlassCircleToggle<Label: View>: View {
     var body: some View {
         Button(action: action) {
             label
-                .foregroundStyle(isOn ? (onColor == .white ? Color.black : Color.white) : Color.white)
+                .foregroundStyle(isOn ? Color.black : Color.white)
                 .frame(width: size, height: size)
                 .background {
-                    if isOn { Circle().fill(onColor) }
+                    ZStack {
+                        Color.clear.glassEffect(.regular.interactive(), in: .circle)
+                        if isOn { Circle().fill(onColor) }
+                    }
                 }
                 .contentShape(.circle)
         }
         .buttonStyle(.plain)
-        .glassEffect(.regular.interactive(), in: .circle)
         .sensoryFeedback(.selection, trigger: isOn)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityValue(isOn ? "On" : "Off")

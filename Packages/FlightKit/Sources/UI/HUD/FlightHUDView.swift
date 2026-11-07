@@ -4,8 +4,12 @@ import Foundation
 /// In-flight screen.
 ///
 /// Prototype: controls work by touch but drive demo state only; the numbers are fixed demo data
-/// and the world behind is a flat stand-in until the M1 renderer lands. Each thumb owns its edge:
-/// thrust on the left; gear, brake, spoilers and flaps on the right. The center stays open.
+/// and the world behind is a flat stand-in until the M1 renderer lands.
+///
+/// Arrangement follows the mobile-sim convention the owner flies with: flight data across the
+/// top center, the button bar along the bottom center with panels rising from it, thrust on the
+/// left edge, and gear, brake, spoilers and flaps on the right edge. The center data and the
+/// button bar sit on the screen's true center axis, independent of the side columns.
 public struct FlightHUDView: View {
     @State private var model = HUDModel()
     private let onExit: () -> Void
@@ -14,28 +18,56 @@ public struct FlightHUDView: View {
         self.onExit = onExit
     }
 
+    /// Width of the right-thumb column: spoiler slider, gap, flap slider.
+    static let rightEdgeWidth: CGFloat = 52 + HUDStyle.gap + 68
+    /// Symmetric inset that keeps the bottom center clear of both thumb columns.
+    static let bottomCenterInset: CGFloat = HUDStyle.edge + rightEdgeWidth + HUDStyle.gap
+    /// Symmetric inset for the top center: clear of the pause button.
+    static let topCenterInset: CGFloat = HUDStyle.edge + 48 + HUDStyle.gap
+
     public var body: some View {
         ZStack {
             WorldPlaceholder()
                 .ignoresSafeArea()
 
-            VStack(spacing: 0) {
-                topRow
-                Spacer(minLength: HUDStyle.gap)
-                HStack(alignment: .bottom, spacing: HUDStyle.gap) {
-                    leftEdge
-                    Spacer(minLength: HUDStyle.gap)
-                    VStack(spacing: 8) {
-                        demoTag
-                        MetricsBar(model: model)
-                    }
-                    Spacer(minLength: HUDStyle.gap)
-                    rightEdge
-                }
+            // Thumb columns.
+            HStack(alignment: .bottom, spacing: 0) {
+                leftEdge
+                Spacer(minLength: 0)
+                rightEdge
             }
+            .frame(maxHeight: .infinity, alignment: .bottom)
             .padding(.horizontal, HUDStyle.edge)
-            .padding(.vertical, 10)
-            .overlay(alignment: .topTrailing) { panel }
+            .padding(.bottom, 10)
+
+            // Pause, top-left.
+            pauseButton
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .padding(.horizontal, HUDStyle.edge)
+                .padding(.top, 10)
+
+            // Top center: flight data, then autopilot status while engaged.
+            VStack(spacing: 8) {
+                MetricsBar(model: model)
+                // The status is redundant while the autopilot panel itself is open.
+                if model.apMaster && model.openPanel != .autopilot {
+                    AutopilotStatus(model: model)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
+                if model.openPanel == nil { demoTag }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .padding(.horizontal, Self.topCenterInset)
+            .padding(.top, 10)
+
+            // Bottom center: panels rise from the button bar.
+            VStack(spacing: 10) {
+                panel
+                ToolCluster(model: model)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            .padding(.horizontal, Self.bottomCenterInset)
+            .padding(.bottom, 10)
 
             if model.paused { pausedOverlay }
         }
@@ -51,20 +83,11 @@ public struct FlightHUDView: View {
 
     // MARK: Regions
 
-    private var topRow: some View {
-        HStack(alignment: .top) {
-            GlassCircleToggle(isOn: false, size: 48, accessibilityLabel: "Pause") {
-                withAnimation(.spring(duration: 0.3)) { model.paused = true }
-            } label: {
-                Image(systemName: "pause.fill").font(.system(size: 17, weight: .semibold))
-            }
-            Spacer(minLength: HUDStyle.gap)
-            if model.apMaster {
-                AutopilotStatus(model: model)
-                    .transition(.move(edge: .top).combined(with: .opacity))
-            }
-            Spacer(minLength: HUDStyle.gap)
-            ToolCluster(model: model)
+    private var pauseButton: some View {
+        GlassCircleToggle(isOn: false, size: 48, accessibilityLabel: "Pause") {
+            withAnimation(.spring(duration: 0.3)) { model.paused = true }
+        } label: {
+            Image(systemName: "pause.fill").font(.system(size: 17, weight: .semibold))
         }
     }
 
@@ -74,7 +97,7 @@ public struct FlightHUDView: View {
                 value: $model.throttle,
                 fill: model.reverse ? HUDStyle.caution : HUDStyle.sliderFill,
                 icon: .symbol("flame.fill"),
-                topText: "\(Int((model.throttle * 100).rounded()))%",
+                readout: "\(Int((model.throttle * 100).rounded()))%",
                 width: 68,
                 accessibilityLabel: model.reverse ? "Reverse thrust" : "Thrust"
             )
@@ -89,9 +112,6 @@ public struct FlightHUDView: View {
             }
         }
     }
-
-    /// Width of the right-thumb column: spoiler slider, gap, flap slider.
-    static let rightEdgeWidth: CGFloat = 52 + HUDStyle.gap + 68
 
     private var rightEdge: some View {
         VStack(alignment: .trailing, spacing: HUDStyle.gap) {
@@ -109,23 +129,23 @@ public struct FlightHUDView: View {
             HStack(alignment: .bottom, spacing: HUDStyle.gap) {
                 GlassSlider(
                     value: detentBinding(\.spoilerIndex, count: model.spoilerDetents.count),
-                    steps: model.spoilerDetents.count,
+                    detents: model.spoilerDetents,
+                    fillsFromTop: true,
                     fill: model.spoilerIndex >= 2 ? HUDStyle.caution : HUDStyle.sliderFill,
                     icon: .glyph(.spoilers),
-                    topText: model.spoilerDetents[model.spoilerIndex],
                     width: 52,
                     accessibilityLabel: "Spoilers"
                 )
                 GlassSlider(
                     value: detentBinding(\.flapIndex, count: model.flapDetents.count),
-                    steps: model.flapDetents.count,
+                    detents: model.flapDetents,
+                    fillsFromTop: true,
                     icon: .glyph(.flaps),
-                    topText: model.flapDetents[model.flapIndex],
                     width: 68,
                     accessibilityLabel: "Flaps"
                 )
             }
-            .frame(maxHeight: 190)
+            .frame(maxHeight: 200)
         }
     }
 
@@ -160,10 +180,7 @@ public struct FlightHUDView: View {
                 }
             }
             .fixedSize()
-            .padding(.top, 10 + 48 + HUDStyle.gap)
-            // Hang under the tool cluster but stop short of the right-thumb controls.
-            .padding(.trailing, HUDStyle.edge + Self.rightEdgeWidth + HUDStyle.gap)
-            .transition(.scale(scale: 0.92, anchor: .topTrailing).combined(with: .opacity))
+            .transition(.scale(scale: 0.92, anchor: .bottom).combined(with: .opacity))
         }
     }
 
@@ -193,7 +210,7 @@ public struct FlightHUDView: View {
     private var demoTag: some View {
         Text("Prototype · demo data · 3D world arrives in M1")
             .font(.system(size: 11, weight: .medium))
-            .foregroundStyle(.white.opacity(0.75))
+            .foregroundStyle(HUDStyle.secondaryText)
             .overWorldLegibility()
     }
 
@@ -206,7 +223,7 @@ public struct FlightHUDView: View {
     }
 }
 
-/// Landing gear: green when down and locked, orange while travelling, glass when up.
+/// Landing gear: green when down and locked, orange and pulsing while travelling, glass when up.
 struct GearButton: View {
     let model: HUDModel
 
@@ -218,7 +235,14 @@ struct GearButton: View {
         ) {
             model.toggleGear()
         } label: {
-            GlyphView(glyph: .landingGear, size: 22)
+            if case .transit = model.gear {
+                GlyphView(glyph: .landingGear, size: 24)
+                    .phaseAnimator([1.0, 0.35]) { glyph, opacity in
+                        glyph.opacity(opacity)
+                    } animation: { _ in .easeInOut(duration: 0.45) }
+            } else {
+                GlyphView(glyph: .landingGear, size: 24)
+            }
         }
         .sensoryFeedback(.impact(weight: .heavy), trigger: model.gear)
         .accessibilityValue(stateText)

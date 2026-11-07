@@ -46,9 +46,9 @@ struct HUDModelTests {
     #if canImport(AppKit)
     /// A misspelled SF Symbol renders as nothing, silently. Every name the HUD uses must resolve.
     @Test(arguments: [
-        "video", "map", "antenna.radiowaves.left.and.right", "lightbulb", "gearshape", "pause.fill",
-        "play.fill", "parkingsign", "flame.fill", "xmark", "minus", "plus", "airplane",
-        "airplane.departure", "point.topleft.down.to.point.bottomright.curvepath", "book.closed",
+        "video.fill", "map.fill", "map", "antenna.radiowaves.left.and.right", "lightbulb.fill",
+        "gearshape.fill", "pause.fill", "play.fill", "parkingsign", "flame.fill", "xmark",
+        "airplane.departure",
     ] + HUDModel.Light.allCases.map(\.symbol))
     func symbolExists(_ name: String) {
         #expect(NSImage(systemSymbolName: name, accessibilityDescription: nil) != nil, "missing SF Symbol \(name)")

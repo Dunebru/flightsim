@@ -9,8 +9,11 @@ enum HUDStyle {
     static let caution = Color.orange
     /// Warning: stall, gear unsafe.
     static let warning = Color.red
-    /// Values the pilot selected (autopilot targets).
+    /// Values the pilot selected (autopilot targets). Cyan, not system blue: it is the cockpit
+    /// convention for selected targets (PRODUCT.md principle 4), and blue disappears against sky.
     static let selected = Color.cyan
+    /// Secondary labels over glass. Bright enough for 4.5:1 over a pale sky.
+    static let secondaryText = Color.white.opacity(0.82)
 
     /// Fill of a Control Center-style slider.
     static let sliderFill = Color.white

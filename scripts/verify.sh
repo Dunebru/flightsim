@@ -55,6 +55,23 @@ run_logged() {
 
 settle() { perl -e "select(undef,undef,undef,$1)"; }
 
+# capture <udid> <file> <log-name>: simctl screenshots occasionally fail right after a launch
+# ("Failed to create image data"), most likely while the simulator is still rotating into
+# landscape. Retry up to three times, two seconds apart, then fail loudly.
+capture() {
+  local attempt
+  for attempt in 1 2 3; do
+    if xcrun simctl io "$1" screenshot "$2" >"$OUT/$3.log" 2>&1; then
+      [ "$attempt" -gt 1 ] && printf '    ok: %s (attempt %s)\n' "$3" "$attempt" || printf '    ok: %s\n' "$3"
+      return
+    fi
+    settle 2
+  done
+  printf '    FAILED: %s after 3 attempts (log: %s/%s.log)\n' "$3" "$OUT" "$3"
+  tail -n 3 "$OUT/$3.log" | cut -c1-200
+  exit 1
+}
+
 # test_summary <log>: counts Swift Testing runs and confirms none failed.
 test_summary() {
   local log="$1" runs failed
@@ -85,7 +102,7 @@ run_on_sim() {
     echo "    FAILED: app not running on $name ${LAUNCH_SETTLE_SECONDS}s after launch (crashed?)"; exit 1
   fi
   echo "    ok: running on $name"
-  run_logged "screenshot-$label" xcrun simctl io "$udid" screenshot "$OUT/$label.png"
+  capture "$udid" "$OUT/$label.png" "screenshot-$label"
   # The app is landscape-only; a simulator held in portrait captures it sideways. Rotate upright.
   local w h
   w=$(sips -g pixelWidth "$OUT/$label.png" | awk '/pixelWidth/ {print $2}')
@@ -99,7 +116,7 @@ run_on_sim() {
   if ! xcrun simctl spawn "$udid" launchctl list | grep -F "$BUNDLE_ID" | grep -qE '^[0-9]+'; then
     echo "    FAILED: HUD not running on $name ${LAUNCH_SETTLE_SECONDS}s after launch (crashed?)"; exit 1
   fi
-  run_logged "screenshot-hud-$label" xcrun simctl io "$udid" screenshot "$OUT/$label-hud.png"
+  capture "$udid" "$OUT/$label-hud.png" "screenshot-hud-$label"
   w=$(sips -g pixelWidth "$OUT/$label-hud.png" | awk '/pixelWidth/ {print $2}')
   h=$(sips -g pixelHeight "$OUT/$label-hud.png" | awk '/pixelHeight/ {print $2}')
   if [ "$h" -gt "$w" ]; then sips -r 270 "$OUT/$label-hud.png" >/dev/null; fi

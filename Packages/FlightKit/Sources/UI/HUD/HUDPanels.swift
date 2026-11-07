@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// A floating glass card that hangs under the tool cluster. Title and a close button on top.
+/// A floating glass card that rises from the bottom bar. Title and a close button on top.
 struct GlassPanel<Content: View>: View {
     let title: String
     var trailing: AnyView? = nil
@@ -8,7 +8,7 @@ struct GlassPanel<Content: View>: View {
     @ViewBuilder var content: Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
                 Text(title)
                     .font(.system(size: 20, weight: .bold, design: .rounded))
@@ -18,9 +18,9 @@ struct GlassPanel<Content: View>: View {
                 Button(action: onClose) {
                     Image(systemName: "xmark")
                         .font(.system(size: 13, weight: .bold))
-                        .foregroundStyle(.white.opacity(0.8))
+                        .foregroundStyle(.white)
                         .frame(width: 30, height: 30)
-                        .background(.white.opacity(0.14), in: .circle)
+                        .background(.white.opacity(0.18), in: .circle)
                         .frame(width: 44, height: 44)
                         .contentShape(.rect)
                 }
@@ -29,89 +29,141 @@ struct GlassPanel<Content: View>: View {
             }
             content
         }
-        .padding(.leading, 20)
+        .padding(.leading, 18)
         .padding(.trailing, 8)
-        .padding(.vertical, 12)
+        .padding(.vertical, 10)
         .glassEffect(.regular, in: .rect(cornerRadius: 28, style: .continuous))
     }
 }
 
+/// Autopilot, laid out like a glareshield: four selected targets; tap one to select it, then
+/// adjust it with one row of fine and coarse keys. One adjuster instead of four keeps every key
+/// at a full 44 pt and the panel narrow enough to sit between the thumb columns.
 struct AutopilotPanel: View {
     @Bindable var model: HUDModel
+    @State private var selected: Target = .altitude
+
+    enum Target: CaseIterable {
+        case speed, heading, altitude, verticalSpeed
+
+        var label: String {
+            switch self {
+            case .speed: "Speed"
+            case .heading: "Heading"
+            case .altitude: "Altitude"
+            case .verticalSpeed: "V/S"
+            }
+        }
+
+        /// Fine and coarse steps.
+        var steps: (fine: Int, coarse: Int) {
+            switch self {
+            case .speed: (1, 10)
+            case .heading: (1, 10)
+            case .altitude: (100, 1_000)
+            case .verticalSpeed: (100, 500)
+            }
+        }
+    }
 
     var body: some View {
-        VStack(spacing: 10) {
-            HStack(spacing: 18) {
-                target("Speed", "\(model.targetSpeed)", "kt") {
-                    model.targetSpeed = min(max(model.targetSpeed + $0, 100), 399)
-                }
-                target("Heading", String(format: "%03d°", model.targetHeading), nil) {
-                    model.targetHeading = ((model.targetHeading + $0 - 1) % 360 + 360) % 360 + 1
-                }
-                target("Altitude", model.targetAltitude.formatted(.number.locale(Locale(identifier: "en_US"))), "ft", step: 100) {
-                    model.targetAltitude = min(max(model.targetAltitude + $0, 0), 45_000)
-                }
-                target("Vertical speed", model.targetVerticalSpeed > 0 ? "+\(model.targetVerticalSpeed)" : "\(model.targetVerticalSpeed)", "fpm", step: 100) {
-                    model.targetVerticalSpeed = min(max(model.targetVerticalSpeed + $0, -6_000), 6_000)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                ForEach(Target.allCases, id: \.self) { target in
+                    chip(target)
                 }
             }
-            HStack(spacing: 8) {
-                modeButton("A/THR", isOn: model.autothrottle) { model.autothrottle.toggle() }
-                modeButton("LOC", isOn: model.locArmed) { model.locArmed.toggle() }
-                modeButton("APPR", isOn: model.approachArmed) { model.approachArmed.toggle() }
-                Spacer(minLength: 0)
+            HStack(spacing: 6) {
+                let s = selected.steps
+                adjust("−\(s.coarse.formatted())", -s.coarse)
+                adjust("−\(s.fine.formatted())", -s.fine)
+                adjust("+\(s.fine.formatted())", s.fine)
+                adjust("+\(s.coarse.formatted())", s.coarse)
+            }
+            HStack(spacing: 6) {
+                mode("A/THR", isOn: model.autothrottle) { model.autothrottle.toggle() }
+                mode("LOC", isOn: model.locArmed) { model.locArmed.toggle() }
+                mode("APPR", isOn: model.approachArmed) { model.approachArmed.toggle() }
             }
         }
-        .padding(.trailing, 12)
+        .padding(.trailing, 10)
+        .sensoryFeedback(.selection, trigger: selected)
     }
 
-    private func target(_ label: String, _ value: String, _ unit: String?, step: Int = 1,
-                        change: @escaping (Int) -> Void) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(label)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.white.opacity(0.6))
-            HStack(alignment: .firstTextBaseline, spacing: 2) {
-                Text(value)
-                    .font(HUDStyle.metric(24))
-                    .foregroundStyle(model.apMaster ? HUDStyle.selected : .white)
-                    .contentTransition(.numericText())
-                if let unit {
-                    Text(unit).font(HUDStyle.unit).foregroundStyle(.white.opacity(0.6))
+    private func value(_ target: Target) -> (String, String?) {
+        switch target {
+        case .speed: ("\(model.targetSpeed)", "kt")
+        case .heading: (String(format: "%03d°", model.targetHeading), nil)
+        case .altitude: (model.targetAltitude.formatted(.number.locale(Locale(identifier: "en_US"))), "ft")
+        case .verticalSpeed: (model.targetVerticalSpeed > 0 ? "+\(model.targetVerticalSpeed)" : "\(model.targetVerticalSpeed)", "fpm")
+        }
+    }
+
+    private func change(_ target: Target, by delta: Int) {
+        switch target {
+        case .speed: model.targetSpeed = min(max(model.targetSpeed + delta, 100), 399)
+        case .heading: model.targetHeading = ((model.targetHeading + delta - 1) % 360 + 360) % 360 + 1
+        case .altitude: model.targetAltitude = min(max(model.targetAltitude + delta, 0), 45_000)
+        case .verticalSpeed: model.targetVerticalSpeed = min(max(model.targetVerticalSpeed + delta, -6_000), 6_000)
+        }
+    }
+
+    private func chip(_ target: Target) -> some View {
+        let isSelected = selected == target
+        let (text, unit) = value(target)
+        return Button { selected = target } label: {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(target.label)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(isSelected ? Color.black.opacity(0.7) : HUDStyle.secondaryText)
+                HStack(alignment: .firstTextBaseline, spacing: 2) {
+                    Text(text)
+                        .font(HUDStyle.metric(20))
+                        .foregroundStyle(isSelected ? Color.black : (model.apMaster ? HUDStyle.selected : .white))
+                        .contentTransition(.numericText())
+                    if let unit {
+                        Text(unit)
+                            .font(HUDStyle.unit)
+                            .foregroundStyle(isSelected ? Color.black.opacity(0.7) : HUDStyle.secondaryText)
+                    }
                 }
             }
-            HStack(spacing: 8) {
-                stepper("minus", label: "Decrease \(label)") { change(-step) }
-                stepper("plus", label: "Increase \(label)") { change(step) }
-            }
+            .lineLimit(1)
+            .padding(.horizontal, 12)
+            .frame(minWidth: 92, minHeight: 56, alignment: .leading)
+            .background(isSelected ? AnyShapeStyle(HUDStyle.selected) : AnyShapeStyle(.white.opacity(0.12)),
+                        in: .rect(cornerRadius: 16, style: .continuous))
+            .contentShape(.rect(cornerRadius: 16))
         }
-        .frame(minWidth: 96, alignment: .leading)
-        .accessibilityElement(children: .contain)
+        .buttonStyle(.plain)
+        .accessibilityLabel("Selected \(target.label)")
+        .accessibilityValue("\(text) \(unit ?? "")")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityAdjustableAction { change(target, by: $0 == .increment ? target.steps.fine : -target.steps.fine) }
     }
 
-    private func stepper(_ symbol: String, label: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: 14, weight: .bold))
+    private func adjust(_ title: String, _ delta: Int) -> some View {
+        Button { change(selected, by: delta) } label: {
+            Text(title)
+                .font(.system(size: 15, weight: .semibold, design: .rounded))
+                .monospacedDigit()
                 .foregroundStyle(.white)
-                .frame(width: 44, height: 36)
-                .background(.white.opacity(0.14), in: .capsule)
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .background(.white.opacity(0.16), in: .capsule)
                 .contentShape(.capsule)
         }
         .buttonStyle(.plain)
         .buttonRepeatBehavior(.enabled)
-        .accessibilityLabel(label)
+        .accessibilityLabel("\(delta > 0 ? "Increase" : "Decrease") \(selected.label) by \(abs(delta))")
     }
 
-    private func modeButton(_ title: String, isOn: Bool, action: @escaping () -> Void) -> some View {
+    private func mode(_ title: String, isOn: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title)
                 .font(.system(size: 13, weight: .bold, design: .rounded))
                 .foregroundStyle(isOn ? Color.black : Color.white)
-                .padding(.horizontal, 16)
-                .frame(height: 36)
-                .background(isOn ? AnyShapeStyle(HUDStyle.engaged) : AnyShapeStyle(.white.opacity(0.14)), in: .capsule)
-                .frame(minHeight: 44)
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .background(isOn ? AnyShapeStyle(HUDStyle.engaged) : AnyShapeStyle(.white.opacity(0.16)), in: .capsule)
                 .contentShape(.capsule)
         }
         .buttonStyle(.plain)
@@ -121,12 +173,12 @@ struct AutopilotPanel: View {
     }
 }
 
-/// Exterior lights as a Control Center-style grid of round toggles with a caption under each.
+/// Exterior lights as a Control Center-style row of round toggles with a caption under each.
 struct LightsPanel: View {
     @Bindable var model: HUDModel
 
     var body: some View {
-        HStack(alignment: .top, spacing: 14) {
+        HStack(alignment: .top, spacing: 12) {
             ForEach(HUDModel.Light.allCases) { light in
                 VStack(spacing: 6) {
                     GlassCircleToggle(
@@ -141,11 +193,11 @@ struct LightsPanel: View {
                     }
                     Text(light.name)
                         .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.75))
+                        .foregroundStyle(HUDStyle.secondaryText)
                 }
             }
         }
-        .padding(.trailing, 12)
+        .padding(.trailing, 10)
     }
 }
 
@@ -156,7 +208,7 @@ struct SettingsPanel: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Controls, graphics and realism settings arrive in M3.")
                 .font(.system(size: 14))
-                .foregroundStyle(.white.opacity(0.7))
+                .foregroundStyle(HUDStyle.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
             Button(role: .destructive, action: onEndFlight) {
                 Text("End Flight")
@@ -168,7 +220,7 @@ struct SettingsPanel: View {
             .tint(.red)
         }
         .frame(width: 280)
-        .padding(.trailing, 12)
+        .padding(.trailing, 10)
     }
 }
 
@@ -181,8 +233,8 @@ struct NotYetPanel: View {
     var body: some View {
         ContentUnavailableView(title, systemImage: symbol, description: Text(detail))
             .foregroundStyle(.white)
-            .frame(width: 300, height: 170)
-            .padding(.trailing, 12)
+            .frame(width: 300, height: 160)
+            .padding(.trailing, 10)
     }
 }
 
@@ -198,13 +250,14 @@ nonisolated extension HUDModel.Light {
         }
     }
 
+    /// One distinct silhouette per light.
     var symbol: String {
         switch self {
-        case .nav: "light.beacon.min"
+        case .nav: "circle.lefthalf.filled"        // red/green wingtip pair
         case .beacon: "light.beacon.max"
-        case .strobe: "bolt"
+        case .strobe: "bolt.fill"
         case .landing: "headlight.high.beam"
-        case .taxi: "headlight.low.beam"
+        case .taxi: "flashlight.on.fill"
         case .logo: "airplane"
         }
     }
