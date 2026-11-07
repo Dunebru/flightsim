@@ -14,6 +14,16 @@ public struct AC3DModel: Sendable {
         public var shininess: Float
         /// 0 = opaque, 1 = fully transparent (AC3D "trans").
         public var transparency: Float
+
+        public init(name: String, diffuse: SIMD3<Float>, emissive: SIMD3<Float>, specular: SIMD3<Float>,
+                    shininess: Float, transparency: Float) {
+            self.name = name
+            self.diffuse = diffuse
+            self.emissive = emissive
+            self.specular = specular
+            self.shininess = shininess
+            self.transparency = transparency
+        }
     }
 
     /// Triangles sharing one texture and one material.

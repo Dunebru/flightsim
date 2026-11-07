@@ -34,9 +34,13 @@ for module in modules {
     // UI is the only UI-facing module: it gets main-actor-by-default isolation.
     // Engine modules stay nonisolated so callers choose where their work runs.
     let isUI = module.name == "UI"
+    // Metal shader sources ship as resources and are compiled at load (ShaderLibrary), so the
+    // same code path works under `swift test` on the Mac and in the iOS app.
+    let resources: [Resource]? = module.name == "Renderer" ? [.copy("Shaders")] : nil
     targets.append(.target(
         name: module.name,
         dependencies: module.deps.map { .target(name: $0) },
+        resources: resources,
         swiftSettings: isUI ? swiftSettings + [.defaultIsolation(MainActor.self)] : swiftSettings
     ))
     targets.append(.testTarget(
