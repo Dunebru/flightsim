@@ -4,9 +4,19 @@ What is done, what is a placeholder, and what is next. Honest status only: anyth
 
 Last updated: 2026-11-07.
 
-## Current milestone: M0 Scaffolding
+## Current milestone: M1 Renderer core (code complete; device measurements outstanding)
 
-See `PLAN.md` section 13 for the acceptance criteria. Status per criterion is in the M0 report below.
+### M1 report (2026-11-07), against PLAN.md section 13
+
+1. **Metal renderer, HDR, reverse-Z, floating origin: met.** `CAMetalLayer` driven by `CAMetalDisplayLink` behind the HUD; HDR `rgba16Float`; reverse-Z infinite projection; Double world positions drawn camera-relative. Automated test: a comb of 2 cm slats renders pixel-identical (under 0.1% of pixels changed) at 50 km and 5,000 km from the origin, and the same scene with the floating origin disabled breaks (proves the test can fail). Runs on the iPhone 17 Pro and iPad simulators; on the phone the build installs but has **not run yet** (phone locked).
+2. **Sky and sun: met, with one substitution.** Sun position tested against NREL SPA (stronger than the NOAA calculator named in the plan) within 0.1 degrees at six places and times. Hillaire 2020 atmosphere. Renders at morning, noon, sunset, dusk and night are in `artifacts/renders/scene-*.png` (Mac GPU, same renderer code as the app). Not yet: stars and moon (night sky is black), planned for M7.
+3. **Aerial perspective, ground, runway markings: met.** Ground is procedural Sonoran desert (no imagery until M4). KPHX 8/26 with precision-runway markings; dimensions follow FAA AC 150/5340-1 **as recalled**, to be checked against the circular in M5. A top-down render caught and fixed vertically flipped numerals.
+4. **Test aircraft: met, placeholder quality.** FlightGear C172P (GPL-2.0), textured, GGX shading, sky reflections, glass pass, sun shadow map. Placeholder: no normal maps, no control-surface animation, no livery system (M6).
+5. **MetalFX: implemented, verified on the Mac, not yet on the phone.** Temporal (jittered, depth and motion vectors), spatial, and bilinear fallback, switchable in Settings. Mac GPU test: temporal upscaling of a static scene lands closer to the native image than bilinear (error 1.09 vs 1.40), and the flipped jitter sign is clearly worse (1.89), so the sign is right. The iOS Simulator SDK has no MetalFX, so the simulator always uses the bilinear path.
+6. **Frame-time overlay: implemented; device numbers not measured yet.** Shows fps, GPU time per stage, CPU encode time, render and output resolution, upscaler. The simulator reports GPU times near zero (no real GPU timestamps there). `-FlightLogStats YES` prints the same numbers to the device console.
+7. **Signposts: implemented; Instruments trace not captured yet.** `OSSignposter` intervals for the frame and each encode stage.
+
+Deferred from the plan's renderer section: bloom (not in the M1 criteria), stars and moon (M7).
 
 ## M0 report (2026-11-07): done
 

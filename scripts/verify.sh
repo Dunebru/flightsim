@@ -202,8 +202,17 @@ if [ "$WITH_DEVICE" -eq 1 ]; then
   else
     echo "    ok: install-device"
   fi
-  run_logged launch-device xcrun devicectl device process launch --terminate-existing \
-    --device "$UDID" "$BUNDLE_ID"
+  if ! xcrun devicectl device process launch --terminate-existing --device "$UDID" "$BUNDLE_ID" \
+      >"$OUT/launch-device.log" 2>&1; then
+    if grep -q "Locked" "$OUT/launch-device.log"; then
+      echo "    FAILED: the phone is locked. Unlock it and run again (the app is installed)."
+    else
+      echo "    FAILED: launch-device (full log: $OUT/launch-device.log)"
+      grep -E "ERROR|Reason" "$OUT/launch-device.log" | head -3 | cut -c1-200
+    fi
+    exit 1
+  fi
+  echo "    ok: launch-device"
   settle "$LAUNCH_SETTLE_SECONDS"
   run_logged processes-device xcrun devicectl device info processes --device "$UDID"
   if ! grep -q "Flight.app/Flight" "$OUT/processes-device.log"; then
