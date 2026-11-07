@@ -1,62 +1,83 @@
 public import SwiftUI
 
-/// Main menu. Placeholder (M0): the final design arrives in M3. Buttons are inert.
+/// Main menu. Placeholder: Free Flight opens the HUD prototype directly; the setup screens
+/// (aircraft, livery, airport, gate, weight, time, weather) and the other entries arrive in M3.
 public struct MainMenuView: View {
-    public init() {}
+    private let onFreeFlight: () -> Void
 
-    private let items: [(title: String, symbol: String)] = [
-        ("Free Flight", "airplane.departure"),
-        ("Flight Plan", "point.topleft.down.to.point.bottomright.curvepath"),
-        ("Hangar", "airplane"),
-        ("Logbook", "book.closed"),
-        ("Settings", "gearshape"),
+    public init(onFreeFlight: @escaping () -> Void = {}) {
+        self.onFreeFlight = onFreeFlight
+    }
+
+    private struct Item: Identifiable {
+        let title: String
+        let detail: String
+        let enabled: Bool
+        var id: String { title }
+    }
+
+    private let items: [Item] = [
+        Item(title: "FREE FLIGHT", detail: "HUD prototype", enabled: true),
+        Item(title: "FLIGHT PLAN", detail: "M8", enabled: false),
+        Item(title: "HANGAR", detail: "M6", enabled: false),
+        Item(title: "LOGBOOK", detail: "M10", enabled: false),
+        Item(title: "SETTINGS", detail: "M3", enabled: false),
     ]
 
     public var body: some View {
-        ZStack(alignment: .topLeading) {
-            LinearGradient(
-                colors: [Color(white: 0.10), Color(white: 0.02)],
-                startPoint: .top, endPoint: .bottom
-            )
-            .ignoresSafeArea()
+        ZStack {
+            Color(red: 0.035, green: 0.04, blue: 0.045).ignoresSafeArea()
 
-            HStack(alignment: .center, spacing: 48) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Flight")
-                        .font(.system(size: 44, weight: .bold, design: .rounded))
-                    Text("Placeholder menu (M0)")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+            HStack(alignment: .center, spacing: 56) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("FLIGHT")
+                        .font(Typeface.title(40))
+                        .tracking(8)
+                        .foregroundStyle(Palette.textPrimary)
+                    Rectangle().fill(Palette.selected).frame(width: 40, height: 3)
+                    Text("PLACEHOLDER MENU · M0")
+                        .labelStyle(Palette.textTertiary, size: 9)
                 }
-                .frame(maxWidth: 260, alignment: .leading)
+                .frame(maxWidth: 280, alignment: .leading)
 
-                VStack(spacing: 10) {
-                    ForEach(items, id: \.title) { item in
-                        Button {} label: {
-                            HStack(spacing: 14) {
-                                Image(systemName: item.symbol)
-                                    .frame(width: 28)
+                VStack(spacing: 0) {
+                    ForEach(items) { item in
+                        Button {
+                            if item.enabled { onFreeFlight() }
+                        } label: {
+                            HStack {
                                 Text(item.title)
+                                    .labelStyle(item.enabled ? Palette.textPrimary : Palette.textTertiary, size: 13)
+                                Spacer()
+                                Text(item.detail)
+                                    .labelStyle(item.enabled ? Palette.selected : Palette.textTertiary, size: 9)
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 11, weight: .bold))
+                                    .foregroundStyle(item.enabled ? Palette.textSecondary : Palette.textTertiary.opacity(0.5))
                             }
-                            .font(.system(.title3, design: .rounded, weight: .semibold))
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, 18)
-                                .padding(.vertical, 12)
-                                .background(.white.opacity(0.08), in: .rect(cornerRadius: 12))
+                            .padding(.horizontal, 16)
+                            .frame(height: 52)
+                            .contentShape(.rect)
                         }
                         .buttonStyle(.plain)
+                        .disabled(!item.enabled)
+                        if item.id != items.last?.id {
+                            Rectangle().fill(Palette.hairline).frame(height: 1)
+                        }
                     }
                 }
-                .frame(maxWidth: 340)
+                .frame(maxWidth: 360)
+                .bezel()
             }
             .padding(40)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .foregroundStyle(.white)
         .preferredColorScheme(.dark)
     }
 }
 
+#if os(iOS)
 #Preview(traits: .landscapeLeft) {
+    let _ = Typeface.registerBundledFonts()
     MainMenuView()
 }
+#endif

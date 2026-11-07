@@ -200,15 +200,19 @@ Navigraph's developer terms say they cannot license nav data to a developer, onl
 
 ## 8. UI
 
-**Decision (2026-11-07):** the UI is an original design, not a copy of Infinite Flight. No assets, code or data are extracted from the Infinite Flight app, and screens are not traced or replicated one to one from it. What carries over are the conventions the genre shares, chosen because they work well on a phone held in landscape: where the controls sit, how panels slide in, and a dark translucent overlay that keeps the outside view visible. The visual identity (iconography, typography, color, shapes, motion) is our own.
+**Decision (2026-11-07):** an original design that combines the ergonomics of the two sims you named, with a visual identity taken from real avionics rather than from either app. Nothing is extracted from, traced from, or replicated one to one from Infinite Flight or Microsoft Flight Simulator.
 
-Planned layout, in SwiftUI, with SF Symbols and custom-drawn controls:
+**Ergonomics borrowed (conventions, not looks):** thrust lever under the left thumb with trim beside it; aircraft controls (gear, brake, spoilers, flaps) under the right thumb; the numbers you fly by in a strip along the bottom; a slim top bar of keys that opens panels, which drop down as windows with a header and close key and never cover the thumb controls.
 
-- **Left edge:** vertical throttle slider with a detent and a reverse thrust zone below idle; trim wheel next to it.
-- **Right edge:** control cluster: gear, flaps (detented slider with labels), spoilers, brakes, lights.
-- **Bottom bar:** tappable, configurable info boxes (IAS, GS, ALT, VS, HDG, AoA, N1, fuel) and the bottom row of buttons: pause, camera, map, autopilot, flight plan, ATC, settings. Panels slide up from the bottom (AP, ATC) or in from the side (map, flight plan), as in Infinite Flight.
-- **Controls:** tilt (CoreMotion, calibrate-to-current-attitude), on-screen yoke, virtual joystick; GameController framework for MFi, PlayStation and Xbox controllers; per-axis sensitivity, dead zone and curve.
-- **Cameras:** cockpit, chase (spring-damped), tower (nearest tower or airport reference point), wing, free orbit; critically damped transitions between them.
+**Visual identity: "glass cockpit".**
+- Color follows the avionics convention pilots already read: cyan for values the pilot selected (autopilot targets), green for engaged modes and healthy states (gear down, A/THR), magenta for the route, amber for caution (reverse thrust, parking brake, spoilers out), red for warning (gear in transit, stall). White for live state, grays for labels.
+- Type is B612 (SIL Open Font License), designed by Airbus for cockpit displays. Its figures are tabular (measured: every digit 0.65 em), so values never jitter; labels are uppercase with open tracking.
+- Bezels: near-black at about 60 percent opacity with 1 pt hairlines and 6 pt corners, separate floating groups rather than full-width bars so the outside view stays open. Panel windows are near-opaque because on small phones they can sit over other controls.
+- Top bar carries a flight mode annunciator styled like the one on a primary flight display (engaged mode on top in green, armed mode below in cyan).
+- Keys are labeled soft keys (AP, MAP, ATC, CAM, LTS, SET), like the keys around a cockpit display, with a cyan bar when selected. No decorative gradients, glows or icons where a word is clearer.
+- Haptics: detent clicks on flaps and spoilers, a heavier click on the gear handle and when the thrust lever crosses into reverse.
+
+**Status:** HUD prototype built 2026-11-07 (controls work by touch on demo data; the world behind it is a flat stand-in). M3 adds tilt, yoke, joystick and controller input, cameras, the free flight setup screens, settings, and wires everything to the flight model.
 
 ---
 

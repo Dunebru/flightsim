@@ -28,12 +28,12 @@ Build warnings: 1, the deprecated `UIRequiresFullScreen`, kept on purpose (see K
 | CJSBSim | **Placeholder (M0 stub).** C API header with `jsb_version()` returning "stub"; compiled as C++17. JSBSim sources arrive in M2. |
 | FlightModel | **Placeholder (M0 stub).** Links CJSBSim; no physics. |
 | Weather, Nav, Autopilot, Airports, Terrain, Aircraft, Renderer, Traffic, ATC | **Placeholder (M0 stubs).** Module identity only. |
-| UI | **Placeholder.** Main menu with inert buttons; final original HUD and menu design arrives in M3. |
+| UI | **Prototype.** Original "glass cockpit" design language (PLAN.md section 8). In-flight HUD with working touch controls: thrust lever with idle/reverse gate, trim, detented flaps and spoilers, gear with a 6 s transit and position lights, parking brake, mode annunciator, autopilot panel with steppable targets, lights and camera panels. All values are **demo data**; the world behind is a flat gradient stand-in. Map, ATC and Settings panels say "not built yet". Main menu restyled; only Free Flight is active. |
 | Tools (`flight-tools`) | **Placeholder (M0 stub).** Declares `nav-import`, `airport-import`, `terrain-bake`, `asset-cook`; each prints "not implemented". |
 
 ## Placeholders in the app today
 
-Everything visible is a placeholder: the main menu is a plain list, labeled "Placeholder menu (M0)" on screen. No aircraft, terrain, airports or flight model exist yet.
+The HUD is labeled on screen "PROTOTYPE · DEMO DATA · 3D VIEW ARRIVES IN M1": its numbers are fixed demo values and the sky and ground are a flat gradient. The main menu is labeled "PLACEHOLDER MENU · M0". No aircraft, terrain, airports or flight model exist yet.
 
 ## Known issues
 

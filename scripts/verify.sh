@@ -91,6 +91,19 @@ run_on_sim() {
   w=$(sips -g pixelWidth "$OUT/$label.png" | awk '/pixelWidth/ {print $2}')
   h=$(sips -g pixelHeight "$OUT/$label.png" | awk '/pixelHeight/ {print $2}')
   if [ "$h" -gt "$w" ]; then sips -r 270 "$OUT/$label.png" >/dev/null; fi
+
+  # Second screen: the in-flight HUD, opened directly by a launch argument.
+  xcrun simctl terminate "$udid" "$BUNDLE_ID" >/dev/null 2>&1 || true
+  run_logged "launch-hud-$label" xcrun simctl launch "$udid" "$BUNDLE_ID" -FlightStartScreen hud
+  settle "$LAUNCH_SETTLE_SECONDS"
+  if ! xcrun simctl spawn "$udid" launchctl list | grep -F "$BUNDLE_ID" | grep -qE '^[0-9]+'; then
+    echo "    FAILED: HUD not running on $name ${LAUNCH_SETTLE_SECONDS}s after launch (crashed?)"; exit 1
+  fi
+  run_logged "screenshot-hud-$label" xcrun simctl io "$udid" screenshot "$OUT/$label-hud.png"
+  w=$(sips -g pixelWidth "$OUT/$label-hud.png" | awk '/pixelWidth/ {print $2}')
+  h=$(sips -g pixelHeight "$OUT/$label-hud.png" | awk '/pixelHeight/ {print $2}')
+  if [ "$h" -gt "$w" ]; then sips -r 270 "$OUT/$label-hud.png" >/dev/null; fi
+  echo "    ok: HUD running on $name"
 }
 
 device_udid() {
