@@ -16,6 +16,11 @@ targets:
       Release: Config/Base.xcconfig
     sources:
       - path: App
+      # Third-party assets fetched by scripts/fetch-assets.sh (gitignored). Copied into the app
+      # as the "Bundle" folder.
+      - path: Data/Bundle
+        type: folder
+        buildPhase: resources
     dependencies:
       - package: FlightKit
         product: FlightKit

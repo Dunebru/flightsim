@@ -135,6 +135,8 @@ public struct RenderSettings: Sendable, Equatable {
     public var renderScale: Double = 0.67
     /// Draw world positions without the floating origin (test and demonstration only).
     public var disableFloatingOrigin = false
+    /// Hand MetalFX the opposite jitter sign (test only: proves the sign matters).
+    public var flipJitterSignForTest = false
 
     public init(upscaler: UpscalerMode = .temporal, renderScale: Double = 0.67) {
         self.upscaler = upscaler

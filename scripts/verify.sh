@@ -152,6 +152,9 @@ PY
 
 # ---------------------------------------------------------------------------
 
+step "Fetch pinned assets"
+run_logged fetch-assets scripts/fetch-assets.sh
+
 step "Generate Xcode project"
 run_logged xcodegen xcodegen generate --quiet
 

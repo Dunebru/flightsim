@@ -12,6 +12,9 @@ import Foundation
 /// button bar sit on the screen's true center axis, independent of the side columns.
 public struct FlightHUDView: View {
     @State private var model = HUDModel()
+    #if os(iOS)
+    @State private var engine = WorldEngine()
+    #endif
     private let onExit: () -> Void
 
     public init(onExit: @escaping () -> Void = {}) {
@@ -27,8 +30,13 @@ public struct FlightHUDView: View {
 
     public var body: some View {
         ZStack {
+            #if os(iOS)
+            WorldView(engine: engine)
+                .ignoresSafeArea()
+            #else
             WorldPlaceholder()
                 .ignoresSafeArea()
+            #endif
 
             // Thumb columns.
             HStack(alignment: .bottom, spacing: 0) {
@@ -40,8 +48,20 @@ public struct FlightHUDView: View {
             .padding(.horizontal, HUDStyle.edge)
             .padding(.bottom, 10)
 
-            // Pause, top-left.
-            pauseButton
+            // Pause, top-left; startup problems are reported under it.
+            VStack(alignment: .leading, spacing: 8) {
+                pauseButton
+                #if os(iOS)
+                if let error = engine.startupError {
+                    Text(error)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(10)
+                        .background(HUDStyle.warning.opacity(0.85), in: .rect(cornerRadius: 12))
+                        .frame(maxWidth: 260, alignment: .leading)
+                }
+                #endif
+            }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .padding(.horizontal, HUDStyle.edge)
                 .padding(.top, 10)
@@ -57,7 +77,12 @@ public struct FlightHUDView: View {
                             AutopilotStatus(model: model)
                                 .transition(.move(edge: .top).combined(with: .opacity))
                         }
-                        if model.openPanel == nil { demoTag }
+                        if model.openPanel == nil {
+                            demoTag
+                            #if os(iOS)
+                            if engine.showStats { FrameStatsOverlay(engine: engine) }
+                            #endif
+                        }
                     }
                     .padding(.horizontal, Self.topCenterInset)
                     .padding(.top, 10)
@@ -179,7 +204,13 @@ public struct FlightHUDView: View {
                 case .lights:
                     GlassPanel(title: "Lights", onClose: close) { LightsPanel(model: model) }
                 case .settings:
-                    GlassPanel(title: "Settings", onClose: close) { SettingsPanel(onEndFlight: onExit) }
+                    GlassPanel(title: "Settings", onClose: close) {
+                        #if os(iOS)
+                        SettingsPanel(engine: engine, onEndFlight: onExit)
+                        #else
+                        SettingsPanel(onEndFlight: onExit)
+                        #endif
+                    }
                 case .map:
                     GlassPanel(title: "Map", onClose: close) {
                         NotYetPanel(title: "No map yet", symbol: "map", detail: "The moving map with your route, traffic and airspace arrives in M8.")
@@ -219,7 +250,7 @@ public struct FlightHUDView: View {
     }
 
     private var demoTag: some View {
-        Text("Prototype · demo data · 3D world arrives in M1")
+        Text("Prototype · instrument values are demo data until the flight model (M2)")
             .font(.system(size: 11, weight: .semibold))
             .foregroundStyle(.white)
             .padding(.horizontal, 10)

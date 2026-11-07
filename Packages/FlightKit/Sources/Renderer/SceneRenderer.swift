@@ -1,7 +1,6 @@
 public import Aircraft
 public import Foundation
 public import Metal
-import MetalFX
 import os
 import simd
 import SimCore
@@ -54,7 +53,7 @@ public final class SceneRenderer {
     private let markingsBuffer: any MTLBuffer
     private let markingsVertexCount: Int
     private let runway = RunwaySpec.kphx08_26
-    private let aircraft: AircraftMesh?
+    private var aircraft: AircraftMesh?
 
     // Per-size targets
     private var targets: Targets?
@@ -432,7 +431,7 @@ public final class SceneRenderer {
             e.endEncoding()
         }
         let upscaled = t.upscaler.encode(commandBuffer: cbPost, color: t.ldr, depth: t.depth, motion: t.motion,
-                                         jitter: jitter, reset: reset)
+                                         jitter: settings.flipJitterSignForTest ? -jitter : jitter, reset: reset)
         let finalPass = MTLRenderPassDescriptor()
         finalPass.colorAttachments[0].texture = target
         finalPass.colorAttachments[0].loadAction = .dontCare
@@ -490,6 +489,17 @@ public final class SceneRenderer {
         if let error = cb.error { throw error }
         let p = readback.contents().bindMemory(to: UInt8.self, capacity: width * height * 4)
         return Array(UnsafeBufferPointer(start: p, count: width * height * 4))
+    }
+
+    /// Whether this device can run the given MetalFX mode.
+    public static func supports(_ mode: UpscalerMode, device: any MTLDevice) -> Bool {
+        Upscaler.supports(mode, device: device)
+    }
+
+    /// Replaces the aircraft (models load in the background after the first frame).
+    public func setAircraft(_ model: AC3DModel, textures: URL?) throws {
+        aircraft = try AircraftMesh(model: model, textureDirectory: textures, device: device)
+        previousCamera = nil
     }
 
     /// Forget temporal history (camera cut, new scene).

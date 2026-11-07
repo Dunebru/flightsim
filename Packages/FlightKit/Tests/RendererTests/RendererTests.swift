@@ -223,3 +223,73 @@ struct RendererTests {
         CGImageDestinationFinalize(dest)
     }
 }
+
+/// MetalFX temporal upscaling of a static scene must converge toward the native-resolution
+/// image, and the jitter we hand MetalFX must have the right sign: the flipped sign has to land
+/// measurably further from the reference. Skipped where MetalFX is unavailable.
+@Suite(.serialized)
+struct TemporalUpscalingTests {
+    static var available: Bool {
+        guard let d = MTLCreateSystemDefaultDevice() else { return false }
+        return SceneRenderer.supports(.temporal, device: d)
+    }
+
+    static func meanError(_ a: [UInt8], _ b: [UInt8]) -> Double {
+        var sum = 0.0
+        for i in stride(from: 0, to: a.count, by: 4) {
+            for c in 0..<3 { sum += Double(abs(Int(a[i + c]) - Int(b[i + c]))) }
+        }
+        return sum / Double(a.count / 4 * 3)
+    }
+
+    @Test(.enabled(if: available))
+    func temporalConvergesAndJitterSignIsRight() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let w = 320, h = 240
+        let scene = RendererTests.combScene(offset: .zero)
+
+        let native = try SceneRenderer(device: device, aircraftModel: try RendererTests.comb(), aircraftTextures: nil)
+        native.settings = RenderSettings(upscaler: .off, renderScale: 1)
+        let reference = try native.renderImage(scene, width: w, height: h)
+
+        func upscaled(flip: Bool) throws -> [UInt8] {
+            let r = try SceneRenderer(device: device, aircraftModel: try RendererTests.comb(), aircraftTextures: nil)
+            var s = RenderSettings(upscaler: .temporal, renderScale: 0.5)
+            s.flipJitterSignForTest = flip
+            r.settings = s
+            return try r.renderImage(scene, width: w, height: h, warmupFrames: 48)
+        }
+        let correct = try upscaled(flip: false)
+        let flipped = try upscaled(flip: true)
+
+        let bilinear = try SceneRenderer(device: device, aircraftModel: try RendererTests.comb(), aircraftTextures: nil)
+        bilinear.settings = RenderSettings(upscaler: .off, renderScale: 0.5)
+        let plain = try bilinear.renderImage(scene, width: w, height: h)
+
+        let eCorrect = Self.meanError(correct, reference)
+        let eFlipped = Self.meanError(flipped, reference)
+        let ePlain = Self.meanError(plain, reference)
+        print(String(format: "temporal error: correct %.2f  flipped %.2f  bilinear %.2f", eCorrect, eFlipped, ePlain))
+        try RendererTests.savePNG(correct, w, h, name: "test-temporal-upscaled")
+        try RendererTests.savePNG(plain, w, h, name: "test-bilinear-upscaled")
+        #expect(eCorrect < ePlain, "temporal upscaling should beat a plain bilinear upscale")
+        #expect(eCorrect < eFlipped * 0.9, "jitter sign: correct \(eCorrect) vs flipped \(eFlipped)")
+    }
+}
+
+/// Top-down views of both thresholds, for checking marking layout by eye (artifacts/renders).
+@Test func runwayThresholdSnapshots() throws {
+    let device = try #require(MTLCreateSystemDefaultDevice())
+    let r = try SceneRenderer(device: device, aircraftModel: nil, aircraftTextures: nil)
+    r.settings = RenderSettings(upscaler: .off, renderScale: 1)
+    for (name, x, yaw) in [("rwy08", -1_751.0 + 60, 90.0), ("rwy26", 1_751.0 - 60, 270.0)] {
+        var s = SceneDescription.phoenixTest(date: RendererTests.date("2026-06-21T19:30:00Z"))
+        s.showAircraft = false
+        // Looking down the landing direction from above the approach end.
+        s.camera = OrbitCamera(target: SIMD3(x, 0, 0), yaw: yaw * .pi / 180, pitch: 70 * .pi / 180,
+                               distance: 120, fovY: 55 * .pi / 180)
+        r.resetHistory()
+        let img = try r.renderImage(s, width: 800, height: 600)
+        try RendererTests.savePNG(img, 800, 600, name: "test-\(name)")
+    }
+}

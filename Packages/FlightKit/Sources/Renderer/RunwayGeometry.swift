@@ -71,13 +71,9 @@ enum MarkingAtlas {
         desc.usage = [.shaderRead]
         desc.storageMode = .shared
         guard let staging = device.makeTexture(descriptor: desc) else { return nil }
-        // CoreGraphics rows run bottom-up here (origin bottom-left); flip so v = 0 is the glyph top.
-        var flipped = [UInt8](repeating: 0, count: pixels.count)
-        for y in 0..<height {
-            let src = (height - 1 - y) * width
-            flipped.replaceSubrange(y * width..<(y + 1) * width, with: pixels[src..<src + width])
-        }
-        staging.replace(region: MTLRegionMake2D(0, 0, width, height), mipmapLevel: 0, withBytes: flipped, bytesPerRow: width)
+        // A CGBitmapContext stores its top row first, which is already Metal's row order
+        // (v = 0 at the glyph top). Verified by rendering both thresholds (test-rwy26.png).
+        staging.replace(region: MTLRegionMake2D(0, 0, width, height), mipmapLevel: 0, withBytes: pixels, bytesPerRow: width)
         if let cb = queue.makeCommandBuffer(), let blit = cb.makeBlitCommandEncoder() {
             blit.generateMipmaps(for: staging)
             blit.endEncoding()

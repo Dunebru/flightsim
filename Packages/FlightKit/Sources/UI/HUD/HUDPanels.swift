@@ -1,3 +1,4 @@
+import Renderer
 import SwiftUI
 
 /// A floating glass card that rises from the bottom bar. Title and a close button on top.
@@ -202,12 +203,39 @@ struct LightsPanel: View {
 }
 
 struct SettingsPanel: View {
+    #if os(iOS)
+    @Bindable var engine: WorldEngine
+    #endif
     let onEndFlight: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Controls, graphics and realism settings arrive in M3.")
-                .font(.system(size: 14))
+            #if os(iOS)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Upscaling")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(HUDStyle.secondaryText)
+                Picker("Upscaling", selection: $engine.upscaler) {
+                    Text("MetalFX").tag(UpscalerMode.temporal)
+                    Text("Spatial").tag(UpscalerMode.spatial)
+                    Text("Off").tag(UpscalerMode.off)
+                }
+                .pickerStyle(.segmented)
+                .disabled(!engine.temporalSupported)
+                if !engine.temporalSupported {
+                    Text("MetalFX is not available on this device; rendering at full resolution.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(HUDStyle.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Toggle("Frame statistics", isOn: $engine.showStats)
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(.white)
+                .tint(HUDStyle.engaged)
+            #endif
+            Text("Controls and realism settings arrive in M3.")
+                .font(.system(size: 13))
                 .foregroundStyle(HUDStyle.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
             Button(role: .destructive, action: onEndFlight) {
@@ -219,7 +247,7 @@ struct SettingsPanel: View {
             .buttonStyle(.glass)
             .tint(.red)
         }
-        .frame(width: 280)
+        .frame(width: 300)
         .padding(.trailing, 10)
     }
 }
