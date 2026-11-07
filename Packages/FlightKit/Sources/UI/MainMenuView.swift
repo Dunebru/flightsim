@@ -1,7 +1,6 @@
 public import SwiftUI
 
-/// Main menu. Placeholder (M0): layout and styling are not yet the Infinite Flight style;
-/// M3 rebuilds every screen against reference screenshots. Buttons are inert.
+/// Main menu. Placeholder (M0): the final design arrives in M3. Buttons are inert.
 public struct MainMenuView: View {
     public init() {}
 

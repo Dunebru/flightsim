@@ -2,13 +2,6 @@
 
 Things only you can supply, buy or ask for. Each entry says where to get it, what it costs if known, and where to put it. Nothing here blocks M0 to M2.
 
-## Wanted now (helps M3)
-
-### Infinite Flight reference screenshots (free, optional but strongly recommended)
-You asked for the UI to match Infinite Flight exactly. I am rebuilding it from scratch, so the closer the reference, the closer the result. If you have Infinite Flight on your phone, take landscape screenshots of: main menu, free flight setup (aircraft, livery, airport, gate/runway, time, weather), the in-flight HUD with nothing open, each panel open (autopilot, flight plan, map, ATC, camera menu, lights/systems, settings), the pause menu, and the map. Two or three in-flight shots in different cameras help too.
-
-Put them in `Reference/InfiniteFlight/` (gitignored, never shipped, used only to compare layouts side by side).
-
 ## Later milestones
 
 ### EOX Sentinel-2 cloudless: bulk caching permission (M4, free)

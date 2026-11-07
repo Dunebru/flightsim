@@ -1,6 +1,6 @@
 # Flight: Plan
 
-Personal iOS/iPadOS flight simulator. Infinite Flight is the UX blueprint; Microsoft Flight Simulator is the visual ceiling we measure against, not one we can reach. This file holds architecture, decisions, honest quality ceilings, risks and milestone acceptance criteria. Status lives in `PROGRESS.md`.
+Personal iOS/iPadOS flight simulator. The UI follows the ergonomic conventions of mobile flight sims such as Infinite Flight with an original design (section 8); Microsoft Flight Simulator is the visual ceiling we measure against, not one we can reach. This file holds architecture, decisions, honest quality ceilings, risks and milestone acceptance criteria. Status lives in `PROGRESS.md`.
 
 Last updated: 2026-11-07 (pre-approval draft).
 
@@ -23,12 +23,12 @@ The team ID goes in `Config/Local.xcconfig`, which is gitignored. No certificate
 
 ---
 
-## 2. What "as close to Infinite Flight" and "MSFS ceiling" mean in practice
+## 2. What the quality targets and the "MSFS ceiling" mean in practice
 
 Being direct about the gap up front, so nothing later reads as a surprise.
 
 **Achievable, with free data, on an iPhone 18 Pro Max:**
-UI, layout, controls and flow that feel like Infinite Flight. Flight models that are genuinely physics-based (JSBSim), with the C172 close to published numbers and the airliners tuned to published stall, climb and approach numbers. A physically based sky (Hillaire-style atmosphere) and volumetric clouds that look better than Infinite Flight's. Global terrain with 30 m elevation and 10 m satellite color that looks good from about 3,000 ft and up. Sharp 60 cm aerial imagery in the US. Procedurally generated airports from real layout data that are correct in geometry, markings and lighting, with generic (not lookalike) terminals. A US nav database with real SIDs, STARs and approaches.
+UI, layout, controls and flow that feel familiar to an Infinite Flight pilot, with an original look. Flight models that are genuinely physics-based (JSBSim), with the C172 close to published numbers and the airliners tuned to published stall, climb and approach numbers. A physically based sky (Hillaire-style atmosphere) and volumetric clouds that look better than Infinite Flight's. Global terrain with 30 m elevation and 10 m satellite color that looks good from about 3,000 ft and up. Sharp 60 cm aerial imagery in the US. Procedurally generated airports from real layout data that are correct in geometry, markings and lighting, with generic (not lookalike) terminals. A US nav database with real SIDs, STARs and approaches.
 
 **Not achievable with free data, and not hidden:**
 Photogrammetry cities and terrain (MSFS uses petabytes of Bing/Azure data; nothing comparable is licensable for a personal offline app). Low-altitude photoreal imagery outside the US (10 m Sentinel-2 is blurry below about 2,000 ft). Worldwide SIDs, STARs and approaches (see 7.4: Navigraph will not license data for a home-built app). Type-accurate 777 or 747-8 flight models (none exist in JSBSim form). Hand-modeled lookalike terminals for all 20 airports at MSFS quality (that is months of 3D art per airport).
@@ -198,9 +198,11 @@ Navigraph's developer terms say they cannot license nav data to a developer, onl
 
 ---
 
-## 8. Infinite Flight style UI
+## 8. UI
 
-Recreated from scratch in SwiftUI, from memory of how Infinite Flight behaves; no assets taken from it. Dark translucent panels (`.ultraThinMaterial` over black at about 60 percent), SF Symbols, SF Pro Rounded numerals.
+**Decision (2026-11-07):** the UI is an original design, not a copy of Infinite Flight. No assets, code or data are extracted from the Infinite Flight app, and screens are not traced or replicated one to one from it. What carries over are the conventions the genre shares, chosen because they work well on a phone held in landscape: where the controls sit, how panels slide in, and a dark translucent overlay that keeps the outside view visible. The visual identity (iconography, typography, color, shapes, motion) is our own.
+
+Planned layout, in SwiftUI, with SF Symbols and custom-drawn controls:
 
 - **Left edge:** vertical throttle slider with a detent and a reverse thrust zone below idle; trim wheel next to it.
 - **Right edge:** control cluster: gear, flaps (detented slider with labels), spoilers, brakes, lights.
