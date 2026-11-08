@@ -14,7 +14,7 @@ Last updated: 2026-11-07 (pre-approval draft).
 | Xcode | 27.0 (27A266a), iOS SDK 27.0, Swift 6.4 |
 | Simulators | iPhone 17 Pro, iPhone SE (3rd gen), iOS 27.0. An iPad simulator will be created with `simctl create` in M0. |
 | Physical device | **iPhone 18 Pro Max** (iPhone19,3), iOS 27.0.1, 256 GB, Developer Mode on. Connected and verified 2026-11-07: a signed test app built, installed and launched via `xcrun devicectl`. (An older iPhone 15 Pro Max pairing record also exists on this Mac; it is not the target.) RAM and GPU core count are not reported by `devicectl`; the frame budget is measured in M1 rather than assumed. |
-| Signing | **Working on the paid team `7SQH…`** (verified 2026-11-07 after the Program License Agreement was accepted): device build signed with an Apple Development certificate, one-year profile. Bundle ID is **`com.shreyas.flightsim`**, because `com.shreyas.flight` was registered to the free Personal Team `377T…` during an earlier signing test and bundle IDs are unique across teams. |
+| Signing | **Working on the paid developer team** (verified 2026-11-07 after the Program License Agreement was accepted): device build signed with an Apple Development certificate, one-year profile. Bundle ID is **`com.shreyas.flightsim`**, because `com.shreyas.flight` was registered to the free Personal Team (free Personal Team) during an earlier signing test and bundle IDs are unique across teams. |
 | Tools present | `xcodegen`, `git`, `brew`, `python3` |
 | Tools missing | `cmake` (not needed, see 4.3), `gdal` (needed by offline tools, M4), `git-lfs` (not needed, see 9), Blender (needed for model conversion, M6) |
 | The `iOS app` folder | Does not exist on the Desktop. Nothing is needed from it: automatic signing with your signed-in Apple ID is enough. |
@@ -244,7 +244,7 @@ See 7.4. **Recommendation: US procedures from CIFP plus hand-entered procedures 
 
 ## 11. Signing
 
-Verified 2026-11-07: automatic signing on paid team `7SQH…` produces an Apple Development certificate and a one-year profile; a test device build of `com.shreyas.flightsim` succeeded. The team ID lives only in the gitignored `Config/Local.xcconfig`.
+Verified 2026-11-07: automatic signing on paid developer team produces an Apple Development certificate and a one-year profile; a test device build of `com.shreyas.flightsim` succeeded. The team ID lives only in the gitignored `Config/Local.xcconfig`.
 
 Device install verified 2026-11-07 over cable on the iPhone 18 Pro Max (device registered to the team by `-allowProvisioningDeviceRegistration`). For cable-free installs, tick **Connect via network** for the phone once in Xcode, Window, Devices and Simulators; afterwards it works whenever the phone is unlocked on the same Wi-Fi as the Mac.
 
