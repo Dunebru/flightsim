@@ -3,5 +3,5 @@ import Testing
 
 @Test func moduleIdentity() {
     #expect(WeatherModule.info.name == "Weather")
-    #expect(WeatherModule.info.status == .stub(plannedFor: "M7"))
+    #expect(WeatherModule.info.status != .stub(plannedFor: "M7"))
 }

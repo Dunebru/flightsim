@@ -5,6 +5,7 @@ import Foundation
 import Renderer
 import SimCore
 import Terrain
+import Weather
 
 /// One flight: the physics loop for the chosen aircraft, its control inputs, and the mapping from
 /// its state to the scene and the HUD. Lives on the main actor; physics runs on its own thread.
@@ -23,6 +24,9 @@ final class FlightSession {
     /// Solid ground under the aircraft, from the same scenery the renderer draws.
     private var ground: GroundModel
     private var lastHUDUpdate: TimeInterval = 0
+    /// The weather the flight uses (clear until a METAR arrives).
+    var weather: WeatherConditions = .clear
+    private var clock = 0.0
     private var lastState: FlightState?
 
     /// - Parameters:
@@ -92,6 +96,27 @@ final class FlightSession {
         tilt.calibrate()
     }
 
+    /// Weather for the flight model at a height above the ground: the profiled wind with gusts
+    /// (a smooth random swing between the steady speed and the reported gust), turbulence when
+    /// it is gusty or strong, and the temperature and pressure.
+    func atmosphere(heightFeet: Double) -> AtmosphereInputs {
+        var a = AtmosphereInputs()
+        var wind = weather.wind(atHeightFeet: heightFeet)
+        if let gust = weather.gustKnots, weather.windKnots > 0 {
+            let t = clock
+            let swing = 0.5 + 0.25 * sin(t * 0.71) + 0.15 * sin(t * 1.93 + 1.1) + 0.1 * sin(t * 3.7 + 2.3)
+            wind *= 1 + (gust / weather.windKnots - 1) * max(0, min(1, swing))
+        }
+        a.windNorthKnots = wind.x
+        a.windEastKnots = wind.y
+        a.surfaceWindKnots = weather.windKnots
+        let spread = (weather.gustKnots ?? weather.windKnots) - weather.windKnots
+        a.turbulenceSeverity = spread >= 10 ? 4 : (spread >= 5 || weather.windKnots >= 15 ? 3 : (weather.windKnots >= 8 ? 2 : 0))
+        a.deltaTCelsius = weather.isaDeviation(fieldElevationMetres: site.layout.elevation)
+        a.seaLevelPressureHPa = weather.altimeterHPa
+        return a
+    }
+
     /// Called once per display frame, before rendering.
     func tick(dt: Double, hud: HUDModel, scene: inout SceneDescription, holdForScenery: Bool = false) {
         guard let physics else { return }
@@ -132,6 +157,8 @@ final class FlightSession {
         inputs.pitchTrim = hud.trim
         physics.setInputs(inputs)
         physics.setPaused(hud.paused || holdForScenery)
+        clock += dt
+        if let s = lastState { physics.setAtmosphere(atmosphere(heightFeet: s.heightAboveGroundFeet)) }
 
         let s = physics.state
         lastState = s
@@ -160,6 +187,11 @@ final class FlightSession {
             hud.heading = hdg
             hud.angleOfAttack = s.onGround ? 0 : s.angleOfAttackDegrees
             hud.n1 = s.engineIndication
+            hud.windFrom = Int(weather.windFromDegrees.rounded())
+            hud.windKnots = Int(weather.windKnots.rounded())
+            hud.windGust = weather.gustKnots.map { Int($0.rounded()) }
+            hud.windRelative = weather.windFromDegrees + 180 - s.heading * 180 / .pi
+            hud.weatherSource = weather.source
         }
     }
 }

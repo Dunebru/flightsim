@@ -54,6 +54,16 @@ public struct InitialConditions: Sendable {
 }
 
 /// A snapshot of the aircraft, in the units pilots read.
+/// Weather inputs to the flight model.
+public struct AtmosphereInputs: Sendable, Equatable {
+    public var windNorthKnots = 0.0, windEastKnots = 0.0
+    public var surfaceWindKnots = 0.0
+    public var turbulenceSeverity = 0
+    public var deltaTCelsius = 0.0
+    public var seaLevelPressureHPa = 1013.25
+    public init() {}
+}
+
 public struct FlightState: Sendable, Equatable {
     public var time: Double = 0
     public var latitude: Double = 0
@@ -230,6 +240,19 @@ public final class FlightDynamics {
     }
 
     public var terrainElevationFeet: Double { self.get("position/terrain-elevation-asl-ft") }
+
+    /// Applies weather: the wind (air moving toward north and east, knots), MIL-spec turbulence
+    /// (severity 0 to 7; 0 off), the temperature offset from standard (Celsius) and sea-level
+    /// pressure (hPa).
+    public func setAtmosphere(_ a: AtmosphereInputs) {
+        set("atmosphere/wind-north-fps", a.windNorthKnots * 1.687_81)
+        set("atmosphere/wind-east-fps", a.windEastKnots * 1.687_81)
+        set("atmosphere/turb-type", a.turbulenceSeverity > 0 ? 3 : 0)
+        set("atmosphere/turbulence/milspec/windspeed_at_20ft_AGL-fps", a.surfaceWindKnots * 1.687_81)
+        set("atmosphere/turbulence/milspec/severity", Double(a.turbulenceSeverity))
+        set("atmosphere/delta-T", a.deltaTCelsius * 1.8)
+        set("atmosphere/P-sl-psf", a.seaLevelPressureHPa * 2.088_543)
+    }
 
     /// Advances `count` fixed steps.
     public func step(_ count: Int = 1) {

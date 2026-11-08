@@ -22,6 +22,7 @@ public final class PhysicsLoop: Sendable {
         var restingHeightFeet: Double = 0
         /// Ground height under the aircraft (mean sea level, feet), from the scenery.
         var terrainElevationFeet: Double?
+        var atmosphere: AtmosphereInputs?
     }
 
     /// Reference wrapper so the physics thread and callers share one (noncopyable) mutex.
@@ -99,6 +100,8 @@ public final class PhysicsLoop: Sendable {
     /// Ground height under the aircraft, feet above mean sea level; applied before the next
     /// steps. Update it every frame as the aircraft moves over terrain.
     public func setTerrainElevation(feet: Double) { shared.withLock { $0.terrainElevationFeet = feet } }
+    /// Weather (wind, turbulence, temperature, pressure); applied when it changes.
+    public func setAtmosphere(_ a: AtmosphereInputs) { shared.withLock { $0.atmosphere = a } }
     public func send(_ command: Command) { shared.withLock { $0.commands.append(command) } }
     public func stop() { shared.withLock { $0.running = false } }
 
@@ -111,11 +114,16 @@ public final class PhysicsLoop: Sendable {
         var stepped = 0
         var lastTick = start
         var appliedTerrain: Double?
+        var appliedAtmosphere: AtmosphereInputs?
         while true {
-            let (running, paused, inputs, commands, terrain) = shared.withLock { s -> (Bool, Bool, ControlInputs, [Command], Double?) in
+            let (running, paused, inputs, commands, terrain, atmosphere) = shared.withLock { s -> (Bool, Bool, ControlInputs, [Command], Double?, AtmosphereInputs?) in
                 let c = s.commands
                 s.commands = []
-                return (s.running, s.paused, s.inputs, c, s.terrainElevationFeet)
+                return (s.running, s.paused, s.inputs, c, s.terrainElevationFeet, s.atmosphere)
+            }
+            if let atmosphere, atmosphere != appliedAtmosphere {
+                fdm.setAtmosphere(atmosphere)
+                appliedAtmosphere = atmosphere
             }
             if !running { return }
             for command in commands {

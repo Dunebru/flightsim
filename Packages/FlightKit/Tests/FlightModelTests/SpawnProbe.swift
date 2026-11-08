@@ -60,3 +60,26 @@ struct TerrainFollowingTests {
         #expect(after.onGround)
     }
 }
+
+/// Weather reaches the flight model: a 20 kt headwind takes 20 kt off the groundspeed; a 20 kt
+/// tailwind adds it. Fails if the wind properties are not applied.
+struct WindTests {
+    @Test func headwindAndTailwind() throws {
+        func groundMinusTrue(windFromEast: Bool) throws -> Double {
+            let fdm = try FlightDynamics(model: "c172p")
+            let ic = InitialConditions(latitude: 33.44, longitude: -112.0, terrainElevationFeet: 1135,
+                                       heightAboveGroundFeet: 3_000, headingDegrees: 90, airspeedKnots: 100)
+            try fdm.initialize(ic)
+            try fdm.trim(.full)
+            var a = AtmosphereInputs()
+            a.windEastKnots = windFromEast ? -20 : 20      // air moving west (headwind) or east (tailwind)
+            fdm.setAtmosphere(a)
+            fdm.step(600)
+            let s = fdm.state
+            return s.groundSpeedKnots - s.trueAirspeedKnots
+        }
+        let head = try groundMinusTrue(windFromEast: true), tail = try groundMinusTrue(windFromEast: false)
+        #expect(abs(head + 20) < 3, "headwind: groundspeed minus true airspeed \(head)")
+        #expect(abs(tail - 20) < 3, "tailwind: \(tail)")
+    }
+}

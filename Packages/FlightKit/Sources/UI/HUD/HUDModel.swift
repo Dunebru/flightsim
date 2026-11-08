@@ -89,6 +89,13 @@ final class HUDModel {
     var angleOfAttack = 0.0
     var n1 = 0.0
     var stallWarning = false
+    /// Wind at the aircraft: from (degrees true), speed and gust (knots), and the direction it
+    /// blows relative to the nose (degrees, for the HUD arrow).
+    var windFrom = 0
+    var windKnots = 0
+    var windGust: Int?
+    var windRelative = 0.0
+    var weatherSource = "Clear skies"
 
     // MARK: Pilot inputs from on-screen controls
 

@@ -4,6 +4,10 @@ What is done, what is a placeholder, and what is next. Honest status only: anyth
 
 Last updated: 2026-11-07.
 
+## M7 Weather: started (2026-11-07)
+
+Live weather from the departure airport's METAR (aviationweather.gov), parsed in the app (tested against live, thunderstorm, fractional-visibility and ICAO-format reports). The flight model gets the wind (growing with the 1/7 power law to 2,000 ft; winds aloft not used yet), smooth gusts between the steady and gust speeds, MIL-spec turbulence when gusty, the temperature offset from standard and the sea-level pressure (tested: a 20 kt headwind takes 20 kt off the groundspeed). The HUD shows the wind with an arrow relative to the nose; Free Flight shows the current METAR and a Live weather switch. Not yet: clouds, reduced visibility and haze, precipitation, winds aloft.
+
 ## Current milestone: M5 Airports, KPHX and KLAX only (in progress)
 
 Scope set by you on 2026-11-07: KPHX and KLAX, made as good as possible, before any other airport.
@@ -109,7 +113,8 @@ Build warnings: 1, the deprecated `UIRequiresFullScreen`, kept on purpose (see K
 | UI | **Working.** Apple-style HUD with live data, free-flight setup, persisted settings, five cameras, tilt, stick and controller input. |
 | Tools (`flight-tools`) | **Partial.** `terrain-bake` works (DEM, AWS terrain tiles, Sentinel-2 and USGS imagery with colour matching); `nav-import`, `airport-import` and `asset-cook` say "not implemented" and name their milestone. |
 | Airports | **Working (KPHX, KLAX).** Cooked layouts, airport surface, generated runways, markings, taxiways, aprons, buildings, lights and signs, start positions. |
-| Weather, Nav, Autopilot, Traffic, ATC | **Placeholders.** Module identity only (M7 to M9). |
+| Weather | **Partial.** METAR parsing and live fetch, wind, gusts, turbulence, temperature and pressure into the flight model. No clouds yet. |
+| Nav, Autopilot, Traffic, ATC | **Placeholders.** Module identity only (M8, M9). |
 
 ## Placeholders in the app today
 

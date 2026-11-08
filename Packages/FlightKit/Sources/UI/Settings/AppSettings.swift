@@ -25,6 +25,8 @@ public final class AppSettings {
     public var invertPitch = false { didSet { save() } }
     public var upscaler = "temporal" { didSet { save() } }
     public var showStats = false { didSet { save() } }
+    /// Live weather from the departure airport's METAR; off is clear and calm.
+    public var liveWeather = true { didSet { save() } }
 
     private let defaults: UserDefaults
     private var loading = false
@@ -40,6 +42,7 @@ public final class AppSettings {
         var invertPitch: Bool
         var upscaler: String
         var showStats: Bool
+        var liveWeather: Bool?
     }
 
     public init(defaults: UserDefaults = .standard) {
@@ -55,6 +58,7 @@ public final class AppSettings {
             invertPitch = s.invertPitch
             upscaler = s.upscaler
             showStats = s.showStats
+            liveWeather = s.liveWeather ?? true
         }
         // `-FlightAircraft A320` (scripts and screenshots): fly that aircraft this launch.
         if let forced = defaults.string(forKey: "FlightAircraft"), !forced.isEmpty { aircraftID = forced }
@@ -69,7 +73,8 @@ public final class AppSettings {
     private func save() {
         guard !loading else { return }
         let s = Stored(aircraftID: aircraftID, airport: airport, spot: spot, fixedUTCHour: fixedUTCHour, controlMode: controlMode,
-                       sensitivity: sensitivity, invertPitch: invertPitch, upscaler: upscaler, showStats: showStats)
+                       sensitivity: sensitivity, invertPitch: invertPitch, upscaler: upscaler, showStats: showStats,
+                       liveWeather: liveWeather)
         if let data = try? JSONEncoder().encode(s) { defaults.set(data, forKey: Self.key) }
     }
 

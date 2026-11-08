@@ -1,4 +1,5 @@
 import FlightModel
+import Weather
 import Renderer
 public import SwiftUI
 import Foundation
@@ -89,7 +90,10 @@ public struct FlightHUDView: View {
                                 .transition(.move(edge: .top).combined(with: .opacity))
                         }
                         if model.openPanel == nil {
-                            demoTag
+                            HStack(spacing: 8) {
+                                demoTag
+                                windTag
+                            }
                             #if os(iOS)
                             if engine.showStats { FrameStatsOverlay(engine: engine) }
                             #endif
@@ -188,6 +192,13 @@ public struct FlightHUDView: View {
             s.tick(dt: dt, hud: hud, scene: &scene, holdForScenery: engine?.loadingScenery ?? false)
         }
         engine.physicsProbe = { s.physics?.state }
+        // Live weather: the departure airport's METAR, when it can be fetched.
+        if settings.liveWeather {
+            let icao = settings.airport
+            Task { @MainActor in
+                if let m = await WeatherService.shared.metar(icao) { s.weather = WeatherConditions(metar: m) }
+            }
+        }
     }
 
     private func switchAircraft(to profile: AircraftProfile) {
@@ -348,6 +359,27 @@ public struct FlightHUDView: View {
         #else
         false
         #endif
+    }
+
+    /// Wind at the aircraft: an arrow for where it blows relative to the nose, then the
+    /// direction it comes from and its speed, as a METAR would give it.
+    private var windTag: some View {
+        HStack(spacing: 5) {
+            if model.windKnots > 0 {
+                Image(systemName: "location.north.fill")
+                    .font(.system(size: 10, weight: .bold))
+                    .rotationEffect(.degrees(model.windRelative))
+                Text(String(format: "%03d°/%d", model.windFrom, model.windKnots) + (model.windGust.map { "G\($0)" } ?? "") + " kt")
+            } else {
+                Text("Calm")
+            }
+        }
+        .font(.system(size: 11, weight: .semibold).monospacedDigit())
+        .foregroundStyle(.white)
+        .padding(.horizontal, 10)
+        .frame(height: 22)
+        .glassEffect(HUDStyle.glass, in: .capsule)
+        .accessibilityLabel(model.windKnots > 0 ? "Wind \(model.windFrom) degrees at \(model.windKnots) knots" : "Wind calm")
     }
 
     private var demoTag: some View {

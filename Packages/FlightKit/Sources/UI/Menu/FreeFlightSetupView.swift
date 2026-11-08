@@ -1,10 +1,13 @@
 import Airports
 import FlightModel
 public import SwiftUI
+import Weather
 
 /// Free flight setup: aircraft, start position, time of day, weather. Choices persist.
 public struct FreeFlightSetupView: View {
     @Bindable var settings: AppSettings
+    @State private var metar: Metar?
+    @State private var metarFailed = false
     let onStart: () -> Void
     let onBack: () -> Void
 
@@ -144,12 +147,33 @@ public struct FreeFlightSetupView: View {
                             }
                         }
                         section("Weather") {
-                            Label("Clear, no wind", systemImage: "sun.max.fill")
-                                .font(.system(size: 15, weight: .medium))
-                                .foregroundStyle(.white)
-                            Text("Live METAR weather, clouds and wind arrive in M7.")
-                                .font(.system(size: 12))
-                                .foregroundStyle(HUDStyle.secondaryText)
+                            Toggle("Live weather", isOn: $settings.liveWeather)
+                                .tint(HUDStyle.engaged)
+                            if settings.liveWeather {
+                                if let metar {
+                                    Text(metar.raw.components(separatedBy: " RMK").first ?? metar.raw)
+                                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                                        .foregroundStyle(.white)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                    Text("Wind, gusts, temperature and pressure fly with you. Clouds and visibility are not drawn yet.")
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(HUDStyle.secondaryText)
+                                } else {
+                                    Text(metarFailed ? "No report reachable: the flight will be clear and calm." : "Fetching the latest report...")
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(HUDStyle.secondaryText)
+                                }
+                            } else {
+                                Label("Clear and calm", systemImage: "sun.max.fill")
+                                    .font(.system(size: 15, weight: .medium))
+                                    .foregroundStyle(.white)
+                            }
+                        }
+                        .task(id: settings.airport) {
+                            metar = nil
+                            metarFailed = false
+                            metar = await WeatherService.shared.metar(settings.airport)
+                            metarFailed = metar == nil
                         }
                     }
                     .padding(20)
