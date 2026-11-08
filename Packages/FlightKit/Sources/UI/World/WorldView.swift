@@ -192,7 +192,7 @@ final class WorldEngine: NSObject {
     /// state still nominal), so the internal resolution steps down while the GPU frame runs
     /// long and back up when there is room. Changes are at least 3 s apart: each one rebuilds
     /// the render targets and restarts the upscaler's history.
-    static let maxRenderScale = 0.8, minRenderScale = 0.5
+    static let maxRenderScale = 0.8, minRenderScale = 0.7
     @ObservationIgnored private var lastScaleChange = 0.0
 
     private func adjustResolution(_ renderer: SceneRenderer) {
@@ -202,8 +202,10 @@ final class WorldEngine: NSObject {
         let gpu = renderer.stats.gpuFrameMilliseconds
         let scale = renderer.settings.renderScale
         var next = scale
-        if gpu > 13.5 { next = max(Self.minRenderScale, scale - 0.1) }
-        else if gpu < 9 { next = min(Self.maxRenderScale, scale + 0.05) }
+        // Late and shallow: lower resolution barely shortens a geometry-bound frame (measured)
+        // but blurs every one, so it steps down only when frames are about to be missed.
+        if gpu > 15.5 { next = max(Self.minRenderScale, scale - 0.05) }
+        else if gpu < 12 { next = min(Self.maxRenderScale, scale + 0.05) }
         guard abs(next - scale) > 0.001 else { return }
         renderer.settings.renderScale = next
         lastScaleChange = now

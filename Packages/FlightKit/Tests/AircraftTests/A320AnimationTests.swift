@@ -115,6 +115,7 @@ struct A320FlightDeckTests {
         #expect(parts.contains("windshield"))
         let screens = parts.filter { $0.hasPrefix("display:") }
         print("screens: \(screens.sorted())")
-        #expect(screens == ["display:pfd1", "display:pfd2", "display:nd1", "display:nd2", "display:ewd", "display:sd"])
+        #expect(Set(screens) == ["display:pfd1", "display:pfd2", "display:nd1", "display:nd2", "display:ewd", "display:sd",
+                                 "display:mcdu", "display:dcdu", "display:isis", "display:clock", "display:atc", "display:batt1", "display:batt2"])
     }
 }

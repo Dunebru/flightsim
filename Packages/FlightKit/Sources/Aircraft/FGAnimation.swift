@@ -303,6 +303,8 @@ public struct AnimatedModel: Sendable {
             let base = placement != matrix_identity_double4x4 ? "anim:\(name)|" : ""
             let hidden = hiddenObjects
             var parsed = try AC3DParser.parse(text, objectPart: { object, parent in
+                // A screen the sim draws is shown whatever the panel's power switches would say.
+                if let own = special(object), own.hasPrefix("display:") { return own }
                 if hidden.contains(object) || hiddenBySelect.contains(object) { return "hidden" }
                 if let own = special(object) { return own }
                 guard animated.contains(object) else { return "" }

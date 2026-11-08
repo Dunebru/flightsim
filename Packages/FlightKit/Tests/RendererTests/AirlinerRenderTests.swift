@@ -73,7 +73,9 @@ struct AirlinerRenderTests {
         print("gate \(ref): stop point \(placement.position), heading \(placement.heading)")
         // The screens, from the pages the display test draws (when it has run).
         let renders = RendererTests.repoRoot.appendingPathComponent("artifacts/renders")
-        for (screen, page) in [("pfd1", "pfd"), ("pfd2", "pfd"), ("nd1", "nd"), ("nd2", "nd"), ("ewd", "ewd"), ("sd", "sd")] {
+        for (screen, page) in [("pfd1", "pfd"), ("pfd2", "pfd"), ("nd1", "nd"), ("nd2", "nd"), ("ewd", "ewd"), ("sd", "sd"),
+                               ("mcdu", "mcdu"), ("dcdu", "dcdu"), ("isis", "isis"), ("clock", "clock"), ("atc", "atc"),
+                               ("batt1", "batt"), ("batt2", "batt")] {
             guard let src = CGImageSourceCreateWithURL(renders.appendingPathComponent("display-\(page).png") as CFURL, nil),
                   let img = CGImageSourceCreateImageAtIndex(src, 0, nil) else { continue }
             let n = img.width
@@ -93,6 +95,10 @@ struct AirlinerRenderTests {
                                             forward: simd_normalize(left * 9 - fwd * 1 - SIMD3(0, 0, 0.3)), up: SIMD3(0, 0, 1), fovY: 40 * .pi / 180)),
             ("a320-flightdeck", CameraPose(position: p + fwd * 14.7 + left * 0.53 + SIMD3(0, 0, 5.0),
                                            forward: simd_normalize(fwd - SIMD3(0, 0, 0.2)), up: SIMD3(0, 0, 1), fovY: 68 * .pi / 180)),
+            ("a320-pedestal", CameraPose(position: p + fwd * 14.7 + left * 0.53 + SIMD3(0, 0, 4.85),
+                                         forward: simd_normalize(fwd * 0.55 - left * 0.45 - SIMD3(0, 0, 0.7)), up: SIMD3(0, 0, 1), fovY: 60 * .pi / 180)),
+            ("a320-centre-panel", CameraPose(position: p + fwd * 14.75 + left * 0.25 + SIMD3(0, 0, 4.85),
+                                             forward: simd_normalize(fwd - left * 0.25 - SIMD3(0, 0, 0.45)), up: SIMD3(0, 0, 1), fovY: 45 * .pi / 180)),
             ("a320-gate-nose", CameraPose(position: p + left * 14 + fwd * 6 + SIMD3(0, 0, 4),
                                           forward: simd_normalize(-left * 14 + fwd * 8 - SIMD3(0, 0, 0.5)), up: SIMD3(0, 0, 1), fovY: 55 * .pi / 180)),
         ]

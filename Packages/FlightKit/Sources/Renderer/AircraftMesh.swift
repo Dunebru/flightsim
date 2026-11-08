@@ -9,7 +9,10 @@ import simd
 final class AircraftMesh {
     struct Part {
         let vertices: any MTLBuffer
+        /// Triangle corners: the index count when `indices` is set (shared vertices), else the
+        /// vertex count.
         let vertexCount: Int
+        var indices: (any MTLBuffer)? = nil
         let texture: (any MTLTexture)?
         var draw: DrawUniforms
         let isGlass: Bool
@@ -30,6 +33,9 @@ final class AircraftMesh {
         var isWindshield = false
         /// A display screen ("pfd1"): drawn with its live image, self-lit.
         var display = ""
+        /// Bounding sphere in the model's own frame, for culling parts out of view.
+        var centre = SIMD3<Float>.zero
+        var radius: Float = 0
     }
 
     /// Animations for the parts that move (the cockpit's needles, yoke and pedals).
@@ -114,17 +120,67 @@ final class AircraftMesh {
             return t
         }
 
-        for group in model.groups where !group.positions.isEmpty && !hiddenParts.contains(group.part) {
+        // Large fixed groups (merged by texture across the whole airframe or flight deck) are
+        // cut into 2 m cells, so parts out of view can be skipped.
+        var groups: [AC3DModel.Group] = []
+        for g in model.groups where !g.positions.isEmpty && !hiddenParts.contains(g.part) {
+            guard g.positions.count > 6_000, !g.part.hasPrefix("anim:"), !g.part.hasPrefix("display:") else { groups.append(g); continue }
+            var cells: [SIMD3<Int32>: AC3DModel.Group] = [:]
+            for t in stride(from: 0, to: g.positions.count - 2, by: 3) {
+                let c = (g.positions[t] + g.positions[t + 1] + g.positions[t + 2]) / 3
+                let key = SIMD3<Int32>((c / 2).rounded(.down))
+                var cell = cells[key] ?? { var e = g; e.positions = []; e.normals = []; e.uvs = []; return e }()
+                cell.positions += g.positions[t..<(t + 3)]
+                cell.normals += g.normals[t..<(t + 3)]
+                cell.uvs += g.uvs[t..<(t + 3)]
+                cells[key] = cell
+            }
+            groups += cells.values
+        }
+        for group in groups {
+            let lo = group.positions.reduce(SIMD3<Float>(repeating: .infinity)) { simd_min($0, $1) }
+            let hi = group.positions.reduce(SIMD3<Float>(repeating: -.infinity)) { simd_max($0, $1) }
+            // A screen carved from a shared texture sheet: its UVs are stretched to the whole
+            // image the sim draws; one with no UVs gets them from its two longest extents.
+            var uvs = group.uvs
+            if group.part.hasPrefix("display:") {
+                let ulo = uvs.reduce(SIMD2<Float>(repeating: .infinity)) { simd_min($0, $1) }
+                let uhi = uvs.reduce(SIMD2<Float>(repeating: -.infinity)) { simd_max($0, $1) }
+                if uhi.x - ulo.x > 1e-4, uhi.y - ulo.y > 1e-4 {
+                    uvs = uvs.map { ($0 - ulo) / (uhi - ulo) }
+                } else {
+                    let ext = hi - lo
+                    let axes = [0, 1, 2].sorted { ext[$0] > ext[$1] }
+                    // In AC3D's frame: x aft, y up, z left. Across the screen is the longer
+                    // horizontal extent; up the screen is y unless the screen lies flat.
+                    let uAxis = axes[0] == 1 ? axes[1] : axes[0], vAxis = axes.first { $0 != uAxis }!
+                    uvs = group.positions.map { p in
+                        let u = (p[uAxis] - lo[uAxis]) / max(ext[uAxis], 1e-6), v = (p[vAxis] - lo[vAxis]) / max(ext[vAxis], 1e-6)
+                        return SIMD2(uAxis == 2 ? 1 - u : u, v)
+                    }
+                }
+            }
+            // Shared vertices: AC3D triangles repeat every corner, which tripled the vertex work
+            // (the phone's scene pass was limited by geometry, not pixels).
+            struct Key: Hashable { let p: SIMD3<Float>, n: SIMD3<Float>, t: SIMD2<Float> }
             var verts: [MeshVertex] = []
-            verts.reserveCapacity(group.positions.count)
+            var lookup: [Key: UInt32] = [:]
+            var indexList: [UInt32] = []
+            indexList.reserveCapacity(group.positions.count)
             for i in 0..<group.positions.count {
                 // AC3D texture v runs bottom-up; Metal samples top-down.
-                let uv = group.uvs[i]
-                verts.append(MeshVertex(position: SIMD4(group.positions[i], 1), normal: SIMD4(group.normals[i], 0),
-                                        uv: SIMD2(uv.x, 1 - uv.y)))
+                let uv = SIMD2(uvs[i].x, 1 - uvs[i].y)
+                let key = Key(p: group.positions[i], n: group.normals[i], t: uv)
+                if let k = lookup[key] { indexList.append(k); continue }
+                let k = UInt32(verts.count)
+                lookup[key] = k
+                indexList.append(k)
+                verts.append(MeshVertex(position: SIMD4(group.positions[i], 1), normal: SIMD4(group.normals[i], 0), uv: uv))
             }
             guard let buffer = device.makeBuffer(bytes: verts, length: MemoryLayout<MeshVertex>.stride * verts.count,
-                                                 options: .storageModeShared) else { continue }
+                                                 options: .storageModeShared),
+                  let indexBuffer = device.makeBuffer(bytes: indexList, length: 4 * indexList.count, options: .storageModeShared)
+            else { continue }
             let material = group.materialIndex < model.materials.count
                 ? model.materials[group.materialIndex]
                 : AC3DModel.Material(name: "", diffuse: SIMD3(0.8, 0.8, 0.8), emissive: .zero, specular: .zero, shininess: 16, transparency: 0)
@@ -141,7 +197,7 @@ final class AircraftMesh {
             draw.baseColor = SIMD4(tint, isGlass ? max(0.15, 1 - material.transparency) : 1)
             if group.part == "windshield" {
                 // Untextured, lightly tinted: the painted window frames stay on the airframe.
-                draw.baseColor = SIMD4(0.55, 0.6, 0.62, 0.18)
+                draw.baseColor = SIMD4(0.25, 0.28, 0.3, 0.05)
             }
             // Paint, not chrome: FlightGear's high shininess values (its effects add their own
             // reflection maps) made the airframe mirror the sky in blotches.
@@ -160,11 +216,12 @@ final class AircraftMesh {
             // FlightGear's panels carry emission for their lighting effects; a little of it
             // reads as backlit labels, all of it as a white wash.
             draw.emissive = SIMD4(material.emissive * 0.08, inside ? 0.3 : 0)
-            parts.append(Part(vertices: buffer, vertexCount: verts.count, texture: tex, draw: draw, isGlass: isGlass,
+            parts.append(Part(vertices: buffer, vertexCount: indexList.count, indices: indexBuffer, texture: tex, draw: draw, isGlass: isGlass,
                               isGear: group.part == "gear", variant: group.part.hasPrefix("prop-") ? group.part : "",
                               animated: group.part.hasPrefix("anim:") ? group.part : "", twoSided: group.twoSided || !cullsBackFaces, interior: inside,
                               isWindshield: group.part == "windshield",
-                              display: group.part.hasPrefix("display:") ? String(group.part.dropFirst(8)) : ""))
+                              display: group.part.hasPrefix("display:") ? String(group.part.dropFirst(8)) : "",
+                              centre: (lo + hi) / 2, radius: simd_length(hi - lo) / 2))
         }
     }
 }

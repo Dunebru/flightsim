@@ -751,7 +751,11 @@ public final class SceneRenderer {
                     d.model = aircraftModel * (partTransforms[part.animated] ?? matrix_identity_float4x4)
                     e.setVertexBuffer(part.vertices, offset: 0, index: 0)
                     e.setVertexBytes(&d, length: MemoryLayout<DrawUniforms>.stride, index: 2)
-                    e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: part.vertexCount)
+                    if let indices = part.indices {
+                        e.drawIndexedPrimitives(type: .triangle, indexCount: part.vertexCount, indexType: .uint32, indexBuffer: indices, indexBufferOffset: 0)
+                    } else {
+                        e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: part.vertexCount)
+                    }
                 }
                 e.endEncoding()
             }
@@ -790,13 +794,18 @@ public final class SceneRenderer {
             e.setDepthStencilState(depthWrite)
             e.setCullMode(.none)
 
-            func draw(_ buffer: any MTLBuffer, count: Int, _ d: DrawUniforms, texture: (any MTLTexture)?) {
+            func draw(_ buffer: any MTLBuffer, count: Int, _ d: DrawUniforms, texture: (any MTLTexture)?,
+                      indices: (any MTLBuffer)? = nil) {
                 var d = d
                 e.setVertexBuffer(buffer, offset: 0, index: 0)
                 e.setVertexBytes(&d, length: MemoryLayout<DrawUniforms>.stride, index: 2)
                 e.setFragmentBytes(&d, length: MemoryLayout<DrawUniforms>.stride, index: 2)
                 e.setFragmentTexture(texture ?? dummyTexture, index: 0)
-                e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: count)
+                if let indices {
+                    e.drawIndexedPrimitives(type: .triangle, indexCount: count, indexType: .uint32, indexBuffer: indices, indexBufferOffset: 0)
+                } else {
+                    e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: count)
+                }
             }
             if scene.showGround {
                 if settings.fallbackGround || terrain == nil {
@@ -988,13 +997,17 @@ public final class SceneRenderer {
                         d.emissive = SIMD4(displayBrightness, displayBrightness, displayBrightness, 0.3)
                     }
                     let pt = part.animated.isEmpty ? matrix_identity_float4x4 : (partTransforms[part.animated] ?? matrix_identity_float4x4)
+                    // Parts out of view are skipped (from the flight deck, most of the airframe
+                    // and the deck behind the pilot).
+                    let c4 = aircraftModel * pt * SIMD4(part.centre, 1)
+                    if !MatrixMath.sphereVisible(centre: SIMD3(c4.x, c4.y, c4.z), radius: part.radius, planes: frustum) { continue }
                     d.model = aircraftModel * pt
                     // Last frame's pose of the part, so moving parts get true motion vectors.
                     d.prevModel = aircraftPrev * (part.animated.isEmpty ? pt : (previousPartTransforms[part.animated] ?? pt))
                     e.setCullMode(part.twoSided || !part.display.isEmpty ? .none : .front)   // AC3D fronts wind counter-clockwise; Metal's default front is clockwise
                     // Screens lie flush with the panel's own dark glass: pulled toward the eye.
                     if !part.display.isEmpty { e.setDepthBias(8, slopeScale: 4, clamp: 0) }   // reverse Z: larger is nearer
-                    draw(part.vertices, count: part.vertexCount, d, texture: texture)
+                    draw(part.vertices, count: part.vertexCount, d, texture: texture, indices: part.indices)
                     if !part.display.isEmpty { e.setDepthBias(0, slopeScale: 0, clamp: 0) }
                 }
                 e.setCullMode(.none)
@@ -1074,7 +1087,7 @@ public final class SceneRenderer {
                     // Last frame's pose of the part, so moving parts get true motion vectors.
                     d.prevModel = aircraftPrev * (part.animated.isEmpty ? pt : (previousPartTransforms[part.animated] ?? pt))
                     e.setCullMode(part.twoSided ? .none : .front)   // AC3D fronts wind counter-clockwise; Metal's default front is clockwise
-                    draw(part.vertices, count: part.vertexCount, d, texture: part.texture)
+                    draw(part.vertices, count: part.vertexCount, d, texture: part.texture, indices: part.indices)
                 }
                 e.setCullMode(.none)
             }

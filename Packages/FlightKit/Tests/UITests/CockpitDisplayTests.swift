@@ -15,7 +15,7 @@ struct CockpitDisplayTests {
         d.gearDown = 0; d.onGround = false; d.windFrom = 260; d.windKnots = 12; d.selectedAltitude = 7_000
         d.fma = ["SPEED", "CLB", "HDG", "", "AP1"]
         let dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../../../artifacts/renders").standardized
-        for page in ["pfd", "nd", "ewd", "sd"] {
+        for page in ["pfd", "nd", "ewd", "sd", "mcdu", "dcdu", "isis", "clock", "atc", "batt"] {
             let px = CockpitDisplays.draw(page, d)
             let n = CockpitDisplays.size
             #expect(px.count == n * n * 4)

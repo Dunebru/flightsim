@@ -98,7 +98,9 @@ final class FlightSession {
         let latest = displayBox.pages.withLock { $0 }
         if latest.version > 0 {
             let size = CockpitDisplays.size
-            for (screen, page) in [("pfd1", "pfd"), ("pfd2", "pfd"), ("nd1", "nd"), ("nd2", "nd"), ("ewd", "ewd"), ("sd", "sd")] {
+            for (screen, page) in [("pfd1", "pfd"), ("pfd2", "pfd"), ("nd1", "nd"), ("nd2", "nd"), ("ewd", "ewd"), ("sd", "sd"),
+                                   ("mcdu", "mcdu"), ("dcdu", "dcdu"), ("isis", "isis"), ("clock", "clock"), ("atc", "atc"),
+                                   ("batt1", "batt"), ("batt2", "batt")] {
                 if let px = latest.images[page], scene.displays[screen]?.version != latest.version {
                     scene.displays[screen] = DisplayImage(pixels: px, size: size, version: latest.version)
                 }
@@ -129,7 +131,9 @@ final class FlightSession {
         let box = displayBox
         DispatchQueue.global(qos: .userInitiated).async {
             var images: [String: [UInt8]] = [:]
-            for page in ["pfd", "nd", "ewd", "sd"] { images[page] = CockpitDisplays.draw(page, d) }
+            for page in ["pfd", "nd", "ewd", "sd", "mcdu", "dcdu", "isis", "clock", "atc", "batt"] {
+                images[page] = CockpitDisplays.draw(page, d)
+            }
             box.pages.withLock { $0 = (images, $0.version + 1, false) }
         }
     }

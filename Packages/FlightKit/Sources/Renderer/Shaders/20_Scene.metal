@@ -799,8 +799,10 @@ fragment float4 glassFragment(VertexOut in [[stage_in]],
     color = applyAerialPerspective(color, in.worldPos, in.position, u, aerial, light);
     // Glass reflects more at grazing angles.
     float3 V = normalize(-in.worldPos);
+    // Laminated cockpit glass is coated: its grazing-angle sheen is a fraction of bare glass's,
+    // or a raked windscreen veils the whole view.
     float fresnel = 0.04 + 0.96 * pow(1.0 - saturate(abs(dot(N, V))), 5.0);
-    float a = saturate(max(alpha, fresnel));
+    float a = saturate(max(alpha, fresnel * 0.3));
     return float4(color * a, a);
 }
 

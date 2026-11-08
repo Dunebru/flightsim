@@ -33,6 +33,10 @@ inline float3 agxTonemap(float3 linearColor) {
     v = clamp(log2(v), minEV, maxEV);
     v = (v - minEV) / (maxEV - minEV);
     v = agxContrast(v);
+    // A "punchy" look (as Blender's AgX offers): the base curve alone reads flat and hazy.
+    v = pow(max(v, float3(0.0)), float3(1.12));
+    float luma = dot(v, float3(0.2126, 0.7152, 0.0722));
+    v = luma + 1.25 * (v - luma);
     v = outset * v;
     // The curve's output is display-encoded (roughly sRGB gamma); keep it encoded.
     return saturate(v);
@@ -50,5 +54,17 @@ fragment float4 tonemapFragment(FullscreenOut in [[stage_in]],
 /// Copies the (possibly lower-resolution) display-encoded image to the drawable. When no
 /// MetalFX scaler ran, the linear sampler does the upscale.
 fragment float4 finalFragment(FullscreenOut in [[stage_in]], texture2d<float> source [[texture(0)]]) {
-    return float4(source.sample(kLinearClamp, in.uv).rgb, 1.0);
+    // Contrast-adaptive sharpening (after AMD's CAS): restores the edge crispness upscaling
+    // and temporal anti-aliasing soften, less where the neighbourhood already has contrast.
+    float2 texel = 1.0 / float2(source.get_width(), source.get_height());
+    float3 c = source.sample(kLinearClamp, in.uv).rgb;
+    float3 n = source.sample(kLinearClamp, in.uv + float2(0, -texel.y)).rgb;
+    float3 sth = source.sample(kLinearClamp, in.uv + float2(0, texel.y)).rgb;
+    float3 w = source.sample(kLinearClamp, in.uv + float2(-texel.x, 0)).rgb;
+    float3 e = source.sample(kLinearClamp, in.uv + float2(texel.x, 0)).rgb;
+    float3 mn = min(c, min(min(n, sth), min(w, e))), mx = max(c, max(max(n, sth), max(w, e)));
+    float3 amp = sqrt(saturate(min(mn, 1.0 - mx) / max(mx, 1e-4)));
+    float3 wgt = -amp * 0.16;
+    float3 sharp = (c + (n + sth + w + e) * wgt) / (1.0 + 4.0 * wgt);
+    return float4(saturate(sharp), 1.0);
 }

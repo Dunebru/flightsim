@@ -35,6 +35,12 @@ nonisolated enum CockpitDisplays {
             case "pfd": pfd(ctx, d)
             case "nd": nd(ctx, d)
             case "ewd": ewd(ctx, d)
+            case "mcdu": mcdu(ctx, d)
+            case "dcdu": dcdu(ctx, d)
+            case "isis": isis(ctx, d)
+            case "clock": clock(ctx)
+            case "atc": atc(ctx)
+            case "batt": batt(ctx)
             default: sd(ctx, d)
             }
         }
@@ -291,5 +297,67 @@ nonisolated enum CockpitDisplays {
         text(ctx, f.string(from: Date()), 500, 905, size: 36, colour: green, align: 0.5)
         text(ctx, "GW", 760, 905, size: 28)
         text(ctx, "64200", 830, 905, size: 30, colour: green)
+    }
+
+    // MARK: Small screens
+
+    /// The MCDU's flight plan page.
+    static func mcdu(_ ctx: CGContext, _ d: DisplayInputs) {
+        text(ctx, "FROM", 60, 90, size: 44)
+        text(ctx, "KPHX", 500, 90, size: 52, align: 0.5)
+        let rows: [(String, String, String)] = [("RW08", "  ---", "/1135"), ("C090°", " 0420", "/ 3500"),
+                                                ("BXK", " 0438", "/FL240"), ("(T/C)", " 0441", "/FL340"), ("-----", "", "")]
+        for (i, r) in rows.enumerated() {
+            let y = CGFloat(200 + i * 140)
+            text(ctx, r.0, 40, y, size: 56, colour: i == 0 ? white : green)
+            text(ctx, r.1, 420, y, size: 52, colour: green)
+            text(ctx, r.2, 960, y, size: 52, colour: green, align: 1)
+        }
+        text(ctx, "DEST   TIME  DIST  EFOB", 40, 900, size: 40)
+        text(ctx, "KLAX   0538   306   5.9", 40, 960, size: 44, colour: green)
+    }
+
+    static func dcdu(_ ctx: CGContext, _ d: DisplayInputs) {
+        text(ctx, "NO ACTIVE ATC", 500, 520, size: 80, colour: white, align: 0.5)
+    }
+
+    /// The integrated standby instrument: attitude with speed and altitude beside it.
+    static func isis(_ ctx: CGContext, _ d: DisplayInputs) {
+        let c = CGPoint(x: 500, y: 520)
+        ctx.saveGState()
+        ctx.addRect(CGRect(x: 180, y: 120, width: 640, height: 800))
+        ctx.clip()
+        ctx.translateBy(x: c.x, y: c.y)
+        ctx.rotate(by: CGFloat(-d.roll * .pi / 180))
+        let off = CGFloat(d.pitch) * 14
+        ctx.setFillColor(CGColor(red: 0.1, green: 0.45, blue: 0.9, alpha: 1))
+        ctx.fill(CGRect(x: -900, y: -1800 + off, width: 1800, height: 1800))
+        ctx.setFillColor(CGColor(red: 0.55, green: 0.33, blue: 0.12, alpha: 1))
+        ctx.fill(CGRect(x: -900, y: off, width: 1800, height: 1800))
+        line(ctx, CGPoint(x: -900, y: off), CGPoint(x: 900, y: off), white, 6)
+        ctx.restoreGState()
+        line(ctx, CGPoint(x: c.x - 200, y: c.y), CGPoint(x: c.x - 80, y: c.y), yellow, 14)
+        line(ctx, CGPoint(x: c.x + 80, y: c.y), CGPoint(x: c.x + 200, y: c.y), yellow, 14)
+        tape(ctx, CGRect(x: 0, y: 120, width: 170, height: 800), value: d.ias, step: 10, pxPerUnit: 8, label: { "\(Int($0))" }, every: 20)
+        tape(ctx, CGRect(x: 830, y: 120, width: 170, height: 800), value: d.altitude, step: 100, pxPerUnit: 0.7,
+             label: { "\(Int($0) / 100)" }, every: 500)
+        text(ctx, "\(Int(d.ias.rounded()))", 85, 80, size: 60, colour: white, align: 0.5)
+        text(ctx, "\(Int(d.altitude.rounded()))", 915, 80, size: 60, colour: green, align: 0.5)
+        text(ctx, "QNH 1013", 500, 985, size: 50, colour: cyan, align: 0.5)
+    }
+
+    static func clock(_ ctx: CGContext) {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm:ss"
+        f.timeZone = TimeZone(identifier: "UTC")
+        text(ctx, f.string(from: Date()), 500, 600, size: 190, colour: CGColor(red: 1, green: 0.8, blue: 0.2, alpha: 1), align: 0.5)
+    }
+
+    static func atc(_ ctx: CGContext) {
+        text(ctx, "2000", 500, 640, size: 330, colour: CGColor(red: 1, green: 0.62, blue: 0.1, alpha: 1), align: 0.5)
+    }
+
+    static func batt(_ ctx: CGContext) {
+        text(ctx, "28.1", 500, 680, size: 420, colour: CGColor(red: 1, green: 0.62, blue: 0.1, alpha: 1), align: 0.5)
     }
 }

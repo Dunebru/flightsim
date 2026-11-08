@@ -77,7 +77,11 @@ public enum A320Model {
             // The six screens (PFDs, NDs, E/WD, SD) are the sim's own drawn displays.
             let screens = ["pfd1.screen": "display:pfd1", "pfd2.screen": "display:pfd2", "ND.screen": "display:nd1",
                            "ND_R.screen": "display:nd2", "uecam.screen": "display:ewd", "lecam.screen": "display:sd",
-                           "uecam.screen2": "hidden"]
+                           "uecam.screen2": "hidden",
+                           "mcdu1.screen": "display:mcdu", "mcdu2.screen": "display:mcdu",
+                           "dcduScreenL": "display:dcdu", "dcduScreenR": "display:dcdu", "iesi_screen": "display:isis",
+                           "clock_display": "display:clock", "clock_display_illuminated": "hidden", "atc_screen": "display:atc",
+                           "batt_voltage.canvas.L": "display:batt1", "batt_voltage.canvas.R": "display:batt2"]
             try m.load(xml: "a320.flightdeck.xml", directory: directory, placement: deck,
                        excluding: ["IESI", "Effects/"], staticPart: "cabin", special: { screens[$0] },
                        animate: { Self.deckControls.contains($0.property) }, fixedSelects: true)
