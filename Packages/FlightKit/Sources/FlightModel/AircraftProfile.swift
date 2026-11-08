@@ -19,6 +19,12 @@ public struct AircraftProfile: Sendable, Hashable, Identifiable {
     /// Airborne starts on final: calibrated airspeed (knots) and flap lever detent.
     public let approachKnots: Double
     public let approachFlapIndex: Int
+    /// The JSBSim model's geometry (metres): how far the nose gear's contact point is ahead of
+    /// the centre of gravity (the point whose position the flight reports), and how high the
+    /// centre of gravity is above the main gear's contact points with the struts extended. The
+    /// drawn model is placed by these so its wheels are where the flight model's are.
+    public let noseWheelAheadOfCG: Double
+    public let cgAboveMainGear: Double
 
     public static let c172 = AircraftProfile(
         id: "c172p", name: "Cessna 172P",
@@ -26,7 +32,9 @@ public struct AircraftProfile: Sendable, Hashable, Identifiable {
         hasSpoilers: false, retractableGear: false, isTurbine: false, visualIsStandIn: false,
         fidelityNote: "JSBSim's reference C172P: the best-validated model in the JSBSim library.",
         stallWarningAlpha: 13,
-        approachKnots: 65, approachFlapIndex: 2
+        approachKnots: 65, approachFlapIndex: 2,
+        // c172p.xml: CG x 41 in, z 36.5; NOSE x -6.8; LEFT_MAIN z -15.5.
+        noseWheelAheadOfCG: (41 - -6.8) * 0.0254, cgAboveMainGear: (36.5 - -15.5) * 0.0254
     )
 
     /// The JSBSim library A320 is a generic 2002-era model: flaps 0 to 40 degrees and no slats,
@@ -37,7 +45,9 @@ public struct AircraftProfile: Sendable, Hashable, Identifiable {
         hasSpoilers: true, retractableGear: true, isTurbine: true, visualIsStandIn: false,
         fidelityNote: "Generic JSBSim A320, tuned (see TUNING.md): no slats, no fly-by-wire. Drawn with the FlightGear A320 model (GPL) in American colours; no cockpit panel yet.",
         stallWarningAlpha: 14,
-        approachKnots: 140, approachFlapIndex: 4
+        approachKnots: 140, approachFlapIndex: 4,
+        // A320.xml: CG x 672 in, z -40; NOSE_LG x 196.1; LEFT_MLG z -142.
+        noseWheelAheadOfCG: (672 - 196.1) * 0.0254, cgAboveMainGear: (-40 - -142) * 0.0254
     )
 
     public static let all: [AircraftProfile] = [.c172, .a320]

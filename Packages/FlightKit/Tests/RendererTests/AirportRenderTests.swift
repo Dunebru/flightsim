@@ -14,7 +14,7 @@ import simd
 struct AirportRenderTests {
     static let airportsURL = RendererTests.repoRoot.appendingPathComponent("Data/Bundle/Airports")
 
-    static func scene(_ site: AirportSite, aircraft: Bool) throws -> (SceneRenderer, SceneDescription) {
+    static func scene(_ site: AirportSite, aircraft: Bool, excludeStand: String? = nil) throws -> (SceneRenderer, SceneDescription) {
         let device = try #require(MTLCreateSystemDefaultDevice())
         var model: AC3DModel?
         if aircraft {
@@ -31,7 +31,7 @@ struct AirportRenderTests {
             var ground = GroundModel(scenery: packs, frame: s.frame, flatten: s.overrides)
             let city = CityGeometry.build(surroundings, site: s) { p in ground.groundZ(atENU: SIMD3(p.x, p.y, 0)) }
             return AirportAssets(site: s, geometry: AirportGeometry.build(s), lights: AirportLights.build(s), city: city)
-        }, sceneOrigin: site.frame.origin)
+        }, sceneOrigin: site.frame.origin, excludeStand: excludeStand)
         // Every airliner as the A320 model.
         let a320 = RendererTests.repoRoot.appendingPathComponent("Data/Bundle/Aircraft/A320")
         try r.setAirliners(try A320Model.load(from: a320), directory: a320)

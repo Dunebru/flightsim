@@ -4,7 +4,8 @@ import simd
 @testable import UI
 
 struct CameraRigTests {
-    /// Heading east, level: the cockpit camera looks east and sits forward of the airframe centre.
+    /// Heading east, level: the cockpit camera looks east from the C172's front seat, which is
+    /// a little behind the centre of gravity (the origin) and well behind the nose wheel (1.2 m ahead).
     @Test func cockpitLooksAlongTheNose() {
         var rig = CameraRig()
         rig.mode = .cockpit
@@ -13,7 +14,7 @@ struct CameraRigTests {
         var pose = rig.pose(aircraftPosition: .zero, heading: .pi / 2, pitch: 0, roll: 0, dt: 1)
         pose = rig.pose(aircraftPosition: .zero, heading: .pi / 2, pitch: 0, roll: 0, dt: 1)
         #expect(pose.forward.x > 0.99, "forward \(pose.forward)")
-        #expect(pose.position.x > 0.5, "eye should be forward of centre: \(pose.position)")
+        #expect(pose.position.x > -0.8 && pose.position.x < 0.4, "eye should sit by the centre of gravity: \(pose.position)")
         #expect(abs(pose.up.z - 1) < 1e-9)
     }
 

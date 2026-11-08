@@ -184,8 +184,36 @@ fetch_set "$A320_BASE/Liveries/CFM/2k" "$A320_RAW" \
   "DAL-engine.png b1d46b3c47e5aa1b34b6814151ceea87a4f1700e7f28da797158bc386440ccb5" \
   "SWR-engine.png aa416852b556c283d58f06f1abdbfeba79d7b7533f46f5f2c849f2345ed50640" \
   "CFM56-white.png aa416852b556c283d58f06f1abdbfeba79d7b7533f46f5f2c849f2345ed50640"
+# Their animation files: gear retraction and doors, strut compression, wheel and fan spin,
+# flight controls, spoilers, slats, flaps, reversers.
+fetch_set "$A320_BASE/Fuselage" "$A320_RAW" \
+  "fuselage.xml 718a74bbf84d444dd86beed3a8427be2e451ad2246eb50cfaa928e80338b5a6d" \
+  "a320.cfm.xml 6a23afce46658c418892e9926ffd97b72cbc0960b97b16424bc3a755cf8f3436"
+# CFM56 recordings from the same A320 repository (Sounds/SASA/CFM56B, GPL-2.0): outside and
+# flight-deck sets. The app gets mono 16-bit copies named ext-* and ckpt-*.
+fetch_set "https://raw.githubusercontent.com/legoboyvdlp/A320-family/$A320_COMMIT/Sounds/SASA/CFM56B" "$A320_RAW/sounds" \
+  "cockpit/cfm-buzz.wav 3916c4cb562a1f79965e5f3280170390dc9640ebfd1a992bafdac57ec2e43a82" \
+  "cockpit/cfm-comb.wav 1356a4a94cb152347e1a0f0029535f3ca90452e3f441b963b3bc0e45cefcca7c" \
+  "cockpit/cfm-hum.wav ecb41f5384713c1f699e699a95917d3e5bec349b36c828b5614360323acdf560" \
+  "cockpit/cfm-idle.wav 0db5e1ac4634ce044adb1cd5129f5eed636db3d348182d563d180930d5ff7595" \
+  "cockpit/cfm-lowspool.wav f8289c7f87a81d1253f769bc921bdeb96def38320359673980d93ec73c38a259" \
+  "cockpit/cfm-reverse.wav 91e020aedc6023a38f78b01e2001eaae85726c23143b815235110653b5db6d84" \
+  "cockpit/cfm-spool.wav 2e2aeb5da9b38f458ab65752fd3de1979b60f46449c101fb7ffbb1806648f826" \
+  "external/cfm-buzz.wav 64b7cc3b1fe904865a02a9f5fe4f9cc05dc9e21dc480607be81c5d25b369e5dc" \
+  "external/cfm-idle.wav c095fa853fd76bf45a6aa1726faf978870d337abff68480c77a851a89f3e9427" \
+  "external/cfm-idleClose.wav d55f3f8868ba3ae2a8eba32d18e70d59df4ebe897444614d3a61fa1e8afb1707" \
+  "external/cfm-lowspool.wav 9eaa736a3b9fa0d910cac1b7114cab257ed11c1560ed94ddf4e0d72aa5dfa18a" \
+  "external/cfm-reverse.wav 0d3228728f5d3f638575568ef4745bb0d32e816905cbf5d03a693365ce8fb1ed" \
+  "external/cfm-rumble.wav 2859ed2b8a9efc023f7c2b6c088fe22d549d81e02b501985ffe8ad4df20ccc87" \
+  "external/cfm-spool.wav 5907c059ff9eecae2567c8d9fa87cb3b9e956f393b6fcb44d06aeb4f519e7124"
+SOUND_DIR="$ROOT/Data/Bundle/Sounds/CFM56"
+mkdir -p "$SOUND_DIR"
+for f in "$A320_RAW"/sounds/external/*.wav "$A320_RAW"/sounds/cockpit/*.wav; do
+  case "$f" in */external/*) out="$SOUND_DIR/ext-$(basename "$f" .wav).caf" ;; *) out="$SOUND_DIR/ckpt-$(basename "$f" .wav).caf" ;; esac
+  if [ ! -f "$out" ] || [ "$f" -nt "$out" ]; then afconvert -f caff -d LEI16@32000 -c 1 "$f" "$out"; fi
+done
 mkdir -p "$A320_DIR"
-for f in A320-216.ac CFM56.ac; do
+for f in A320-216.ac CFM56.ac fuselage.xml a320.cfm.xml; do
   cmp -s "$A320_RAW/$f" "$A320_DIR/$f" || cp "$A320_RAW/$f" "$A320_DIR/$f"
 done
 # Fuselage sheets at 2048 px (the player's aircraft); everything else, and the parked and moving

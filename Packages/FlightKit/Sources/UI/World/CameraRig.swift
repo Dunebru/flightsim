@@ -25,25 +25,25 @@ nonisolated struct CameraRig {
     var hasCockpit = true
 
     /// Pilot eye and wing-camera positions in the body frame (x forward, y left, z up, metres,
-    /// origin on the ground under the airframe centre). Set for the C172 test model.
-    var eyeOffset = SIMD3<Double>(1.62, 0.21, 1.6)
-    var wingOffset = SIMD3<Double>(0.1, 5.4, 2.15)
+    /// origin on the extended-gear ground plane under the flight model's centre of gravity).
+    var eyeOffset = SIMD3<Double>(-0.26, 0.21, 1.6)
+    var wingOffset = SIMD3<Double>(-1.78, 5.4, 2.15)
     var wingLook = SIMD3<Double>(1.0, -0.22, -0.06)
 
     /// Viewpoints for an aircraft: the C172 test model, or the generic narrowbody (captain's
     /// eye behind the windscreen, a right-side cabin window over the wing, a longer chase).
     mutating func configure(forAircraft id: String) {
         if id == "A320" {
-            // The FlightGear A320 is centred on its length: nose at +18.8 m.
-            eyeOffset = SIMD3(15.8, 0.55, 4.7)
-            wingOffset = SIMD3(-1.5, -2.3, 4.6)
+            // Origin under the flight model's centre of gravity: the nose tip about 17 m ahead.
+            eyeOffset = SIMD3(14.23, 0.55, 4.7)
+            wingOffset = SIMD3(-3.07, -2.3, 4.6)
             wingLook = SIMD3(0.45, -1.0, -0.14)
             orbitDistance = 60
             hasCockpit = false
         } else {
             hasCockpit = true
-            eyeOffset = SIMD3(1.62, 0.21, 1.6)
-            wingOffset = SIMD3(0.1, 5.4, 2.15)
+            eyeOffset = SIMD3(-0.26, 0.21, 1.6)
+            wingOffset = SIMD3(-1.78, 5.4, 2.15)
             wingLook = SIMD3(1.0, -0.22, -0.06)
             orbitDistance = 15
         }
@@ -78,9 +78,13 @@ nonisolated struct CameraRig {
     }
 
     /// The camera for this frame. `dt` advances the transition clock.
-    mutating func pose(aircraftPosition p: SIMD3<Double>, heading: Double, pitch: Double, roll: Double, dt: Double) -> CameraPose {
+    /// `pivot`: height of the centre of gravity above the position, which the attitude turns
+    /// the aircraft (and the cockpit and wing cameras with it) about.
+    mutating func pose(aircraftPosition p: SIMD3<Double>, heading: Double, pitch: Double, roll: Double, dt: Double,
+                       pivot: Double = 0) -> CameraPose {
         clock += dt
         let r = Self.bodyToWorld(heading: heading, pitch: pitch, roll: roll)
+        let pz = SIMD3<Double>(0, 0, pivot)
         var target: CameraPose
         switch mode {
         case .chase, .orbit:
@@ -90,11 +94,11 @@ nonisolated struct CameraRig {
         case .cockpit:
             // Head turn in the body frame, then into the world with the aircraft's attitude.
             let look = SIMD3(cos(lookPitch) * cos(lookYaw), cos(lookPitch) * sin(lookYaw), sin(lookPitch))
-            target = CameraPose(position: p + r * eyeOffset, forward: simd_normalize(r * look),
+            target = CameraPose(position: p + pz + r * (eyeOffset - pz), forward: simd_normalize(r * look),
                                 up: simd_normalize(r * SIMD3(0, 0, 1)), fovY: 68 * .pi / 180)
         case .wing:
             let look = simd_normalize(wingLook)
-            target = CameraPose(position: p + r * wingOffset, forward: simd_normalize(r * look),
+            target = CameraPose(position: p + pz + r * (wingOffset - pz), forward: simd_normalize(r * look),
                                 up: simd_normalize(r * SIMD3(0, 0, 1)), fovY: 62 * .pi / 180 / zoom)
         case .tower:
             let toAircraft = p + SIMD3(0, 0, 1.5) - towerPosition

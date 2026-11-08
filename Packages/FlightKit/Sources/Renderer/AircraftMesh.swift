@@ -26,6 +26,7 @@ final class AircraftMesh {
 
     /// Animations for the parts that move (the cockpit's needles, yoke and pedals).
     var animation: AnimatedModel?
+    let spinProperties: Set<String>
 
     private(set) var parts: [Part] = []
     /// Model space -> aircraft body frame (x forward, y left, z up, origin on the ground).
@@ -49,6 +50,7 @@ final class AircraftMesh {
         parts = [Part(vertices: buffer, vertexCount: v.count, texture: nil, draw: draw, isGlass: false)]
         let wing = Float(spec.noseToGear - spec.wingX - spec.rootChord * 0.1)
         modelToBody = MatrixMath.translation(SIMD3(-wing, 0, 0))
+        spinProperties = []
         boundsCenter = SIMD3(0, 0, Float(spec.gearHeight + spec.diameter / 2))
         boundsRadius = Float(spec.span / 2) + 4
     }
@@ -56,8 +58,10 @@ final class AircraftMesh {
     /// `textureMap` swaps texture names (a livery's sheets for the base model's); parts named in
     /// `hiddenParts` are left out.
     init(model: AC3DModel, textureDirectory: URL?, textureMap: [String: String] = [:], hiddenParts: Set<String> = [],
-         animation: AnimatedModel? = nil, cullsBackFaces: Bool = false, device: any MTLDevice) throws {
+         animation: AnimatedModel? = nil, cullsBackFaces: Bool = false, opaqueGlass: Bool = false, noseWheel: (model: SIMD3<Float>, aheadOfCG: Float)? = nil,
+         device: any MTLDevice) throws {
         self.animation = animation
+        spinProperties = animation?.spinProperties ?? []
         // FlightGear AC3D: x runs along the fuselage, y is up, z is the span. Find the nose by
         // where the propeller sits; default to FlightGear's convention (nose toward -x).
         let center = (model.boundsMin + model.boundsMax) / 2
@@ -74,7 +78,14 @@ final class AircraftMesh {
         let minUp = model.boundsMin.y
         let lift = MatrixMath.translation(SIMD3(0, 0, -minUp))
         let centreFwd = MatrixMath.translation(SIMD3(noseSign < 0 ? center.x : -center.x, noseSign < 0 ? -center.z : center.z, 0))
-        modelToBody = lift * centreFwd * axes
+        var toBody = lift * centreFwd * axes
+        // Put the body origin under the flight model's centre of gravity: the drawn nose wheel
+        // goes where the flight model's is.
+        if let noseWheel {
+            let drawn = toBody * SIMD4(noseWheel.model, 1)
+            toBody = MatrixMath.translation(SIMD3(noseWheel.aheadOfCG - drawn.x, 0, 0)) * toBody
+        }
+        modelToBody = toBody
         let size = model.boundsMax - model.boundsMin
         boundsCenter = SIMD3(0, 0, size.y / 2)
         boundsRadius = simd_length(size) / 2
@@ -116,11 +127,18 @@ final class AircraftMesh {
             // drop the darkening, so textured parts show their painted colour.
             var tint = material.diffuse
             if tex != nil { tint /= max(tint.max(), 1e-3) }
-            let isGlass = material.transparency > 0.05 || (group.texture?.lowercased().contains("glass") ?? false)
+            var isGlass = material.transparency > 0.05 || (group.texture?.lowercased().contains("glass") ?? false)
             var draw = DrawUniforms()
             draw.baseColor = SIMD4(tint, isGlass ? max(0.15, 1 - material.transparency) : 1)
-            let roughness = min(max(sqrt(2 / (material.shininess + 2)), 0.18), 0.9)
+            var roughness = min(max(sqrt(2 / (material.shininess + 2)), 0.18), 0.9)
             draw.material = SIMD4(roughness, 0, tex == nil ? 0 : 1, SurfaceKind.aircraft.rawValue)
+            if isGlass && opaqueGlass {
+                // Dark, glossy, drawn opaque: an aircraft with nothing modelled behind its windows.
+                isGlass = false
+                roughness = 0.08
+                draw.baseColor = SIMD4(0.035, 0.04, 0.05, 1)
+                draw.material = SIMD4(roughness, 0, 0, SurfaceKind.aircraft.rawValue)
+            }
             // The cabin sees the sky only through its windows: about a third of it.
             let inside = animation?.isInterior(part: group.part) ?? false
             draw.emissive = SIMD4(material.emissive, inside ? 0.3 : 0)

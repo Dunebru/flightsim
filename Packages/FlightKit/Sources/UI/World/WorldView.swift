@@ -185,7 +185,7 @@ final class WorldEngine: NSObject {
     @ObservationIgnored private var aircraftID = "c172p"
     @ObservationIgnored private var c172: AC3DModel?
     @ObservationIgnored private var c172Cockpit: AnimatedModel?
-    @ObservationIgnored private var a320: AC3DModel?
+    @ObservationIgnored private var a320: AnimatedModel?
 
     private func loadAircraft() {
         guard let directory = Bundle.main.resourceURL?.appendingPathComponent("Bundle/Aircraft/c172p") else { return }
@@ -207,8 +207,8 @@ final class WorldEngine: NSObject {
     }
 
     @concurrent
-    private nonisolated static func parseA320(_ directory: URL) async -> AC3DModel? {
-        try? A320Model.load(from: directory)
+    private nonisolated static func parseA320(_ directory: URL) async -> AnimatedModel? {
+        try? A320Model.loadAnimated(from: directory)
     }
 
     /// Draws the aircraft for a profile (the C172 once its model has loaded).
@@ -218,17 +218,26 @@ final class WorldEngine: NSObject {
         applyAircraft()
     }
 
+    /// The drawn nose wheel and where the flight model has it, for placing the model.
+    static func noseWheel(_ m: AnimatedModel, _ object: String, _ profile: AircraftProfile) -> (model: SIMD3<Float>, aheadOfCG: Float)? {
+        m.centre(ofObject: object).map { ($0, Float(profile.noseWheelAheadOfCG)) }
+    }
+
     private func applyAircraft() {
         do {
             if aircraftID == "A320" {
                 if let a320, let directory = Bundle.main.resourceURL?.appendingPathComponent("Bundle/Aircraft/A320") {
-                    try renderer?.setAircraft(a320, textures: directory, textureMap: A320Model.liveries[0].textures,
-                                              hiddenParts: ["hidden"])
+                    // No flight deck yet: the cockpit windows are tinted, not clear, so the empty
+                    // nose does not show through them.
+                    try renderer?.setAircraft(a320.model, textures: directory, textureMap: A320Model.liveries[0].textures,
+                                              hiddenParts: ["hidden"], animation: a320, cullsBackFaces: true, opaqueGlass: true,
+                                              noseWheel: Self.noseWheel(a320, "NLGWheels", AircraftProfile.a320))
                 } else {
                     try renderer?.setGenericAirliner()    // until the model has loaded
                 }
             } else if let c172, let directory = Bundle.main.resourceURL?.appendingPathComponent("Bundle/Aircraft/c172p") {
-                try renderer?.setAircraft(c172, textures: directory, hiddenParts: ["hidden"], animation: c172Cockpit, cullsBackFaces: true)
+                try renderer?.setAircraft(c172, textures: directory, hiddenParts: ["hidden"], animation: c172Cockpit, cullsBackFaces: true,
+                                          noseWheel: c172Cockpit.flatMap { Self.noseWheel($0, "NoseWheel", AircraftProfile.c172) })
             }
         } catch {
             startupError = String(describing: error)
@@ -278,7 +287,7 @@ final class WorldEngine: NSObject {
         scene.date = timeOverride ?? dateProvider?() ?? Date()
         frameHook?(dt, &scene)
         var pose = rig.pose(aircraftPosition: scene.aircraftPosition, heading: scene.aircraftHeading,
-                            pitch: scene.aircraftPitch, roll: scene.aircraftRoll, dt: dt)
+                            pitch: scene.aircraftPitch, roll: scene.aircraftRoll, dt: dt, pivot: scene.aircraftPivotHeight)
         let floor = cameraGround.groundZ(atENU: pose.position) + 1.5
         if pose.position.z < floor { pose.position.z = floor }
         scene.cameraPose = pose

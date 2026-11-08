@@ -136,8 +136,12 @@ public final class SceneRenderer {
     private let markingsVertexCount: Int
     private let runway = RunwaySpec.kphx08_26
     private var aircraft: AircraftMesh?
-    /// This frame's model-space transform for each animated aircraft part.
+    /// This frame's model-space transform for each animated aircraft part, and those a select
+    /// animation hides.
     private var partTransforms: [String: simd_float4x4] = [:]
+    private var hiddenParts: Set<String> = []
+    private var spinTurns: [String: Double] = [:]
+    private var lastAnimationTime: Double?
 
     // Per-size targets
     private var targets: Targets?
@@ -474,19 +478,38 @@ public final class SceneRenderer {
         if let aircraft {
             // Body frame: x forward, y left, z up. Heading about z, then pitch (nose up is a
             // negative rotation about +y), then bank (right wing down is positive about +x).
-            let orient = MatrixMath.rotationZ(Float(.pi / 2 - scene.aircraftHeading))
+            // The attitude turns the aircraft about its centre of gravity, `aircraftPivotHeight`
+            // above the position, as the flight model turns it.
+            let pivot = SIMD3<Float>(0, 0, Float(scene.aircraftPivotHeight))
+            let orient = MatrixMath.translation(pivot)
+                * MatrixMath.rotationZ(Float(.pi / 2 - scene.aircraftHeading))
                 * MatrixMath.rotationY(Float(-scene.aircraftPitch))
                 * MatrixMath.rotationX(Float(scene.aircraftRoll))
+                * MatrixMath.translation(-pivot)
                 * aircraft.modelToBody
             aircraftModel = MatrixMath.translation(relative(aircraftWorld, to: camera)) * orient
             if let animation = aircraft.animation {
+                // Spinning parts (fans, wheels, propeller) turn at their property's rpm: keep
+                // each one's revolutions.
+                let now = Date.timeIntervalSinceReferenceDate
+                let dt = lastAnimationTime.map { min(max(now - $0, 0), 0.1) } ?? 0
+                lastAnimationTime = now
+                var values = scene.instrumentValues
+                for p in aircraft.spinProperties {
+                    spinTurns[p, default: 0] += (values[p] ?? 0) / 60 * dt
+                    values["spin:" + p] = spinTurns[p]
+                }
                 var cache: [String: simd_float4x4] = [:]
+                var hidden = Set<String>()
                 for part in aircraft.parts where !part.animated.isEmpty && cache[part.animated] == nil {
-                    cache[part.animated] = animation.transform(part: part.animated, values: scene.instrumentValues) ?? matrix_identity_float4x4
+                    if !animation.isVisible(part: part.animated, values: values) { hidden.insert(part.animated) }
+                    cache[part.animated] = animation.transform(part: part.animated, values: values) ?? matrix_identity_float4x4
                 }
                 partTransforms = cache
+                hiddenParts = hidden
             } else {
                 partTransforms = [:]
+                hiddenParts = []
             }
             aircraftPrev = reset ? aircraftModel : MatrixMath.translation(relative(aircraftWorld, to: previousCam)) * orient
             // Sun shadow map around the aircraft.
@@ -664,7 +687,7 @@ public final class SceneRenderer {
                 e.setCullMode(.none)
                 e.setDepthBias(1, slopeScale: 2, clamp: 0.01)
                 e.setVertexBytes(&u, length: MemoryLayout<FrameUniforms>.stride, index: 1)
-                for part in aircraft.parts where !part.isGlass && (scene.aircraftGearDown || !part.isGear) && part.variant != (scene.propellerSpinning ? "prop-slow" : "prop-fast") {
+                for part in aircraft.parts where !part.isGlass && (scene.aircraftGearDown || !part.isGear) && part.variant != (scene.propellerSpinning ? "prop-slow" : "prop-fast") && !hiddenParts.contains(part.animated) {
                     var d = part.draw
                     d.model = aircraftModel * (partTransforms[part.animated] ?? matrix_identity_float4x4)
                     e.setVertexBuffer(part.vertices, offset: 0, index: 0)
@@ -889,7 +912,7 @@ public final class SceneRenderer {
                 e.setDepthBias(0, slopeScale: 0, clamp: 0)
             }
             if let aircraft, scene.showAircraft {
-                for part in aircraft.parts where !part.isGlass && (scene.aircraftGearDown || !part.isGear) && part.variant != (scene.propellerSpinning ? "prop-slow" : "prop-fast") {
+                for part in aircraft.parts where !part.isGlass && (scene.aircraftGearDown || !part.isGear) && part.variant != (scene.propellerSpinning ? "prop-slow" : "prop-fast") && !hiddenParts.contains(part.animated) {
                     var d = part.draw
                     let pt = part.animated.isEmpty ? matrix_identity_float4x4 : (partTransforms[part.animated] ?? matrix_identity_float4x4)
                     d.model = aircraftModel * pt
@@ -967,7 +990,7 @@ public final class SceneRenderer {
             if let aircraft, scene.showAircraft {
                 e.setRenderPipelineState(glassPipeline)
                 e.setDepthStencilState(depthTestOnly)
-                for part in aircraft.parts where part.isGlass && (scene.aircraftGearDown || !part.isGear) && part.variant != (scene.propellerSpinning ? "prop-slow" : "prop-fast") {
+                for part in aircraft.parts where part.isGlass && (scene.aircraftGearDown || !part.isGear) && part.variant != (scene.propellerSpinning ? "prop-slow" : "prop-fast") && !hiddenParts.contains(part.animated) {
                     var d = part.draw
                     let pt = part.animated.isEmpty ? matrix_identity_float4x4 : (partTransforms[part.animated] ?? matrix_identity_float4x4)
                     d.model = aircraftModel * pt
@@ -1203,9 +1226,12 @@ public final class SceneRenderer {
     }
 
     public func setAircraft(_ model: AC3DModel, textures: URL?, textureMap: [String: String] = [:],
-                            hiddenParts: Set<String> = [], animation: AnimatedModel? = nil, cullsBackFaces: Bool = false) throws {
+                            hiddenParts: Set<String> = [], animation: AnimatedModel? = nil, cullsBackFaces: Bool = false,
+                            opaqueGlass: Bool = false, noseWheel: (model: SIMD3<Float>, aheadOfCG: Float)? = nil) throws {
         aircraft = try AircraftMesh(model: model, textureDirectory: textures, textureMap: textureMap, hiddenParts: hiddenParts,
-                                    animation: animation, cullsBackFaces: cullsBackFaces, device: device)
+                                    animation: animation, cullsBackFaces: cullsBackFaces, opaqueGlass: opaqueGlass,
+                                    noseWheel: noseWheel, device: device)
+        spinTurns = [:]
         previousCamera = nil
     }
 

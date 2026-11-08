@@ -44,13 +44,80 @@ struct AirlinerRenderTests {
         }
     }
 
+    /// The A320 spawned at a KPHX gate exactly as the flight places it: nose wheel on the
+    /// stand's stop point, facing along the lead-in line, wheels on the apron, its windows
+    /// tinted. Views from the front quarter, at wheel height and of the bridge.
+    @Test func a320AtGate() throws {
+        let site = try AirportSite.load(AirportRenderTests.airportsURL.appendingPathComponent("KPHX.json"))
+        let slot = try #require(site.airlinerStands.first { $0.ref != nil && $0.occupied && $0.ref!.hasPrefix("D") }
+                                ?? site.airlinerStands.first { $0.ref != nil && $0.occupied })
+        let ref = slot.ref!
+        let (r, base) = try AirportRenderTests.scene(site, aircraft: false, excludeStand: ref)
+        let m = try A320Model.loadAnimated(from: Self.a320)
+        let nose = try #require(m.centre(ofObject: "NLGWheels"))
+        try r.setAircraft(m.model, textures: Self.a320, textureMap: A320Model.liveries[0].textures, hiddenParts: ["hidden"],
+                          animation: m, cullsBackFaces: true, opaqueGlass: true, noseWheel: (nose, Float((672 - 196.1) * 0.0254)))
+        let placement = try #require(site.placement(.stand(ref)))
+        let h = placement.heading * .pi / 180
+        let fwd = SIMD3(sin(h), cos(h), 0.0), left = SIMD3(-cos(h), sin(h), 0.0)
+        let cg = placement.position - fwd * (672 - 196.1) * 0.0254
+        var s = base
+        s.showAircraft = true
+        s.aircraftPosition = site.onSurface(SIMD2(cg.x, cg.y))
+        s.aircraftHeading = h
+        s.aircraftPivotHeight = (-40 - -142) * 0.0254
+        s.instrumentValues = A320Model.readings(leftAileron: 0, rightAileron: 0, elevator: 0, rudder: 0, flaps: 0, speedbrake: 0,
+                                                steering: 0, gear: 1, compression: .zero, wheelSpeed: .zero, n1: 20, reverser: 0)
+        print("gate \(ref): stop point \(placement.position), heading \(placement.heading)")
+        let p = s.aircraftPosition
+        let views: [(String, CameraPose)] = [
+            ("a320-gate", CameraPose(position: p + left * 38 - fwd * 22 + SIMD3(0, 0, 14),
+                                     forward: simd_normalize(-left * 38 + fwd * 30 - SIMD3(0, 0, 12)), up: SIMD3(0, 0, 1), fovY: 55 * .pi / 180)),
+            ("a320-gate-wheels", CameraPose(position: p - left * 9 + fwd * 1 + SIMD3(0, 0, 0.6),
+                                            forward: simd_normalize(left * 9 - fwd * 1 - SIMD3(0, 0, 0.3)), up: SIMD3(0, 0, 1), fovY: 40 * .pi / 180)),
+            ("a320-gate-nose", CameraPose(position: p + left * 14 + fwd * 6 + SIMD3(0, 0, 4),
+                                          forward: simd_normalize(-left * 14 + fwd * 8 - SIMD3(0, 0, 0.5)), up: SIMD3(0, 0, 1), fovY: 55 * .pi / 180)),
+        ]
+        for (name, pose) in views {
+            s.cameraPose = pose
+            r.exposureAdaptation = 1
+            try TerrainRenderTests.settle(r, s, limit: .seconds(60))
+            r.resetHistory()
+            let img = try r.renderImage(s, width: 1600, height: 900)
+            try RendererTests.savePNG(img, 1600, 900, name: name)
+        }
+        // The nearest parked neighbour from its right side: its ground equipment.
+        if let other = site.airlinerStands.filter({ $0.occupied && $0.ref != ref })
+            .min(by: { simd_distance($0.position, slot.position) < simd_distance($1.position, slot.position) }) {
+            let f2 = SIMD3(sin(other.heading), cos(other.heading), 0.0), l2 = SIMD3(-cos(other.heading), sin(other.heading), 0.0)
+            let o = site.onSurface(other.position)
+            let eye = o - f2 * 42 - l2 * 22 + SIMD3(0, 0, 14), look = o - f2 * 10 - l2 * 6 + SIMD3(0, 0, 1)
+            s.cameraPose = CameraPose(position: eye, forward: simd_normalize(look - eye), up: SIMD3(0, 0, 1), fovY: 45 * .pi / 180)
+            r.exposureAdaptation = 1
+            try TerrainRenderTests.settle(r, s, limit: .seconds(60))
+            r.resetHistory()
+            try RendererTests.savePNG(try r.renderImage(s, width: 1600, height: 900), 1600, 900, name: "gate-equipment")
+        }
+        // In the air with the gear halfway and the flaps out: doors open, gear folding.
+        s.aircraftPosition = p + SIMD3(0, 0, 30)
+        s.instrumentValues = A320Model.readings(leftAileron: 0, rightAileron: 0, elevator: 0, rudder: 0, flaps: 0.5, speedbrake: 0,
+                                                steering: 0, gear: 0.5, compression: .zero, wheelSpeed: .zero, n1: 60, reverser: 0)
+        s.cameraPose = CameraPose(position: p + SIMD3(0, 0, 26) - left * 30 - fwd * 4, forward: simd_normalize(left * 30 + SIMD3(0, 0, 3)),
+                                  up: SIMD3(0, 0, 1), fovY: 45 * .pi / 180)
+        r.exposureAdaptation = 1
+        try TerrainRenderTests.settle(r, s, limit: .seconds(60))
+        r.resetHistory()
+        try RendererTests.savePNG(try r.renderImage(s, width: 1600, height: 900), 1600, 900, name: "a320-gear-transit")
+    }
+
     /// The C172 outside and from the pilot's seat, after hiding FlightGear's helper objects.
     @Test func c172Views() throws {
         let aircraft = try C172Model.loadAircraft(directory: RendererTests.c172Dir)
         let site = try AirportSite.load(AirportRenderTests.airportsURL.appendingPathComponent("KPHX.json"))
         let (r, base) = try AirportRenderTests.scene(site, aircraft: false)
         try r.setAircraft(aircraft.model, textures: RendererTests.c172Dir, hiddenParts: ["hidden"],
-                          animation: aircraft, cullsBackFaces: true)
+                          animation: aircraft, cullsBackFaces: true,
+                          noseWheel: (try #require(aircraft.centre(ofObject: "NoseWheel")), Float((41 - -6.8) * 0.0254)))
         let rw08 = site.layout.runways.first { $0.name == "08/26" }!
         let f = site.runwayFrame(rw08)
         let at = f.point(rw08.ends[0].displacedThreshold + 60, 0)
@@ -67,7 +134,7 @@ struct AirlinerRenderTests {
         s.aircraftHeading = f.heading * .pi / 180
         let h = s.aircraftHeading
         let fwd = SIMD3(sin(h), cos(h), 0.0), left = SIMD3(-cos(h), sin(h), 0.0)
-        let eye = SIMD3(1.62, 0.21, 1.6)
+        let eye = SIMD3(-0.26, 0.21, 1.6)
         let views: [(String, CameraPose)] = [
             ("c172-outside", CameraPose(position: s.aircraftPosition + fwd * 7 + left * 6 + SIMD3(0, 0, 2.2),
                                         forward: simd_normalize(-fwd * 7 - left * 6 - SIMD3(0, 0, 1.2)), up: SIMD3(0, 0, 1), fovY: 55 * .pi / 180)),

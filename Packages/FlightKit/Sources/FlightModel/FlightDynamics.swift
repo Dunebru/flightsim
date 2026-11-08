@@ -104,6 +104,15 @@ public struct FlightState: Sendable, Equatable {
     public var leftAileron: Double = 0, rightAileron: Double = 0, elevator: Double = 0, rudder: Double = 0
     /// Nose wheel steering angle, degrees.
     public var noseSteeringDegrees: Double = 0
+    /// The same surfaces in degrees (JSBSim's fcs/*-pos-rad), positive as JSBSim signs them.
+    public var elevatorDegrees: Double = 0, leftAileronDegrees: Double = 0, rightAileronDegrees: Double = 0, rudderDegrees: Double = 0
+    /// Speedbrake / spoilers deployed, 0...1.
+    public var speedbrake: Double = 0
+    /// Thrust reversers deployed, 0...1.
+    public var reverser: Double = 0
+    /// Strut compression (feet) and wheel rolling speed (m/s), nose gear first.
+    public var gearCompressionFeet = SIMD3<Double>.zero
+    public var wheelSpeed = SIMD3<Double>.zero
 
     public init() {}
 }
@@ -315,6 +324,17 @@ public final class FlightDynamics {
         s.elevator = optional("fcs/elevator-pos-norm")
         s.rudder = optional("fcs/rudder-pos-norm")
         s.noseSteeringDegrees = optional("fcs/steer-pos-deg")
+        let deg = 180 / Double.pi
+        s.elevatorDegrees = optional("fcs/elevator-pos-rad") * deg
+        s.leftAileronDegrees = optional("fcs/left-aileron-pos-rad") * deg
+        s.rightAileronDegrees = optional("fcs/right-aileron-pos-rad") * deg
+        s.rudderDegrees = optional("fcs/rudder-pos-rad") * deg
+        s.speedbrake = max(optional("fcs/speedbrake-pos-norm"), optional("fcs/spoiler-pos-norm"))
+        s.reverser = isTurbine ? min(max(optional("propulsion/engine/reverser-angle-rad") / (.pi / 2), 0), 1) : 0
+        for i in 0..<3 {
+            s.gearCompressionFeet[i] = optional("gear/unit[\(i)]/compression-ft")
+            s.wheelSpeed[i] = optional("gear/unit[\(i)]/wheel-speed-fps") * 0.3048
+        }
         return s
     }
 }

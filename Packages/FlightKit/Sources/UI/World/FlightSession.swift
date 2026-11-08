@@ -113,6 +113,10 @@ final class FlightSession {
             P.clock: seconds,
             P.elevatorTrim: inputs.pitchTrim,
             P.noseSteering: s.noseSteeringDegrees,
+            // FlightGear calls it compression-norm but feeds it feet.
+            "gear/gear[0]/compression-norm": s.gearCompressionFeet[0],
+            "gear/gear[1]/compression-norm": s.gearCompressionFeet[1],
+            "gear/gear[2]/compression-norm": s.gearCompressionFeet[2],
         ]) { a, _ in a }
     }
 
@@ -158,7 +162,14 @@ final class FlightSession {
 
     func spawnConditions() -> InitialConditions {
         let p = placement
-        let g = frame.geodetic(p.position)
+        var at = p.position
+        if case .stand = spot {
+            // A stand's point is where the nose wheel stops (the end of the lead-in line); the
+            // flight model's position is its centre of gravity, behind that.
+            let h = p.heading * .pi / 180
+            at -= SIMD3(sin(h), cos(h), 0) * profile.noseWheelAheadOfCG
+        }
+        let g = frame.geodetic(at)
         let terrain = ground.height(latitude: g.latitude, longitude: g.longitude)
         let agl = p.altitude.map { max(($0 - terrain) / 0.3048, 50) } ?? 0
         var ic = InitialConditions(latitude: g.latitude, longitude: g.longitude,
@@ -249,6 +260,7 @@ final class FlightSession {
             sound.onGround = s.onGround
             sound.stallWarning = hud.stallWarning
             sound.exterior = hud.camera != .cockpit
+            sound.reverser = s.reverser
             audio.update(sound)
             if s.onGround && !wasOnGround && s.verticalSpeedFPM < -80 { audio.touchdown(-s.verticalSpeedFPM / 600) }
             wasOnGround = s.onGround
@@ -326,13 +338,24 @@ final class FlightSession {
         let groundHeight = ground.height(latitude: s.latitude, longitude: s.longitude)
         physics.setTerrainElevation(feet: groundHeight / 0.3048)
         let base = frame.enu(Geodetic(latitude: s.latitude, longitude: s.longitude, height: groundHeight))
-        let height = max(0, (s.heightAboveGroundFeet - physics.restingHeightFeet) * 0.3048)
-        scene.aircraftPosition = SIMD3(base.x, base.y, base.z + height)
+        // Drawn from the centre of gravity down: the model's extended-gear ground plane sits
+        // `cgAboveMainGear` below it, and the struts' compression lifts the wheels back onto
+        // the surface (so they neither float nor sink).
+        let pivot = profile.cgAboveMainGear
+        scene.aircraftPivotHeight = pivot
+        scene.aircraftPosition = SIMD3(base.x, base.y, base.z + s.heightAboveGroundFeet * 0.3048 - pivot)
         scene.aircraftHeading = s.heading
         scene.aircraftGearDown = s.gearPosition > 0.5
         scene.propellerSpinning = !s.engineIsTurbine && s.engineIndication > 400
-        if !s.engineIsTurbine { scene.instrumentValues = Self.cockpitReadings(s, inputs: inputs, declination: declination,
-                                                                              headingBug: Double(hud.targetHeading)) }
+        if s.engineIsTurbine {
+            scene.instrumentValues = A320Model.readings(
+                leftAileron: s.leftAileronDegrees, rightAileron: s.rightAileronDegrees, elevator: s.elevatorDegrees,
+                rudder: s.rudderDegrees, flaps: s.flapPosition, speedbrake: s.speedbrake, steering: s.noseSteeringDegrees,
+                gear: s.gearPosition, compression: s.gearCompressionFeet, wheelSpeed: s.wheelSpeed, n1: s.engineIndication,
+                reverser: s.reverser)
+        } else {
+            scene.instrumentValues = Self.cockpitReadings(s, inputs: inputs, declination: declination, headingBug: Double(hud.targetHeading))
+        }
         scene.aircraftRoll = s.roll
         scene.aircraftPitch = s.pitch
 

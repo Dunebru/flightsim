@@ -6,11 +6,14 @@ public import simd
 /// PropertyList XML; kept in the AC3D file's frame (x aft, y up, z left) so it applies to the
 /// parsed vertices directly.
 public struct FGAnimation: Sendable, Equatable {
-    public enum Kind: Sendable, Equatable { case rotate, translate }
+    /// `spin` turns continuously at the property's value as rpm (times the factor); `select`
+    /// shows its objects only while its condition holds.
+    public enum Kind: Sendable, Equatable { case rotate, translate, spin, select }
     public var kind: Kind
     public var objects: [String]
     /// Property path without a leading slash ("instrumentation/altimeter/indicated-altitude-ft").
     public var property: String
+    public var condition: FGCondition?
     public var factor = 1.0
     public var offset = 0.0
     public var minimum: Double?
@@ -40,16 +43,23 @@ public struct FGAnimation: Sendable, Equatable {
         return v
     }
 
+    /// The transform for a property value; for `spin`, `input` is the revolutions the property
+    /// has accumulated (its integral as rpm over minutes), which the factor scales.
     public func matrix(_ input: Double) -> simd_double4x4 {
-        let v = output(input)
         let n = simd_length(axis) > 1e-12 ? simd_normalize(axis) : SIMD3(0, 1, 0)
+        let degrees: Double
         switch kind {
+        case .select:
+            return matrix_identity_double4x4
         case .translate:
-            return FGAnimation.translation(n * v)
+            return FGAnimation.translation(n * output(input))
         case .rotate:
-            let r = simd_double4x4(simd_quatd(angle: v * .pi / 180, axis: n))
-            return FGAnimation.translation(center) * r * FGAnimation.translation(-center)
+            degrees = output(input)
+        case .spin:
+            degrees = (input * factor).truncatingRemainder(dividingBy: 1) * 360
         }
+        let r = simd_double4x4(simd_quatd(angle: degrees * .pi / 180, axis: n))
+        return FGAnimation.translation(center) * r * FGAnimation.translation(-center)
     }
 
     static func translation(_ t: SIMD3<Double>) -> simd_double4x4 {
@@ -61,28 +71,41 @@ public struct FGAnimation: Sendable, Equatable {
     /// FlightGear XML axes (x aft, y right, z up) to the AC3D file's (x aft, y up, z left).
     static func acFrame(_ v: SIMD3<Double>) -> SIMD3<Double> { SIMD3(v.x, v.z, -v.y) }
 
-    /// The rotate and translate animations in a PropertyList (others, and those driven by
-    /// expressions rather than a property, are skipped). `<property alias=...>` resolves
-    /// through the file's `<params>`.
+    /// A property element's path: its text, or its `alias` resolved through the file's
+    /// `<params>`; without a leading slash.
+    static func propertyPath(_ p: XMLElementNode, root: XMLElementNode) -> String? {
+        var property = p.text
+        if let alias = p.attributes["alias"] {
+            let path = alias.split(separator: "/").filter { $0 != ".." && !$0.isEmpty }.map(String.init)
+            guard let target = root.descendant(path: path) else { return nil }
+            property = target.child(named: "property")?.text ?? target.text
+        }
+        property = property.trimmingCharacters(in: .whitespacesAndNewlines)
+        while property.hasPrefix("/") { property.removeFirst() }
+        return property.isEmpty ? nil : property
+    }
+
+    /// The rotate, translate, spin and select animations in a PropertyList (others, and those
+    /// driven by expressions rather than a property, are skipped).
     static func parse(_ root: XMLElementNode) -> [FGAnimation] {
         root.children(named: "animation").compactMap { a -> FGAnimation? in
             let kind: Kind
             switch a.text(of: "type") {
             case "rotate": kind = .rotate
             case "translate": kind = .translate
+            case "spin": kind = .spin
+            case "select": kind = .select
             default: return nil
             }
-            guard let p = a.child(named: "property") else { return nil }
-            var property = p.text
-            if let alias = p.attributes["alias"] {
-                let path = alias.split(separator: "/").filter { $0 != ".." && !$0.isEmpty }.map(String.init)
-                guard let target = root.descendant(path: path) else { return nil }
-                property = target.text
+            let objects = a.children(named: "object-name").map(\.text)
+            if kind == .select {
+                guard let c = a.child(named: "condition").flatMap({ FGCondition.parse($0, root: root) }) else { return nil }
+                var anim = FGAnimation(kind: .select, objects: objects, property: "")
+                anim.condition = c
+                return anim
             }
-            property = property.trimmingCharacters(in: .whitespacesAndNewlines)
-            while property.hasPrefix("/") { property.removeFirst() }
-            guard !property.isEmpty else { return nil }
-            var anim = FGAnimation(kind: kind, objects: a.children(named: "object-name").map(\.text), property: property)
+            guard let p = a.child(named: "property"), let property = propertyPath(p, root: root) else { return nil }
+            var anim = FGAnimation(kind: kind, objects: objects, property: property)
             func number(_ name: String) -> Double? { a.text(of: name).flatMap { Double($0) } }
             anim.factor = number("factor") ?? 1
             anim.offset = number(kind == .rotate ? "offset-deg" : "offset-m") ?? 0
@@ -113,6 +136,59 @@ public struct FGAnimation: Sendable, Equatable {
     }
 }
 
+/// A FlightGear `<condition>`: comparisons of a property with a value, a property's truth,
+/// and not / and / or of those.
+public indirect enum FGCondition: Sendable, Equatable {
+    case truthy(String)
+    case compare(String, Comparison, Double)
+    case not(FGCondition)
+    case all([FGCondition])
+    case any([FGCondition])
+
+    public enum Comparison: Sendable, Equatable { case less, lessOrEqual, greater, greaterOrEqual, equal }
+
+    public func holds(_ value: (String) -> Double) -> Bool {
+        switch self {
+        case .truthy(let p): return value(p) != 0
+        case .compare(let p, let c, let v):
+            let x = value(p)
+            switch c {
+            case .less: return x < v
+            case .lessOrEqual: return x <= v
+            case .greater: return x > v
+            case .greaterOrEqual: return x >= v
+            case .equal: return x == v
+            }
+        case .not(let c): return !c.holds(value)
+        case .all(let cs): return cs.allSatisfy { $0.holds(value) }
+        case .any(let cs): return cs.contains { $0.holds(value) }
+        }
+    }
+
+    /// A `<condition>` element (its children are and-ed) or one of its operators; nil for
+    /// forms not handled (expressions, two-property comparisons).
+    static func parse(_ node: XMLElementNode, root: XMLElementNode) -> FGCondition? {
+        func one(_ n: XMLElementNode) -> FGCondition? {
+            switch n.name {
+            case "property": return FGAnimation.propertyPath(n, root: root).map { .truthy($0) }
+            case "not": return n.children.first.flatMap(one).map { .not($0) }
+            case "and": let cs = n.children.compactMap(one); return cs.count == n.children.count ? .all(cs) : nil
+            case "or": let cs = n.children.compactMap(one); return cs.count == n.children.count ? .any(cs) : nil
+            case "less-than", "less-than-equals", "greater-than", "greater-than-equals", "equals":
+                guard let p = n.child(named: "property").flatMap({ FGAnimation.propertyPath($0, root: root) }),
+                      let v = n.text(of: "value").flatMap(Double.init), n.children(named: "property").count == 1 else { return nil }
+                let c: Comparison = ["less-than": .less, "less-than-equals": .lessOrEqual, "greater-than": .greater,
+                                     "greater-than-equals": .greaterOrEqual, "equals": .equal][n.name]!
+                return .compare(p, c, v)
+            default: return nil
+            }
+        }
+        let cs = node.children.compactMap(one)
+        guard cs.count == node.children.count, !cs.isEmpty else { return nil }
+        return cs.count == 1 ? cs[0] : .all(cs)
+    }
+}
+
 /// A FlightGear model assembled from PropertyList files: the geometry of every sub-model in one
 /// AC3D model, and the animations that move its named objects. Animated objects get parts named
 /// "anim:<model>|<object>/<child object>", so a renderer can draw them with `transform(part:values:)`;
@@ -129,15 +205,47 @@ public struct AnimatedModel: Sendable {
     public var defaults: [String: Double] = [:]
     /// Objects left out (their part becomes "hidden"), by name, in every sub-model.
     public var hiddenObjects: Set<String> = []
+    /// Models loaded as the inside of the airframe (whose fixed part is "cabin").
+    public var interiorModels: Set<String> = []
 
     public init() {}
 
     /// Every property some animation reads.
-    public var properties: Set<String> { Set(animations.values.flatMap { $0.map(\.property) }) }
+    public var properties: Set<String> { Set(animations.values.flatMap { $0.map(\.property) }).subtracting([""]) }
 
-    /// Whether a part is inside the cabin (fixed cabin geometry, or animated parts of a sub-model).
+    /// Properties that drive `spin` animations: the caller supplies their accumulated
+    /// revolutions as "spin:<property>" (see `FGAnimation.matrix`).
+    public var spinProperties: Set<String> {
+        Set(animations.values.flatMap { $0.filter { $0.kind == .spin }.map(\.property) })
+    }
+
+    /// Whether a part is inside the cabin (fixed cabin geometry, or animated parts of a model
+    /// inside the airframe).
     public func isInterior(part: String) -> Bool {
-        part == "cabin" || (part.hasPrefix("anim:") && !part.hasPrefix("anim:\(root)|"))
+        if part == "cabin" { return true }
+        guard part.hasPrefix("anim:"), let bar = part.firstIndex(of: "|") else { return false }
+        return interiorModels.contains(String(part[part.index(part.startIndex, offsetBy: 5)..<bar]))
+    }
+
+    /// The centre of the geometry of the parts ending in an object's name (an animated object),
+    /// in the model's frame.
+    public func centre(ofObject object: String) -> SIMD3<Float>? {
+        let p = model.groups.filter { $0.part.hasSuffix("|" + object) || $0.part.hasSuffix("/" + object) }.flatMap(\.positions)
+        guard let first = p.first else { return nil }
+        let lo = p.reduce(first) { simd_min($0, $1) }, hi = p.reduce(first) { simd_max($0, $1) }
+        return (lo + hi) / 2
+    }
+
+    /// Whether a part is shown: false while a `select` on it or on an object it hangs from fails.
+    public func isVisible(part: String, values: [String: Double]) -> Bool {
+        guard part.hasPrefix("anim:"), let bar = part.firstIndex(of: "|") else { return true }
+        let name = String(part[part.index(part.startIndex, offsetBy: 5)..<bar])
+        for object in part[part.index(after: bar)...].split(separator: "/") {
+            for anim in animations["\(name)|\(object)"] ?? [] where anim.kind == .select {
+                if let c = anim.condition, !c.holds({ values[$0] ?? defaults[$0] ?? 0 }) { return false }
+            }
+        }
+        return true
     }
 
     /// Model-space transform for a part, or nil for a part that never moves.
@@ -148,8 +256,9 @@ public struct AnimatedModel: Sendable {
         for object in part[part.index(after: bar)...].split(separator: "/") {
             // FlightGear wraps each animation around the object in turn: the first listed is
             // innermost.
-            for anim in (animations["\(name)|\(object)"] ?? []).reversed() {
-                m = m * anim.matrix(values[anim.property] ?? defaults[anim.property] ?? 0)
+            for anim in (animations["\(name)|\(object)"] ?? []).reversed() where anim.kind != .select {
+                let key = anim.kind == .spin ? "spin:" + anim.property : anim.property
+                m = m * anim.matrix(values[key] ?? defaults[key] ?? 0)
             }
         }
         return simd_float4x4(SIMD4<Float>(m.columns.0), SIMD4<Float>(m.columns.1), SIMD4<Float>(m.columns.2), SIMD4<Float>(m.columns.3))
@@ -166,6 +275,7 @@ public struct AnimatedModel: Sendable {
         let root = try XMLElementNode.parse(contentsOf: directory.appendingPathComponent(file))
         let name = (file as NSString).deletingPathExtension
         if self.root.isEmpty { self.root = name }
+        if staticPart == "cabin" { interiorModels.insert(name) }
         let anims = FGAnimation.parse(root)
         var animated = Set<String>()
         for a in anims {

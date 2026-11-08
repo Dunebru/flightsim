@@ -83,3 +83,27 @@ struct WindTests {
         #expect(abs(tail - 20) < 3, "tailwind: \(tail)")
     }
 }
+
+/// The geometry numbers the drawn model is placed by match the JSBSim files they were read
+/// from (a model update that moves the gear or the CG fails here).
+struct ProfileGeometryTests {
+    @Test(arguments: [AircraftProfile.c172, .a320])
+    func matchesTheJSBSimFile(profile: AircraftProfile) throws {
+        let url = try #require(FlightDynamics.bundledRoot?.appendingPathComponent("aircraft/\(profile.id)/\(profile.id).xml"))
+        let text = try String(contentsOf: url, encoding: .utf8)
+        func location(after marker: String) throws -> SIMD3<Double> {
+            let range = try #require(text.range(of: marker))
+            let rest = text[range.upperBound...]
+            func value(_ tag: String) throws -> Double {
+                let open = try #require(rest.range(of: "<\(tag)>")), close = try #require(rest.range(of: "</\(tag)>"))
+                return try #require(Double(rest[open.upperBound..<close.lowerBound].trimmingCharacters(in: .whitespaces)))
+            }
+            return SIMD3(try value("x"), try value("y"), try value("z"))
+        }
+        let cg = try location(after: "<location name=\"CG\"")
+        let nose = try location(after: profile.id == "A320" ? "name=\"NOSE_LG\"" : "name=\"NOSE\"")
+        let main = try location(after: profile.id == "A320" ? "name=\"LEFT_MLG\"" : "name=\"LEFT_MAIN\"")
+        #expect(abs((cg.x - nose.x) * 0.0254 - profile.noseWheelAheadOfCG) < 0.01)
+        #expect(abs((cg.z - main.z) * 0.0254 - profile.cgAboveMainGear) < 0.01)
+    }
+}

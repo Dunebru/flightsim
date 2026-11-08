@@ -236,6 +236,9 @@ public struct SceneDescription: Sendable {
     public var aircraftGearDown = true
     /// The propeller is turning fast enough to blur.
     public var propellerSpinning = false
+    /// Height of the aircraft's centre of gravity above `aircraftPosition` (the ground plane of
+    /// the model with its struts extended): the point the attitude turns it about.
+    public var aircraftPivotHeight = 0.0
     /// Readings for the aircraft's animated parts (instrument needles, yoke, pedals), by
     /// FlightGear property path.
     public var instrumentValues: [String: Double] = [:]

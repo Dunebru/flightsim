@@ -44,7 +44,7 @@ final class AirportRenderer {
     let parkedInstances: [SIMD8<Float>]
 
     /// Building facade codes for the shader (DrawUniforms.emissive.x).
-    enum Facade: Float { case terminal = 1, hangar = 2, generic = 3, parking = 4, tower = 5, glass = 6, bridge = 7, windsock = 8 }
+    enum Facade: Float { case terminal = 1, hangar = 2, generic = 3, parking = 4, tower = 5, glass = 6, bridge = 7, windsock = 8, equipment = 10 }
 
     init?(site: AirportSite, geometry: AirportGeometry, lights points: [LightPoint], signs: [SignPlacement],
           city chunks: [CityChunk] = [], excludeStand: String? = nil, sceneFrame: LocalFrame, device: any MTLDevice) {
@@ -142,6 +142,9 @@ final class AirportRenderer {
         add(geometry.glazing, kind: .building, roughness: 0.08, emissive: SIMD4(Facade.glass.rawValue, 0, 0, 0))
         add(geometry.bridges, kind: .building, roughness: 0.6, emissive: SIMD4(Facade.bridge.rawValue, 0, 0, 0))
         add(geometry.windsocks, kind: .building, roughness: 0.8, emissive: SIMD4(Facade.windsock.rawValue, 0, 0, 0))
+        // Ground equipment serving the parked airliners (not at the stand the flight starts at).
+        add(StandEquipment.build(site, excluding: excludeStand), kind: .building, roughness: 0.5,
+            emissive: SIMD4(Facade.equipment.rawValue, 0, 0, 0))
         if let built = SignAtlas.build(signs, device: device), !built.vertices.isEmpty,
            let b = device.makeBuffer(bytes: built.vertices, length: built.vertices.count * MemoryLayout<MeshVertex>.stride,
                                      options: .storageModeShared) {

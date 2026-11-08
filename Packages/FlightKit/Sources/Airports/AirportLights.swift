@@ -291,6 +291,15 @@ public enum AirportLights {
     }
 
     public static func mastPositions(_ site: AirportSite) -> [SIMD2<Double>] {
+        // None where a parked airliner would stand (an A320's footprint from its nose wheel:
+        // nose 6 m ahead, tail 33 m behind, wings 18 m each side).
+        let stands = site.airlinerStands.map { s in (s.position, SIMD2(sin(s.heading), cos(s.heading))) }
+        func clear(_ p: SIMD2<Double>) -> Bool {
+            !stands.contains { c, f in
+                let d = p - c, along = simd_dot(d, f), across = simd_dot(d, SIMD2(-f.y, f.x))
+                return along < 6 && along > -33 && abs(across) < 18
+            }
+        }
         var out: [SIMD2<Double>] = []
         for a in site.layout.aprons {
             var ring = Polygon2D.open(a.outer.map(site.xy))
@@ -304,7 +313,8 @@ public enum AirportLights {
                 let d = (q - p) / len, inward = SIMD2(-d.y, d.x)
                 var s = 150 - carry
                 while s < len {
-                    out.append(p + d * s + inward * 8)
+                    let c = p + d * s + inward * 8
+                    if clear(c) { out.append(c) }
                     s += 150
                 }
                 carry = len - (s - 150)

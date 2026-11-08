@@ -9,6 +9,7 @@ struct SoundDemo {
     @Test func writeDemo() throws {
         let rate = 44_100.0
         var synth = EngineSynth(sampleRate: rate)
+        synth.turbineLayers = FlightAudio.loadTurbineLayers(directory: TurbineSampleTests.directory)
         var samples: [Float] = []
         func run(_ seconds: Double, _ set: (Double, inout SoundParameters) -> Void) {
             let frames = Int(seconds * rate)
@@ -29,11 +30,16 @@ struct SoundDemo {
         run(8) { t, p in p.groundSpeedKnots = 60 * t; p.airspeedKnots = 60 * t }
         run(5) { t, p in p.onGround = false; p.airspeedKnots = 60 + 20 * t; p.groundSpeedKnots = 0 }
         run(1) { _, p in p = SoundParameters() }
-        // A320: idle, spool to takeoff thrust, roll.
+        // A320 (CFM56 recordings): idle outside, spool to takeoff thrust, roll; then the
+        // same from the flight deck.
         run(3) { _, p in p.piston = false; p.n1 = 21; p.throttle = 0; p.onGround = true }
         run(6) { t, p in p.n1 = 21 + 74 * t; p.throttle = t }
         run(8) { t, p in p.groundSpeedKnots = 140 * t; p.airspeedKnots = 140 * t }
         run(2) { t, p in p.onGround = false; p.groundSpeedKnots = 0; p.airspeedKnots = 150 }
+        run(3) { _, p in p.exterior = false; p.n1 = 21; p.throttle = 0; p.onGround = true; p.airspeedKnots = 0 }
+        run(5) { t, p in p.n1 = 21 + 70 * t; p.throttle = t; p.groundSpeedKnots = 60 * t; p.airspeedKnots = 60 * t }
+        run(3) { _, p in p.exterior = true; p.n1 = 70; p.reverser = 1; p.groundSpeedKnots = 100; p.airspeedKnots = 100 }
+        run(1) { _, p in p.reverser = 0 }
         // A firm landing to finish.
         run(1) { _, p in p.n1 = 30; p.airspeedKnots = 135 }
         synth.touchdown(0.7)

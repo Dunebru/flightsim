@@ -485,6 +485,19 @@ inline float3 facadeAlbedo(float code, float2 uv, float3 N, thread float &roughn
         if (uv.y < -0.5) return float3(0.7, 0.7, 0.68);
         return fract(uv.x / 0.72) < 0.5 ? float3(0.85, 0.28, 0.04) : float3(0.82, 0.82, 0.80);
     }
+    if (code == 10.0) {
+        // Ground equipment: uv.y is the paint (0 white, 1 safety yellow, 2 black tyres and cab
+        // glass, 3 blue tarpaulin, 4 orange, 5 grey steel), uv.x metres along for wear.
+        float paint = floor(uv.y + 0.5);
+        float wear = 0.9 + 0.1 * fbm(uv * float2(1.3, 1.0) + seed * 11.0, 2);
+        roughness = paint == 2.0 ? 0.35 : (paint == 5.0 ? 0.5 : 0.6);
+        if (paint == 1.0) return float3(0.80, 0.58, 0.05) * wear;
+        if (paint == 2.0) return float3(0.025, 0.025, 0.028);
+        if (paint == 3.0) return float3(0.10, 0.20, 0.42) * wear;
+        if (paint == 4.0) return float3(0.85, 0.30, 0.04);
+        if (paint == 5.0) return float3(0.45, 0.46, 0.47) * wear;
+        return float3(0.80, 0.80, 0.78) * wear;
+    }
     if (N.z > 0.7 && code != 7.0) {
         roughness = 0.9;
         return float3(0.36, 0.35, 0.33) * (0.85 + 0.3 * fbm(uv * 0.05, 3));
