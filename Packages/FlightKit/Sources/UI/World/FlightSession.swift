@@ -1,4 +1,5 @@
 #if os(iOS)
+import Aircraft
 import Airports
 import FlightModel
 import Foundation
@@ -80,6 +81,40 @@ final class FlightSession {
     }
     private var clock = 0.0
     private var lastState: FlightState?
+    private var crash: CrashCheck?
+    private var crashCheckAfter = 1.5
+
+    /// What the C172's needles, yoke and pedals show, by FlightGear property.
+    static func cockpitReadings(_ s: FlightState, inputs: ControlInputs, declination: Double, headingBug: Double) -> [String: Double] {
+        typealias P = C172Model.Property
+        let magnetic = (s.heading * 180 / .pi - declination + 360).truncatingRemainder(dividingBy: 360)
+        let seconds = Date().timeIntervalSince(Calendar.current.startOfDay(for: Date()))
+        let surfaces = C172Model.surfaceReadings(leftAileron: s.leftAileron, rightAileron: s.rightAileron, elevator: s.elevator,
+                                                 rudder: s.rudder)
+        return surfaces.merging([
+            P.airspeed: s.indicatedAirspeedKnots,
+            P.pitch: s.pitch * 180 / .pi,
+            P.roll: s.roll * 180 / .pi,
+            P.altitude: s.altitudeFeet,
+            P.heading: magnetic,
+            P.compass: magnetic,
+            P.headingBug: headingBug,
+            P.verticalSpeed: s.verticalSpeedFPM,
+            // Standard rate (3 degrees a second) is one unit.
+            P.turnRate: s.yawRate * 180 / .pi / 3,
+            // The ball follows the sideslip (FlightGear's is ten times lateral over normal acceleration).
+            P.slipSkid: -s.sideslipDegrees * 0.6,
+            P.rpm: s.engineIndication,
+            P.flaps: s.flapPosition,
+            P.yokeAileron: inputs.roll,
+            P.yokeElevator: -inputs.pitch,
+            P.pedals: inputs.yaw,
+            P.throttle: inputs.throttle,
+            P.clock: seconds,
+            P.elevatorTrim: inputs.pitchTrim,
+            P.noseSteering: s.noseSteeringDegrees,
+        ]) { a, _ in a }
+    }
 
     /// - Parameters:
     ///   - site: the departure airport; its frame is the scene frame.
@@ -168,6 +203,9 @@ final class FlightSession {
     }
 
     func resetToStart(hud: HUDModel) {
+        crash?.reset()
+        hud.crashMessage = nil
+        crashCheckAfter = clock + 1.5        // the reset reaches the physics thread a frame or two later
         physics?.send(.reset(spawnConditions()))
         if isAirborneStart { physics?.send(.trim) }
         configureHUD(hud)
@@ -273,12 +311,14 @@ final class FlightSession {
         inputs.brakes = hud.wheelBrakes ? 1 : 0
         inputs.pitchTrim = hud.trim
         physics.setInputs(inputs)
-        physics.setPaused(hud.paused || holdForScenery)
+        physics.setPaused(hud.paused || holdForScenery || hud.crashMessage != nil)
         clock += dt
         if let s = lastState { physics.setAtmosphere(atmosphere(heightFeet: s.heightAboveGroundFeet, altitudeFeet: s.altitudeFeet)) }
 
         let s = physics.state
         lastState = s
+        if crash == nil, physics.restingHeightFeet > 0 { crash = CrashCheck(restingHeightFeet: physics.restingHeightFeet) }
+        if hud.crashMessage == nil, clock > crashCheckAfter, let reason = crash?.update(s) { hud.crashMessage = reason }
         let warn = !s.onGround && s.angleOfAttackDegrees > profile.stallWarningAlpha && s.indicatedAirspeedKnots > 20
         if warn != hud.stallWarning { hud.stallWarning = warn }
         // The ground under the aircraft, from the scenery: physics treats it as solid, and the
@@ -290,6 +330,9 @@ final class FlightSession {
         scene.aircraftPosition = SIMD3(base.x, base.y, base.z + height)
         scene.aircraftHeading = s.heading
         scene.aircraftGearDown = s.gearPosition > 0.5
+        scene.propellerSpinning = !s.engineIsTurbine && s.engineIndication > 400
+        if !s.engineIsTurbine { scene.instrumentValues = Self.cockpitReadings(s, inputs: inputs, declination: declination,
+                                                                              headingBug: Double(hud.targetHeading)) }
         scene.aircraftRoll = s.roll
         scene.aircraftPitch = s.pitch
 

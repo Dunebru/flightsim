@@ -136,6 +136,8 @@ public final class SceneRenderer {
     private let markingsVertexCount: Int
     private let runway = RunwaySpec.kphx08_26
     private var aircraft: AircraftMesh?
+    /// This frame's model-space transform for each animated aircraft part.
+    private var partTransforms: [String: simd_float4x4] = [:]
 
     // Per-size targets
     private var targets: Targets?
@@ -477,6 +479,15 @@ public final class SceneRenderer {
                 * MatrixMath.rotationX(Float(scene.aircraftRoll))
                 * aircraft.modelToBody
             aircraftModel = MatrixMath.translation(relative(aircraftWorld, to: camera)) * orient
+            if let animation = aircraft.animation {
+                var cache: [String: simd_float4x4] = [:]
+                for part in aircraft.parts where !part.animated.isEmpty && cache[part.animated] == nil {
+                    cache[part.animated] = animation.transform(part: part.animated, values: scene.instrumentValues) ?? matrix_identity_float4x4
+                }
+                partTransforms = cache
+            } else {
+                partTransforms = [:]
+            }
             aircraftPrev = reset ? aircraftModel : MatrixMath.translation(relative(aircraftWorld, to: previousCam)) * orient
             // Sun shadow map around the aircraft.
             if sunDir.z > 0.02 && scene.showAircraft {
@@ -653,9 +664,9 @@ public final class SceneRenderer {
                 e.setCullMode(.none)
                 e.setDepthBias(1, slopeScale: 2, clamp: 0.01)
                 e.setVertexBytes(&u, length: MemoryLayout<FrameUniforms>.stride, index: 1)
-                for part in aircraft.parts where !part.isGlass && (scene.aircraftGearDown || !part.isGear) {
+                for part in aircraft.parts where !part.isGlass && (scene.aircraftGearDown || !part.isGear) && part.variant != (scene.propellerSpinning ? "prop-slow" : "prop-fast") {
                     var d = part.draw
-                    d.model = aircraftModel
+                    d.model = aircraftModel * (partTransforms[part.animated] ?? matrix_identity_float4x4)
                     e.setVertexBuffer(part.vertices, offset: 0, index: 0)
                     e.setVertexBytes(&d, length: MemoryLayout<DrawUniforms>.stride, index: 2)
                     e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: part.vertexCount)
@@ -878,12 +889,15 @@ public final class SceneRenderer {
                 e.setDepthBias(0, slopeScale: 0, clamp: 0)
             }
             if let aircraft, scene.showAircraft {
-                for part in aircraft.parts where !part.isGlass && (scene.aircraftGearDown || !part.isGear) {
+                for part in aircraft.parts where !part.isGlass && (scene.aircraftGearDown || !part.isGear) && part.variant != (scene.propellerSpinning ? "prop-slow" : "prop-fast") {
                     var d = part.draw
-                    d.model = aircraftModel
-                    d.prevModel = aircraftPrev
+                    let pt = part.animated.isEmpty ? matrix_identity_float4x4 : (partTransforms[part.animated] ?? matrix_identity_float4x4)
+                    d.model = aircraftModel * pt
+                    d.prevModel = aircraftPrev * pt
+                    e.setCullMode(part.twoSided ? .none : .front)   // AC3D fronts wind counter-clockwise; Metal's default front is clockwise
                     draw(part.vertices, count: part.vertexCount, d, texture: part.texture)
                 }
+                e.setCullMode(.none)
             }
             if !settings.blackSkyForTest {
                 e.setRenderPipelineState(skyPipeline)
@@ -953,12 +967,15 @@ public final class SceneRenderer {
             if let aircraft, scene.showAircraft {
                 e.setRenderPipelineState(glassPipeline)
                 e.setDepthStencilState(depthTestOnly)
-                for part in aircraft.parts where part.isGlass && (scene.aircraftGearDown || !part.isGear) {
+                for part in aircraft.parts where part.isGlass && (scene.aircraftGearDown || !part.isGear) && part.variant != (scene.propellerSpinning ? "prop-slow" : "prop-fast") {
                     var d = part.draw
-                    d.model = aircraftModel
-                    d.prevModel = aircraftPrev
+                    let pt = part.animated.isEmpty ? matrix_identity_float4x4 : (partTransforms[part.animated] ?? matrix_identity_float4x4)
+                    d.model = aircraftModel * pt
+                    d.prevModel = aircraftPrev * pt
+                    e.setCullMode(part.twoSided ? .none : .front)   // AC3D fronts wind counter-clockwise; Metal's default front is clockwise
                     draw(part.vertices, count: part.vertexCount, d, texture: part.texture)
                 }
+                e.setCullMode(.none)
             }
             e.endEncoding()
         }
@@ -1186,9 +1203,9 @@ public final class SceneRenderer {
     }
 
     public func setAircraft(_ model: AC3DModel, textures: URL?, textureMap: [String: String] = [:],
-                            hiddenParts: Set<String> = []) throws {
+                            hiddenParts: Set<String> = [], animation: AnimatedModel? = nil, cullsBackFaces: Bool = false) throws {
         aircraft = try AircraftMesh(model: model, textureDirectory: textures, textureMap: textureMap, hiddenParts: hiddenParts,
-                                    device: device)
+                                    animation: animation, cullsBackFaces: cullsBackFaces, device: device)
         previousCamera = nil
     }
 

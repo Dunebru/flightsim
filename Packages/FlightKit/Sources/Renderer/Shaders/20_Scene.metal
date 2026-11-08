@@ -319,7 +319,7 @@ inline float ggxSpecular(float NdotH, float NdotV, float NdotL, float roughness)
 
 inline float3 shadeSurface(float3 albedo, float roughness, float metallic, float3 N, float3 worldPos,
                            float shadow, constant FrameUniforms &u, const device LightingState &light,
-                           texture2d<float> skyView)
+                           texture2d<float> skyView, float occlusion = 1.0)
 {
     float3 V = normalize(-worldPos);
     float3 L = u.sunDirection.xyz;
@@ -355,7 +355,9 @@ inline float3 shadeSurface(float3 albedo, float roughness, float metallic, float
     // roughness at grazing angles, so rough ground does not turn white toward the horizon.
     float3 ambientSpecular = env * envBRDF(f0, roughness, NdotV);
 
-    return direct + ambientDiffuse + ambientSpecular;
+    // `occlusion`: the share of the sky a surface sees (a cabin interior sees it only through
+    // the windows).
+    return direct + (ambientDiffuse + ambientSpecular) * occlusion;
 }
 
 inline float3 applyAerialPerspective(float3 color, float3 worldPos, float4 screenPos,
@@ -700,7 +702,9 @@ fragment GBufferOut sceneFragment(VertexOut in [[stage_in]],
 
     float shadow = min(shadowFactor(in.worldPos, u, shadowMap), worldShadowFactor(in.worldPos, N, u, worldShadowMap));
     shadow *= cloudShadowFactor(in.worldPos, u, cloudShadowMap);
-    float3 color = shadeSurface(albedo, roughness, d.material.y, N, in.worldPos, shadow, u, light, skyView);
+    // Aircraft interiors carry their sky occlusion in emissive.w (0 means open air).
+    float occlusion = (kind == kKindAircraft && d.emissive.w > 0.0) ? d.emissive.w : 1.0;
+    float3 color = shadeSurface(albedo, roughness, d.material.y, N, in.worldPos, shadow, u, light, skyView, occlusion);
     color += d.emissive.rgb * (kind == kKindAircraft ? 1.0 : 0.0);
     float night = smoothstep(0.05, -0.08, u.sunDirection.z);
     color += windowGlow * night;
@@ -750,7 +754,9 @@ fragment float4 glassFragment(VertexOut in [[stage_in]],
         alpha *= t.a;
     }
     float shadow = shadowFactor(in.worldPos, u, shadowMap);
-    float3 color = shadeSurface(albedo, 0.05, 0.0, N, in.worldPos, shadow, u, light, skyView);
+    // Clear glass scatters almost nothing: what it adds is a faint tint and the reflection
+    // (shadeSurface's specular). Lit as a diffuse surface, it reads as frosted plastic.
+    float3 color = shadeSurface(albedo * 0.08, 0.05, 0.0, N, in.worldPos, shadow, u, light, skyView);
     color = applyAerialPerspective(color, in.worldPos, in.position, u, aerial, light);
     // Glass reflects more at grazing angles.
     float3 V = normalize(-in.worldPos);

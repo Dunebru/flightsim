@@ -69,6 +69,8 @@ final class HUDModel {
     var lights: Set<Light> = [.nav, .beacon]
     var camera: Camera = .chase
     var paused = false
+    /// Why the flight ended in a crash, until the pilot restarts.
+    var crashMessage: String?
     var openPanel: Panel?
 
     // MARK: Autopilot targets (pilot-selected, shown cyan)

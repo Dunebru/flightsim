@@ -43,4 +43,53 @@ struct AirlinerRenderTests {
             try RendererTests.savePNG(img, 1600, 900, name: name)
         }
     }
+
+    /// The C172 outside and from the pilot's seat, after hiding FlightGear's helper objects.
+    @Test func c172Views() throws {
+        let aircraft = try C172Model.loadAircraft(directory: RendererTests.c172Dir)
+        let site = try AirportSite.load(AirportRenderTests.airportsURL.appendingPathComponent("KPHX.json"))
+        let (r, base) = try AirportRenderTests.scene(site, aircraft: false)
+        try r.setAircraft(aircraft.model, textures: RendererTests.c172Dir, hiddenParts: ["hidden"],
+                          animation: aircraft, cullsBackFaces: true)
+        let rw08 = site.layout.runways.first { $0.name == "08/26" }!
+        let f = site.runwayFrame(rw08)
+        let at = f.point(rw08.ends[0].displacedThreshold + 60, 0)
+        var s = base
+        s.showAircraft = true
+        // Readings with every needle off its stop: 105 kt, 4,500 ft, climbing 500 fpm in a
+        // standard-rate right turn at 2,300 rpm, heading 080, yoke turned right.
+        typealias P = C172Model.Property
+        s.instrumentValues = [P.airspeed: 105, P.altitude: 4_500, P.verticalSpeed: 500, P.turnRate: 1, P.roll: 20, P.pitch: 5,
+                              P.heading: 80, P.headingBug: 120, P.rpm: 2_300, P.yokeAileron: 0.5, P.clock: 37_800,
+                              P.flaps: 1, P.throttle: 0.8]
+        s.instrumentValues.merge(C172Model.surfaceReadings(leftAileron: 1, rightAileron: -1, elevator: -1, rudder: 1)) { a, _ in a }
+        s.aircraftPosition = site.onSurface(at)
+        s.aircraftHeading = f.heading * .pi / 180
+        let h = s.aircraftHeading
+        let fwd = SIMD3(sin(h), cos(h), 0.0), left = SIMD3(-cos(h), sin(h), 0.0)
+        let eye = SIMD3(1.62, 0.21, 1.6)
+        let views: [(String, CameraPose)] = [
+            ("c172-outside", CameraPose(position: s.aircraftPosition + fwd * 7 + left * 6 + SIMD3(0, 0, 2.2),
+                                        forward: simd_normalize(-fwd * 7 - left * 6 - SIMD3(0, 0, 1.2)), up: SIMD3(0, 0, 1), fovY: 55 * .pi / 180)),
+            ("c172-cockpit", CameraPose(position: s.aircraftPosition + fwd * eye.x + left * eye.y + SIMD3(0, 0, eye.z),
+                                        forward: simd_normalize(fwd - SIMD3(0, 0, 0.18)), up: SIMD3(0, 0, 1), fovY: 70 * .pi / 180)),
+            ("c172-cockpit-down", CameraPose(position: s.aircraftPosition + fwd * eye.x + left * eye.y + SIMD3(0, 0, eye.z),
+                                             forward: simd_normalize(fwd * 0.4 - SIMD3(0, 0, 1)), up: SIMD3(0, 0, 1), fovY: 70 * .pi / 180)),
+            // From behind: right roll, nose-up elevator, right rudder, full flap. The left
+            // aileron should be down, the right up, the elevator trailing edge up.
+            ("c172-tail", CameraPose(position: s.aircraftPosition - fwd * 6 + SIMD3(0, 0, 1.6),
+                                     forward: simd_normalize(fwd * 6 - SIMD3(0, 0, 0.4)), up: SIMD3(0, 0, 1), fovY: 75 * .pi / 180)),
+            // The airspeed indicator from 30 cm.
+            ("c172-asi", CameraPose(position: s.aircraftPosition + fwd * (eye.x + 0.5) + left * (eye.y + 0.025) + SIMD3(0, 0, eye.z - 0.15),
+                                    forward: simd_normalize(fwd * 0.3 + left * 0.015 - SIMD3(0, 0, 0.09)), up: SIMD3(0, 0, 1), fovY: 40 * .pi / 180)),
+        ]
+        for (name, pose) in views {
+            s.cameraPose = pose
+            r.exposureAdaptation = 1
+            try TerrainRenderTests.settle(r, s, limit: .seconds(60))
+            r.resetHistory()
+            let img = try r.renderImage(s, width: 1600, height: 900)
+            try RendererTests.savePNG(img, 1600, 900, name: name)
+        }
+    }
 }

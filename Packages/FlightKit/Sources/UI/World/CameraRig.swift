@@ -18,14 +18,15 @@ nonisolated struct CameraRig {
     var lookPitch: Double = -6 * .pi / 180
     var zoom: Double = 1                        // tower and wing field-of-view factor
 
-    /// Whether the aircraft's own geometry is drawn in this view. The C172 test model's
-    /// instrument panel lives in separate FlightGear files that are not imported yet (M6), so the
-    /// cockpit view is a clear pilot's-eye view for now rather than an empty cabin shell.
-    var drawsAircraft: Bool { mode != .cockpit }
+    /// Whether the aircraft's own geometry is drawn in this view. The C172 has its FlightGear
+    /// cockpit (panel, instruments, yoke, seats); the A320's flight deck is not imported yet, so
+    /// its cockpit view is a clear pilot's-eye view rather than the inside of an empty shell.
+    var drawsAircraft: Bool { mode != .cockpit || hasCockpit }
+    var hasCockpit = true
 
     /// Pilot eye and wing-camera positions in the body frame (x forward, y left, z up, metres,
     /// origin on the ground under the airframe centre). Set for the C172 test model.
-    var eyeOffset = SIMD3<Double>(1.56, 0.27, 1.71)
+    var eyeOffset = SIMD3<Double>(1.62, 0.21, 1.6)
     var wingOffset = SIMD3<Double>(0.1, 5.4, 2.15)
     var wingLook = SIMD3<Double>(1.0, -0.22, -0.06)
 
@@ -38,8 +39,10 @@ nonisolated struct CameraRig {
             wingOffset = SIMD3(-1.5, -2.3, 4.6)
             wingLook = SIMD3(0.45, -1.0, -0.14)
             orbitDistance = 60
+            hasCockpit = false
         } else {
-            eyeOffset = SIMD3(1.56, 0.27, 1.71)
+            hasCockpit = true
+            eyeOffset = SIMD3(1.62, 0.21, 1.6)
             wingOffset = SIMD3(0.1, 5.4, 2.15)
             wingLook = SIMD3(1.0, -0.22, -0.06)
             orbitDistance = 15

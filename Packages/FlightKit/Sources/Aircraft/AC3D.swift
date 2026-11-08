@@ -48,6 +48,8 @@ public struct AC3DModel: Sendable {
 
     public var triangleCount: Int { groups.reduce(0) { $0 + $1.triangleCount } }
 
+    public init() {}
+
     /// This model with another's groups added (the other's materials appended), for models
     /// FlightGear assembles from several files at one origin (an airframe and its engines).
     public func merged(with other: AC3DModel) -> AC3DModel {
@@ -79,6 +81,12 @@ public enum AC3DParser {
     /// parent's part when it returns ""), so callers can keep, hide or animate pieces such as
     /// landing gear. By default everything is one part.
     public static func parse(_ text: String, part: (String) -> String = { _ in "" }) throws -> AC3DModel {
+        try parse(text, objectPart: { name, _ in part(name) })
+    }
+
+    /// As `parse(_:part:)`, but the namer also sees the part its parent object ended up in, so
+    /// nested animated objects can carry their whole chain ("Yoke/Wheel").
+    public static func parse(_ text: String, objectPart part: (_ name: String, _ parentPart: String) -> String) throws -> AC3DModel {
         var reader = LineReader(text)
         guard let header = reader.next(), header.hasPrefix("AC3D") else { throw AC3DError.notAC3D }
         var model = AC3DModel()
@@ -146,7 +154,7 @@ public enum AC3DParser {
         _ reader: inout LineReader,
         parent: simd_float4x4,
         parentPart: String,
-        part: (String) -> String,
+        part: (String, String) -> String,
         model: inout AC3DModel,
         groupIndex: inout [GroupKey: Int]
     ) throws {
@@ -167,7 +175,7 @@ public enum AC3DParser {
             switch keyword {
             case "name":
                 let name = line.split(separator: "\"", omittingEmptySubsequences: false).dropFirst().first.map(String.init) ?? ""
-                let p = part(name)
+                let p = part(name, parentPart)
                 if !p.isEmpty { objectPart = p }
             case "url", "subdiv", "hidden", "locked", "folded":
                 continue

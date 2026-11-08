@@ -99,6 +99,11 @@ public struct FlightState: Sendable, Equatable {
     public var dynamicPressurePSF: Double = 0
     /// Throttle as last commanded (0 idle to 1 full), autothrottle included.
     public var throttle: Double = 0
+    /// Control surfaces as the flight control system has moved them, normalized as JSBSim's
+    /// fcs/*-pos-norm (the same values FlightGear's models animate from); 0 where a model lacks one.
+    public var leftAileron: Double = 0, rightAileron: Double = 0, elevator: Double = 0, rudder: Double = 0
+    /// Nose wheel steering angle, degrees.
+    public var noseSteeringDegrees: Double = 0
 
     public init() {}
 }
@@ -300,6 +305,16 @@ public final class FlightDynamics {
         s.track = north * north + east * east > 1 ? atan2(east, north) : s.heading
         s.dynamicPressurePSF = get("aero/qbar-psf")
         s.throttle = get("fcs/throttle-cmd-norm")
+        func optional(_ p: String) -> Double {
+            guard has(p) else { return 0 }
+            let v = get(p)
+            return v.isFinite ? v : 0
+        }
+        s.leftAileron = optional("fcs/left-aileron-pos-norm")
+        s.rightAileron = optional("fcs/right-aileron-pos-norm")
+        s.elevator = optional("fcs/elevator-pos-norm")
+        s.rudder = optional("fcs/rudder-pos-norm")
+        s.noseSteeringDegrees = optional("fcs/steer-pos-deg")
         return s
     }
 }

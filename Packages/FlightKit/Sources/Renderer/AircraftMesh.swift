@@ -15,7 +15,17 @@ final class AircraftMesh {
         let isGlass: Bool
         /// Landing gear: not drawn while the gear is up.
         var isGear = false
+        /// "prop-slow" or "prop-fast": the still or blurred propeller, drawn by engine speed.
+        var variant = ""
+        /// An animated part ("anim:..."), moved each frame by `animation`; empty when fixed.
+        var animated = ""
+        /// AC3D's two-sided flag. One-sided surfaces are culled from behind, as FlightGear
+        /// does; the models rely on it (an instrument's case is capped in front of its face).
+        var twoSided = true
     }
+
+    /// Animations for the parts that move (the cockpit's needles, yoke and pedals).
+    var animation: AnimatedModel?
 
     private(set) var parts: [Part] = []
     /// Model space -> aircraft body frame (x forward, y left, z up, origin on the ground).
@@ -46,7 +56,8 @@ final class AircraftMesh {
     /// `textureMap` swaps texture names (a livery's sheets for the base model's); parts named in
     /// `hiddenParts` are left out.
     init(model: AC3DModel, textureDirectory: URL?, textureMap: [String: String] = [:], hiddenParts: Set<String> = [],
-         device: any MTLDevice) throws {
+         animation: AnimatedModel? = nil, cullsBackFaces: Bool = false, device: any MTLDevice) throws {
+        self.animation = animation
         // FlightGear AC3D: x runs along the fuselage, y is up, z is the span. Find the nose by
         // where the propeller sits; default to FlightGear's convention (nose toward -x).
         let center = (model.boundsMin + model.boundsMax) / 2
@@ -98,6 +109,8 @@ final class AircraftMesh {
             let material = group.materialIndex < model.materials.count
                 ? model.materials[group.materialIndex]
                 : AC3DModel.Material(name: "", diffuse: SIMD3(0.8, 0.8, 0.8), emissive: .zero, specular: .zero, shininess: 16, transparency: 0)
+            // Fully transparent objects are FlightGear's click areas: never seen.
+            if material.transparency >= 0.99 { continue }
             let tex = texture(named: group.texture.map { textureMap[$0] ?? $0 })
             // AC3D materials darken textures (FlightGear lights them brighter); keep the tint,
             // drop the darkening, so textured parts show their painted colour.
@@ -108,9 +121,12 @@ final class AircraftMesh {
             draw.baseColor = SIMD4(tint, isGlass ? max(0.15, 1 - material.transparency) : 1)
             let roughness = min(max(sqrt(2 / (material.shininess + 2)), 0.18), 0.9)
             draw.material = SIMD4(roughness, 0, tex == nil ? 0 : 1, SurfaceKind.aircraft.rawValue)
-            draw.emissive = SIMD4(material.emissive, 0)
+            // The cabin sees the sky only through its windows: about a third of it.
+            let inside = animation?.isInterior(part: group.part) ?? false
+            draw.emissive = SIMD4(material.emissive, inside ? 0.3 : 0)
             parts.append(Part(vertices: buffer, vertexCount: verts.count, texture: tex, draw: draw, isGlass: isGlass,
-                              isGear: group.part == "gear"))
+                              isGear: group.part == "gear", variant: group.part.hasPrefix("prop-") ? group.part : "",
+                              animated: group.part.hasPrefix("anim:") ? group.part : "", twoSided: group.twoSided || !cullsBackFaces))
         }
     }
 }

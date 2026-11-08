@@ -132,7 +132,11 @@ public struct FlightHUDView: View {
                 .padding(.bottom, 10 + 48 + HUDStyle.gap)
             }
 
-            if model.paused { pausedOverlay }
+            if let message = model.crashMessage {
+                crashOverlay(message)
+            } else if model.paused {
+                pausedOverlay
+            }
         }
         .preferredColorScheme(.dark)
         .animation(.spring(duration: 0.35, bounce: 0.15), value: model.apMaster)
@@ -172,6 +176,10 @@ public struct FlightHUDView: View {
             // `-FlightOpenPanel autopilot` opens a panel at launch, so scripts can screenshot it.
             if let key = UserDefaults.standard.string(forKey: "FlightOpenPanel") {
                 model.openPanel = HUDModel.Panel(rawValue: key)
+            }
+            // `-FlightCamera Cockpit` starts in a view (the names on the camera menu).
+            if let key = UserDefaults.standard.string(forKey: "FlightCamera"), let camera = HUDModel.Camera(rawValue: key) {
+                model.camera = camera
             }
             // `-FlightScenario caution` shows the caution states (brake set, reverse armed).
             if UserDefaults.standard.string(forKey: "FlightScenario") == "caution" {
@@ -375,6 +383,44 @@ public struct FlightHUDView: View {
             .transition(.scale(scale: 0.92, anchor: .bottom).combined(with: .opacity))
             }
         }
+    }
+
+    private func crashOverlay(_ message: String) -> some View {
+        ZStack {
+            Color.black.opacity(0.45).ignoresSafeArea()
+            VStack(spacing: 10) {
+                Text("Crashed")
+                    .font(.system(size: 34, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                Text(message)
+                    .font(.system(size: 17, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.8))
+                HStack(spacing: 12) {
+                    Button {
+                        #if os(iOS)
+                        session?.resetToStart(hud: model)
+                        #endif
+                    } label: {
+                        Label("Restart", systemImage: "arrow.counterclockwise")
+                            .font(.system(size: 17, weight: .semibold))
+                            .padding(.horizontal, 12)
+                            .frame(height: 44)
+                    }
+                    .buttonStyle(.glassProminent)
+                    .tint(.white)
+                    .foregroundStyle(.black)
+                    Button(action: onExit) {
+                        Text("End Flight")
+                            .font(.system(size: 17, weight: .semibold))
+                            .padding(.horizontal, 12)
+                            .frame(height: 44)
+                    }
+                    .buttonStyle(.glass)
+                }
+                .padding(.top, 6)
+            }
+        }
+        .transition(.opacity)
     }
 
     private var pausedOverlay: some View {

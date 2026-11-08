@@ -23,7 +23,108 @@ C172P_FILES=(
   "tail.png 2248e1fb506af432dd06904e79e6b2d42d228642226b1261ad982b1bae17f0ac"
   "wing-normal.png 7b4f1f73ce6f3c699b7e215ac7f7722296619dbb9232ca49acc68c6cc1a0bc01"
   "wing.png bac29254864db96988d8f4917df04d04e0a9915e5b0de52d9b9bd75a32553950"
+  "fuel-selector.png e99e386587b53aa584aea6e5f1a42f82e20b1c1508577c50c7385a7c55241274"
 )
+
+# The C172P cockpit: interior, panel, the instruments with their animation XML, yoke and
+# pedals (same repository and commit). Originals keep their folders in Data/raw/c172p; the app
+# gets every file flat beside the exterior (no two share a name).
+C172P_RAW="$ROOT/Data/raw/c172p"
+C172P_COCKPIT_FILES=(
+  "Panel/Flaps/flaps.ac 82066ac587cad23a34d3b350c99706373baf1d638e2971a5c31e60bc46be3352"
+  "Panel/Flaps/flaps.png cbcd5acf6729cf61520ea2ed01ee6909d005b98d42a7902ebe68727205dd904d"
+  "Panel/Flaps/flaps.xml 8f8e9430c5a37876549b258a5cdd23e609ea1f7bde813b370c35effd4ce701fd"
+  "Panel/Instruments/AI/AI.ac b2a81912a796a9b318fb6f1e7090e46a6b499025338d4b314c9cf71f5227d80c"
+  "Panel/Instruments/AI/AI.png 1cc46c55eeb235ff3a7c0aa2e0d00354ff7fd89c643c12bd723945dc30164312"
+  "Panel/Instruments/AI/AI.xml d1c20fd7522255052588166b65ac855a8fe43a57e12bf09a81b8b778f62cc541"
+  "Panel/Instruments/BatteryGauge/BatteryGauge.ac 4eac43ba95d58d8511028fb4a0ee4711f841883ee147022a6eb896e7a9925887"
+  "Panel/Instruments/BatteryGauge/BatteryGauge.png f54adedb9e0dd382eeec9d7c56f1add433e7596c5ee11adc2727f2a012dd8f79"
+  "Panel/Instruments/BatteryGauge/BatteryGauge.xml 9dd304ba467dd9945a7ca56dd6339f1ec9d701222403a71d3e41337af06a3f37"
+  "Panel/Instruments/EGT/EGT.ac 2e1b928756aadb89f09b9d71cd4185ff9c79594e2f06673bfceb9aa3f938e9fd"
+  "Panel/Instruments/EGT/EGT.png 5f8bc20ccc28c1335f75658c30f1f075d739ca2bec6c8230f65d7cb3a15ae248"
+  "Panel/Instruments/EGT/EGT.xml ef239dd05346a68db268c61c5bad56db8f75d718df5ad3ff4f3c3762181f0af5"
+  "Panel/Instruments/FuelOilAmps/c172fuel.ac e8888b86cfc09c6ed0859ba9e17de572acbfed30cb1f81ca145fb2db38c25b30"
+  "Panel/Instruments/FuelOilAmps/c172fuel.xml c68e551f55406d464172ac91088f0a6ce0aaba121545a88134451c25ee0a7e81"
+  "Panel/Instruments/FuelOilAmps/c172oil.ac dc3a99126297d0c8c5bc322b04fd08bd3ff285d7460b7ed5249afe8a7727a314"
+  "Panel/Instruments/FuelOilAmps/c172oil.xml bae15d3a91eaf2ab5f9dadfe095adcf63d94ecbadcfc964518a65b371a4e2ee5"
+  "Panel/Instruments/FuelOilAmps/fuel-oil.png ec41aeb5b89215ff798756ec3431015935effcb88ed1adc370b2212542ea42de"
+  "Panel/Instruments/RPM/RPM.ac 7e193c9d6b7b70f4e063fa148cf43a7dcd6e092a46c7bb1fe3d148a4892498a2"
+  "Panel/Instruments/RPM/RPM.png ab94efe5d2899cf0db25fbb31a1b222d279478a891fe2d06bacd76837f77f633"
+  "Panel/Instruments/RPM/RPM.xml 5868453fa4c06a8dd4e4055431cb20c95b85baedc7df7fc357e3820ccf886954"
+  "Panel/Instruments/VSI/VSI.ac 4b32735b7fad7084db62fdf30660803d605b023d915232ac24bce7c39e1ffee1"
+  "Panel/Instruments/VSI/VSI.png 413403a0a2b3d5d7e27a5f21fce10c635511faec90446e295aaa474ccf24e758"
+  "Panel/Instruments/VSI/VSI.xml 22e8f4bf45c3bcc97c0232d91504413f486806e116c05a5be0f6a1f93169a2f2"
+  "Panel/Instruments/alt/alt.ac 73e1b2fb05949e836c3f937a58665d561cd19cbc38607630689672ddca44662c"
+  "Panel/Instruments/alt/alt.png 3a5406c4a7d99eb6900fc5d6913a9d3b3b15b17b6c10a4f2e4bd8ec459879a0e"
+  "Panel/Instruments/alt/alt.xml 5d71ebbef3c8cf5689b06f2eae3a450fb69b50a751bd7a69dd5bbfff778bdcf3"
+  "Panel/Instruments/asi/asi.ac a8f72730f5c44b568f88de4018a39b5499b9117c3d8ab5e9c53ed5fd1a828890"
+  "Panel/Instruments/asi/asi.png 0c3284e28f3c087ab79b6fda9a71593147d78ec7b3b8c771744c9cca91b84d7e"
+  "Panel/Instruments/asi/asi.xml b7030ee42a284c2c703d9be8237e75ab358613982da00c3a2baac0fdf20df601"
+  "Panel/Instruments/clock/clock.ac 7c0a6aa36a6050c7c3ef4af9c8a879054de3cd611cec1a0053aa07222df37be0"
+  "Panel/Instruments/clock/clock.png 7bb65ebf3d1d8b6fef84ae823715abaa30243201f0f456050a0b6d0ba856cab2"
+  "Panel/Instruments/clock/clock.xml 8ee58b9a0cfce0dfc9cc22f0f514b156b92cd176099098ca2baa280588dc76d7"
+  "Panel/Instruments/dme/dme.png 680490c8128258f585a130fac5b0d0d1eadd48c02ab6983e6a762fda1918e28a"
+  "Panel/Instruments/dme/ki266.ac 0426e2ac141e987cf5ff1a61fd065539bd1d8157f3ad483d464509ad888a960d"
+  "Panel/Instruments/dme/ki266.xml 31ef0a85ecd5cc341d583d2505acbc915031941ee634619baf2b84d3f6856683"
+  "Panel/Instruments/hi/hi.ac 9bbfc8211d14e1f0510d2c17f3fa6f4272cef4e7ff7df69293c8fac7e89ac373"
+  "Panel/Instruments/hi/hi.png 338adf525e2f544f40cf4790110a5a7b55561530a07ec122d9c22bbacd370607"
+  "Panel/Instruments/hi/hi.xml fed6c458c4d52d8da135d824c029b6918020fba5eb57186b9bbfb2e23f4c0931"
+  "Panel/Instruments/hobbs/hobbs.ac 54a1591f8c02e71c09c15cdc7546a4dc57833c239ecab85a3c8f0162555b05c8"
+  "Panel/Instruments/hobbs/hobbs.png 3ef765bdbb730b7910d42ad2ca9f65f7165d6ac0b6b18459d584eb430417bf94"
+  "Panel/Instruments/hobbs/hobbs.xml 8b0795b92bba647069ddcd7e51cf25d460aaa7a205e30dfaddd89883e56029cb"
+  "Panel/Instruments/kap140/kap140.ac 677eb1af505307defb10b812af580c3dfa549f6199421e771976a1bcf0f2048c"
+  "Panel/Instruments/kap140/kap140.png 232e48a808af0f46d4e53f6c169633fe8b264961a708ee56814fd4d818ae4f02"
+  "Panel/Instruments/kap140/kap140.xml 215dc3228c86c1d9d005a44719aabcbb08c9de59ef380ad80512afd39617cb6c"
+  "Panel/Instruments/kap140/nav-selector.xml cf67364960059bbc3215ff33116f2625e129a97e6e1d0d18453b5ba44f771630"
+  "Panel/Instruments/kma20/kma20.ac 5173e01296b0b87366819f48dfd295b359df6eed17afb4a364d5d8b8f62e4e9e"
+  "Panel/Instruments/kma20/kma20.png f0c416b51eea7fee82d592db6a958e81c9523099c6f848b538d73d594197057a"
+  "Panel/Instruments/kma20/kma20.xml 44f612e753699bfe9394a6bbd8907f7c3b327066039ac215953b21aabb81f717"
+  "Panel/Instruments/kma20/kma20init.xml 39cf24f2825439d3844ca8e5ea274eaa83bbf1e531a08e8329ed5b7a1d2a7596"
+  "Panel/Instruments/kr87-adf/adf.png c8876eccc86e1ad5ac0a416e5235f26f0fec97903d02be93fb0edf109de93853"
+  "Panel/Instruments/kr87-adf/ki227_228.ac 4b4547582d366ddbb1c361516129ad5c8b1d29284ae64fd9c7be208e3df13b29"
+  "Panel/Instruments/kr87-adf/ki227_228.xml df50de4107deb284709fbfa9366165b557bcb3042220e1406076c7427d045f7e"
+  "Panel/Instruments/kr87-adf/kr87.ac 345b840596d1caf659b09b4af81aa844eae5670cb0d2bb732671eac0a604b8b9"
+  "Panel/Instruments/kr87-adf/kr87.png dbcacc2501f464ed1afe703d1af8ad1927d9d46258261697765c3fb1f6676982"
+  "Panel/Instruments/kr87-adf/kr87.xml 074a514028df5ee9c5c6f74451cd3e70183c41af24cfb003239d219b30d2a6ab"
+  "Panel/Instruments/kt76a/kt76a.ac f7296470a6f9262c03162e5c659a683cc5d841269c462d9cfcb2574f245cc042"
+  "Panel/Instruments/kt76a/kt76a.png d8a6574795ff04eb6a4d470cc19bc487d9d89fc27f7d682218c95db9a581fa85"
+  "Panel/Instruments/kt76a/kt76a.xml ac8bdc5b51f124120ab6d368b58e2e38ce410b3d8bf8441d88a4bbd38135d3af"
+  "Panel/Instruments/kx165/kx165-1.ac 6756e2c53d28efd0b2e8a5e5bb162b9ec0115dbd86bcd0773a50186af5afd75f"
+  "Panel/Instruments/kx165/kx165-1.xml 058f383ae315d6e55708b0c63be1a868d5edfaf4e22793158186f8c3a813f8ac"
+  "Panel/Instruments/kx165/kx165-2.ac 0d47a0408ab69a9aa7f83b2bc359092b2a8077db51bf92c492aa4df08cc68616"
+  "Panel/Instruments/kx165/kx165-2.xml 5869f1fdb38d012b9be7f551cc3520ee22c619e4dd7412227b80c3efd3bb4c90"
+  "Panel/Instruments/kx165/kx165.png 4677a60756190eb45545b3d4f8ccbb2acc87159012f32755d9ec536923e2e995"
+  "Panel/Instruments/mag-compass/compass-correction-card.png 318e71fc200ff7f5344d52613effcaf3d5be3adb6c2ae24b55616ad8658058b9"
+  "Panel/Instruments/mag-compass/mag-compass-float.ac af6b95912f106b8762f7b7bdb9d98daf45edcc704af2f078a6fdd84f4c91ec9b"
+  "Panel/Instruments/mag-compass/mag-compass-float.xml 2b4c3eb458988eb009d45d2968d1887b110d929a6c101a634f8f4964a325699f"
+  "Panel/Instruments/mag-compass/mag-compass.ac cd69aeae60362b02c80cbb78ef5d1ff49af5124a0e4ecfcc38734795e638bc96"
+  "Panel/Instruments/mag-compass/mag-compass.png 81332d59cbf23e60e3ccc8e38486d09fd60edff80c2bb37acb721c5fcc27e2bb"
+  "Panel/Instruments/mag-compass/mag-compass.xml 7195af19d3b782c32c59da030b61113bfb5e09dfab182100c87913f6b7bae6a9"
+  "Panel/Instruments/magneto-switch/magneto-switch.ac fe801fa0e8a9396f8ecbd5afa5ea5cf9f33acfc6195639883f902524352fc80b"
+  "Panel/Instruments/magneto-switch/magneto-switch.png fad3f150a751503d8e2e2205035e8a755fbcaad2c1fb95e00432b4ef8942f27c"
+  "Panel/Instruments/magneto-switch/magneto-switch.xml e4318153b56a13b69d2f5a5360ad057d28bf0c129a32a74b81831f747e3fbda9"
+  "Panel/Instruments/tc/tc.ac d83c8f3d0e80b3c3949ccb3cad7cad7a2b7965043f5f8ad51607e5dd5cd77101"
+  "Panel/Instruments/tc/tc.png 7f4fbecac0b5c2586fa18c8eb6b1bcd4535965f30bf5ab5f0482c2690e393337"
+  "Panel/Instruments/tc/tc.xml 752e8cd268b8b38802f5e75f11296cfd5974079eec397598896c50b8b8233c74"
+  "Panel/Instruments/vac/vac.ac 15c986484c0e713e3b6eb81767fb9808fc27ca6bc3c6198f2afc6c1a2e127b07"
+  "Panel/Instruments/vac/vac.png 8ab1a930ac1c058622ef216d6faa2fbe3305bc08aeb8e24dad8c3234d75c9a1d"
+  "Panel/Instruments/vac/vac.xml 61e7cdba0137405774a45525c8e295fc8a4eb1f323080f13338db7785be629e6"
+  "Panel/Instruments/vor/vor.png 4bb8549cca20dbd44dac6fa3da5887f59c7a78b74e81f47cda77e718bbd5a21d"
+  "Panel/Instruments/vor/vor.xml c0d783b5c44593e87efce44c75cce979056cea1f850e94d8b2817e3b7b77e08a"
+  "Panel/Instruments/vor/vor1.ac f088106ece50c448e6e028a89ce06b327b0b96d71669cd93079d774f582e9372"
+  "Panel/Instruments/vor/vor2.ac 249b1bb339d41749feee0b1ccc8a0f4cf2ca9c70a874b69661df8e27e6198772"
+  "Panel/Instruments/vor/vor2.xml 47e8c3b73e4bc60ac72319aa54baccc0f9d341abf31a9c4c76dcc4d2634a1ad6"
+  "Panel/c172p-panel/c172p-interior.ac fc3c24701c1f983628b740c07911fd0356b8101002c11d886e708e6dbd288948"
+  "Panel/c172p-panel/c172p.xml b36b92a63ff18d7994d8342df84c1ccc5327b0e3b4a371308ce7b65bfa567914"
+  "Pedals/pedal.png 490cfd6b85a207974b7c1ae2cedaf1ad468b5d5af8f47c604c97e1f051518933"
+  "Pedals/pedals-pilot.xml 1c9cbd51456918bf225c3c1738a8b1c4e8a1d82cdb8c6237e5f8b0809d658d24"
+  "Pedals/pedals.ac 463625db814a14043f54f323e1a647ac711ff19d7481151e6e606178eebc55e0"
+  "Yoke/yoke.ac e8221a2194b825cfa68a571bcb42d623c4d86ebf8b14ed1598dedf02bec3a67b"
+  "Yoke/yoke.png 2c8276716c65fa17e919ed3dd19daa650ff6e9b9e148bcd6fff5f740a23e1300"
+  "Yoke/yoke.xml de438125c3fc68cc5cff0db7d04ddb0cbcaacff7207772775c165d55e8230d15"
+  "Yoke/yoke_mount.png 9b6f7ea42ab690f5138f06300b83cb234aa2aab1651d34505689706319432972"
+)
+
 
 fetch_set() {
   local base="${1:?}" dir="${2:?}"; shift 2
@@ -31,6 +132,7 @@ fetch_set() {
   local entry name sum have part
   for entry in "$@"; do
     name="${entry%% *}"; sum="${entry##* }"
+    mkdir -p "$(dirname "${dir:?}/${name:?}")"
     if [ -f "${dir:?}/${name:?}" ]; then
       have=$(shasum -a 256 "${dir:?}/${name:?}" | awk '{print $1}')
       [ "$have" = "$sum" ] && continue
@@ -49,6 +151,15 @@ fetch_set() {
 }
 
 fetch_set "https://raw.githubusercontent.com/c172p-team/c172p/$C172P_COMMIT/Models" "$C172P_DIR" "${C172P_FILES[@]}"
+fetch_set "https://raw.githubusercontent.com/c172p-team/c172p/$C172P_COMMIT/Models/Interior" "$C172P_RAW" "${C172P_COCKPIT_FILES[@]}"
+# The airframe's own model file (its animations: control surfaces, nose wheel, throttle and
+# mixture knobs), named apart from the panel's c172p.xml in the flat folder.
+fetch_set "https://raw.githubusercontent.com/c172p-team/c172p/$C172P_COMMIT/Models" "$C172P_RAW/model" "c172p.xml 46070342dc08ca8b0713429786e1a61c8547aad0fd929fabcd8728440f24c1da"
+cmp -s "$C172P_RAW/model/c172p.xml" "$C172P_DIR/c172p-model.xml" || cp -f "$C172P_RAW/model/c172p.xml" "$C172P_DIR/c172p-model.xml"
+for entry in "${C172P_COCKPIT_FILES[@]}"; do
+  name="${entry%% *}"
+  cmp -s "$C172P_RAW/$name" "$C172P_DIR/$(basename "$name")" || cp -f "$C172P_RAW/$name" "$C172P_DIR/$(basename "$name")"
+done
 
 # The A320 family by legoboyvdlp and Octal450 (FlightGear, GPL-2.0): the CFM56-powered A320
 # airframe, its engines and four liveries. Originals go to Data/raw/a320; the app gets copies

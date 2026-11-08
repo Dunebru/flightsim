@@ -234,6 +234,11 @@ public struct SceneDescription: Sendable {
     public var showAircraft = true
     /// The aircraft's gear is down (its gear parts are drawn).
     public var aircraftGearDown = true
+    /// The propeller is turning fast enough to blur.
+    public var propellerSpinning = false
+    /// Readings for the aircraft's animated parts (instrument needles, yoke, pedals), by
+    /// FlightGear property path.
+    public var instrumentValues: [String: Double] = [:]
     /// Added to every world position (camera included). Used by the floating-origin test.
     public var worldOffset = SIMD3<Double>.zero
     /// Cloud layers to draw (at most three are used, lowest first).

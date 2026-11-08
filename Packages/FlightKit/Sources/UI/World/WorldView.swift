@@ -184,16 +184,18 @@ final class WorldEngine: NSObject {
     /// Which aircraft to draw: "c172p" or "A320" (both FlightGear models).
     @ObservationIgnored private var aircraftID = "c172p"
     @ObservationIgnored private var c172: AC3DModel?
+    @ObservationIgnored private var c172Cockpit: AnimatedModel?
     @ObservationIgnored private var a320: AC3DModel?
 
     private func loadAircraft() {
         guard let directory = Bundle.main.resourceURL?.appendingPathComponent("Bundle/Aircraft/c172p") else { return }
         Task { [weak self] in
-            guard let model = await Self.parseModel(directory.appendingPathComponent("c172-common.ac")) else {
+            guard let (model, cockpit) = await Self.parseC172(directory) else {
                 self?.startupError = "Test aircraft not found in the app bundle (run scripts/fetch-assets.sh)."
                 return
             }
             self?.c172 = model
+            self?.c172Cockpit = cockpit
             if self?.aircraftID == "c172p" { self?.applyAircraft() }
         }
         guard let a320Directory = Bundle.main.resourceURL?.appendingPathComponent("Bundle/Aircraft/A320") else { return }
@@ -226,17 +228,21 @@ final class WorldEngine: NSObject {
                     try renderer?.setGenericAirliner()    // until the model has loaded
                 }
             } else if let c172, let directory = Bundle.main.resourceURL?.appendingPathComponent("Bundle/Aircraft/c172p") {
-                try renderer?.setAircraft(c172, textures: directory)
+                try renderer?.setAircraft(c172, textures: directory, hiddenParts: ["hidden"], animation: c172Cockpit, cullsBackFaces: true)
             }
         } catch {
             startupError = String(describing: error)
         }
     }
 
+    /// FlightGear's whole c172p: the airframe model file places the cockpit and animates the
+    /// control surfaces. Without the cockpit files the bare exterior still flies.
     @concurrent
-    private nonisolated static func parseModel(_ url: URL) async -> AC3DModel? {
-        guard let text = try? String(contentsOf: url, encoding: .isoLatin1) else { return nil }
-        return try? AC3DParser.parse(text)
+    private nonisolated static func parseC172(_ directory: URL) async -> (AC3DModel, AnimatedModel?)? {
+        if let whole = try? C172Model.loadAircraft(directory: directory) { return (whole.model, whole) }
+        guard let text = try? String(contentsOf: directory.appendingPathComponent("c172-common.ac"), encoding: .isoLatin1),
+              let exterior = try? AC3DParser.parse(text, part: C172Model.part) else { return nil }
+        return (exterior, nil)
     }
 
     // MARK: Display link
