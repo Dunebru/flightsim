@@ -1,5 +1,5 @@
 public import Airports
-public import simd
+import simd
 import Foundation
 
 /// The taxiway network as a graph, in the airport frame: nodes where centrelines bend or meet,
@@ -8,6 +8,11 @@ import Foundation
 public struct TaxiGraph: Sendable {
     public private(set) var nodes: [SIMD2<Double>] = []
     public private(set) var edges: [[Int]] = []
+    /// Taxiway names along edges (keyed by the lower node index, then the higher).
+    private var refs: [Int: [Int: String]] = [:]
+
+    /// The taxiway an edge belongs to, when it is named.
+    public func ref(_ a: Int, _ b: Int) -> String? { refs[min(a, b)]?[max(a, b)] }
 
     public init(site: AirportSite) {
         var cells: [SIMD2<Int>: [Int]] = [:]
@@ -24,17 +29,18 @@ public struct TaxiGraph: Sendable {
             cells[c, default: []].append(nodes.count - 1)
             return nodes.count - 1
         }
-        func link(_ a: Int, _ b: Int) {
+        func link(_ a: Int, _ b: Int, _ name: String?) {
             guard a != b, !edges[a].contains(b) else { return }
             edges[a].append(b)
             edges[b].append(a)
+            if let name, !name.isEmpty { refs[min(a, b), default: [:]][max(a, b)] = name }
         }
         for tw in site.layout.taxiways where tw.points.count >= 2 {
             let pts = tw.points.map(site.xy)
             var previous = node(pts[0])
             for p in pts.dropFirst() {
                 let n = node(p)
-                link(previous, n)
+                link(previous, n, tw.ref)
                 previous = n
             }
         }
@@ -59,11 +65,12 @@ public struct TaxiGraph: Sendable {
                 let m = nodes.count
                 nodes.append(best.q)
                 edges.append([])
+                let name = refs[min(best.a, best.b)]?[max(best.a, best.b)]
                 edges[best.a].removeAll { $0 == best.b }
                 edges[best.b].removeAll { $0 == best.a }
-                link(best.a, m)
-                link(m, best.b)
-                link(d, m)
+                link(best.a, m, name)
+                link(m, best.b, name)
+                link(d, m, edges[d].first.flatMap { refs[min(d, $0)]?[max(d, $0)] })
             }
         }
     }
@@ -78,8 +85,19 @@ public struct TaxiGraph: Sendable {
         return best?.0
     }
 
+    /// The taxiway names along a path, in order, each once per stretch ("C", "B", "B3").
+    public func names(along path: [Int]) -> [String] {
+        var out: [String] = []
+        for (a, b) in zip(path, path.dropFirst()) {
+            if let r = ref(a, b), r != out.last { out.append(r) }
+        }
+        return out
+    }
+
     /// Shortest path between two nodes (A*), as node indices, or nil when they are not connected.
-    public func path(from start: Int, to goal: Int, avoiding blocked: Set<Int> = []) -> [Int]? {
+    /// `turnPenalty`: metres added for each change of taxiway name, so a route keeps to one
+    /// taxiway the way a controller's clearance does rather than hopping between parallels.
+    public func path(from start: Int, to goal: Int, avoiding blocked: Set<Int> = [], turnPenalty: Double = 0) -> [Int]? {
         if start == goal { return [start] }
         var g = [Int: Double](), came = [Int: Int]()
         g[start] = 0
@@ -96,7 +114,10 @@ public struct TaxiGraph: Sendable {
             }
             guard closed.insert(current).inserted else { continue }
             for next in edges[current] where !closed.contains(next) && (!blocked.contains(next) || next == goal) {
-                let cost = g[current]! + simd_distance(nodes[current], nodes[next])
+                var cost = g[current]! + simd_distance(nodes[current], nodes[next])
+                if turnPenalty > 0, let before = came[current], let r1 = ref(before, current), let r2 = ref(current, next), r1 != r2 {
+                    cost += turnPenalty
+                }
                 if cost < g[next] ?? .infinity {
                     g[next] = cost
                     came[next] = current

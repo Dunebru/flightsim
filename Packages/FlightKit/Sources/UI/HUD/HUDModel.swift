@@ -1,3 +1,4 @@
+import ATC
 import Autopilot
 import Nav
 import FlightModel
@@ -101,6 +102,13 @@ final class HUDModel {
     var airports: [NavPoint] = []
     /// Navaids and fixes for the map.
     var navData: NavData?
+
+    // MARK: ATC
+
+    /// The calls that make sense now, what has been said, and how to say one.
+    var atcRequests: [ATCRequest] = []
+    var atcLog: [ATCMessage] = []
+    var onATC: ((ATCRequest) -> Void)?
 
     // MARK: Flight data (live from the flight model on iOS; zero elsewhere)
 

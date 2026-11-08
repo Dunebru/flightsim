@@ -8,7 +8,9 @@ Last updated: 2026-11-07.
 
 AI airliners at the departure airport, on the runways the wind favours (into the wind; the west-facing ends in light wind, as at both airports normally; tested). About an arrival and a departure every two minutes, around 60 movements an hour. Arrivals fly the 3 degree path from 15 km, flare, roll out and leave at the first exit they can make, then taxi over the mapped taxiway network (KPHX: 4,833 nodes, every free gate reaches every runway) to a free gate, where they stay 10 to 25 minutes before pushing back as departures. Departures push back, taxi to the threshold, hold until the runway and the final 5 km are clear, line up, roll and climb out. On the ground they look 60 m along their path: they stop behind anything ahead or standing still, take turns at crossings, and find another way round a head-on meeting; one still stuck after two minutes is withdrawn, never within 2 km of where you are watching. Tested over 40 simulated minutes at each airport: KPHX 14 landings, 18 takeoffs, 10 at gates, closest on the ground 59 m, 2 withdrawn; KLAX 13, 10, 10, 47 m, 3. Traffic stops for you on the ground, and an arrival goes around if you are on its runway (tested). Drawn with the generic narrowbody and widebody shapes, pitched on rotation and approach, with shadows; the airport is already busy when a flight starts.
 
-Their lights follow what they are doing: navigation lights and red beacons whenever the engines run, white wingtip strobes on the runway and in the air, landing lights on approach, takeoff and rollout, the nose taxi light on the ground (render `kphx-traffic-night`). Not yet: landing gear on the shapes, traffic at the arrival airport, ATC, anything that talks.
+Their lights follow what they are doing: navigation lights and red beacons whenever the engines run, white wingtip strobes on the runway and in the air, landing lights on approach, takeoff and rollout, the nose taxi light on the ground (render `kphx-traffic-night`). Not yet: landing gear on the shapes, traffic at the arrival airport.
+
+**ATC.** The ATC panel offers the calls that make sense where you are: the ATIS any time (from the METAR and the runways in use: letter, time, wind, visibility, sky, temperature, altimeter); at a gate, a taxi request answered with the runway in use and a real route by taxiway names, preferring to stay on one taxiway ("runway 25L, taxi via H, H7, G7, hold short of runway 25L"); at the hold, ready for departure, cleared only when no AI arrival is within 5 km or on the runway ("hold short, traffic landing" otherwise; tested), after which AI departures wait for you; departure check-in with a climb; the ILS approach and the landing clearance, numbered behind AI traffic on final; clear of the runway and taxi to a free gate. Controllers speak, in FAA phraseology (digits with "niner", phonetic taxiways, runway sides, altitudes, altimeter; tested), through the system's US English voice; your calls are shown. Callsigns are generic (N172SP, Flight 214). Not yet: a radio-sounding voice, frequencies, readbacks checked, ATC that calls you unprompted (handoffs, traffic alerts), departure and arrival procedures.
 
 ## M8 Navigation and autopilot: started (2026-11-07)
 
@@ -143,11 +145,11 @@ Build warnings: 1, the deprecated `UIRequiresFullScreen`, kept on purpose (see K
 | Autopilot | **Partial (M8).** HDG, NAV, LOC, V/S with altitude capture, G/S, A/THR; tested in flight on both models. |
 | Nav | **Placeholder.** ILS approaches come from the airport data (UI's ApproachCatalog); navaids and procedures not yet. |
 | Traffic | **Partial (M9).** Arrivals, departures and taxiing over the real taxiway network at the departure airport; tested. |
-| ATC | **Placeholder.** Module identity only (M9). |
+| ATC | **Partial (M9).** ATIS, ground, tower, departure and approach on request, aware of the traffic; spoken. |
 
 ## Placeholders in the app today
 
-Airports are generated, not modelled: terminals are extruded footprints with procedural glass, not the real architecture. Airliners, parked and moving, are generic shapes in generic liveries. The HUD carries a small "Prototype" tag. The ATC panel says it is not built (M9). The tower camera position is a guess, not the real tower.
+Airports are generated, not modelled: terminals are extruded footprints with procedural glass, not the real architecture. Airliners, parked and moving, are generic shapes in generic liveries. The HUD carries a small "Prototype" tag.  The tower camera position is a guess, not the real tower.
 
 ## Known issues
 

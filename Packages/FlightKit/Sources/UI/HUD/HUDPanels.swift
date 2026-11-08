@@ -351,3 +351,57 @@ nonisolated extension HUDModel.Light {
         }
     }
 }
+
+/// Talking to ATC: the last few transmissions, then the calls that make sense where you are.
+struct ATCPanel: View {
+    let model: HUDModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if model.atcLog.isEmpty {
+                Text("Calls appear here for where you are: ATIS any time, then ground, tower, departure and approach.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(HUDStyle.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 6) {
+                            ForEach(model.atcLog) { m in
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(m.from)
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundStyle(m.isPilot ? HUDStyle.selected : HUDStyle.engaged)
+                                    Text(m.text)
+                                        .font(.system(size: 13))
+                                        .foregroundStyle(.white)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                                .id(m.id)
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 120)
+                    .onChange(of: model.atcLog.count, initial: true) { if let last = model.atcLog.last { proxy.scrollTo(last.id, anchor: .bottom) } }
+                }
+            }
+            HStack(spacing: 6) {
+                ForEach(model.atcRequests) { r in
+                    Button { model.onATC?(r) } label: {
+                        Text(r.label)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 12)
+                            .frame(height: 36)
+                            .background(.white.opacity(0.16), in: .capsule)
+                            .frame(minHeight: 44)
+                            .contentShape(.capsule)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .frame(width: 440, alignment: .leading)
+        .padding(.trailing, 10)
+    }
+}

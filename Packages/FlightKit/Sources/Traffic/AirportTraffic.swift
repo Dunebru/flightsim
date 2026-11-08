@@ -382,7 +382,8 @@ public final class AirportTraffic: @unchecked Sendable {
                 default: return false
                 }
             }
-            if !busy, let entry = rw.entries.first {
+            let playerHasIt = playerClearance.map { $0.runway == rw.ident } ?? false
+            if !busy, !playerHasIt, let entry = rw.entries.first {
                 let p = rw.point(max(entry.along, 0))
                 a.path = [graph.nodes[entry.node], p, p + rw.direction * 40]
                 a.leg = 0
@@ -566,6 +567,95 @@ public final class AirportTraffic: @unchecked Sendable {
         if d > .pi { d -= 2 * .pi }
         if d < -.pi { d += 2 * .pi }
         return h + max(-rate * dt, min(rate * dt, d))
+    }
+
+    // MARK: For ATC
+
+    /// The player's runway clearance (takeoff or landing): AI departures hold short of it.
+    public var playerClearance: (runway: String, landing: Bool)?
+
+    /// A taxi route: where to, by which taxiways, and the path (airport frame).
+    public struct TaxiRoute: Sendable {
+        public var destination: String
+        public var via: [String]
+        public var path: [SIMD2<Double>]
+    }
+
+    /// The shortest taxi to a runway in use, from a point on the airport.
+    public func routeToRunway(from p: SIMD2<Double>) -> TaxiRoute? {
+        guard let start = graph.nearest(p, within: 200) else { return nil }
+        var best: (TaxiRoute, Double)?
+        for r in active {
+            guard let entry = runways[r].entries.first, let path = graph.path(from: start, to: entry.off, turnPenalty: 250) else { continue }
+            let points = path.map { graph.nodes[$0] }
+            let length = zip(points, points.dropFirst()).reduce(0) { $0 + simd_distance($1.0, $1.1) }
+            if length < (best?.1 ?? .infinity) {
+                best = (TaxiRoute(destination: runways[r].ident, via: graph.names(along: path), path: points), length)
+            }
+        }
+        return best?.0
+    }
+
+    /// A taxi to a free gate near the terminal, reserved for the player.
+    public func routeToGate(from p: SIMD2<Double>) -> TaxiRoute? {
+        guard let start = graph.nearest(p, within: 200) else { return nil }
+        let candidates = freeStands.filter { !reserved.contains($0) && standNode($0) != nil }
+            .sorted { simd_distance(stands[$0].position, p) < simd_distance(stands[$1].position, p) }
+            .prefix(8)
+        for s in candidates {
+            guard let goal = standNode(s), let path = graph.path(from: start, to: goal, turnPenalty: 250) else { continue }
+            reserved.insert(s)
+            return TaxiRoute(destination: stands[s].ref ?? "parking", via: graph.names(along: path),
+                             path: path.map { graph.nodes[$0] } + stands[s].line.dropFirst())
+        }
+        return nil
+    }
+
+    /// Nothing on the runway and no AI arrival within 5 km of it.
+    public func runwayIsClear(_ ident: String) -> Bool {
+        guard let r = runways.firstIndex(where: { $0.ident == ident }) else { return true }
+        let rw = runways[r]
+        return !aircraft.contains { o in
+            guard o.runway == r else { return false }
+            switch o.phase {
+            case .rollout, .takeoff, .lineup: return true
+            case .approach: return rw.along(SIMD2(o.position.x, o.position.y)) > -5_000
+            default: return false
+            }
+        }
+    }
+
+    /// AI arrivals on a runway's final that are closer to the threshold than a point.
+    public func arrivalsAhead(runway ident: String, of p: SIMD2<Double>) -> Int {
+        guard let r = runways.firstIndex(where: { $0.ident == ident }) else { return 0 }
+        let mine = runways[r].along(p)
+        return aircraft.filter { o in
+            guard o.runway == r, case .approach = o.phase else { return false }
+            return runways[r].along(SIMD2(o.position.x, o.position.y)) > mine
+        }.count
+    }
+
+    /// The runway end a point is on (the one in use, when the runway is), or nil.
+    public func runway(at p: SIMD2<Double>) -> String? {
+        let on = runways.indices.filter { i in
+            let r = runways[i]
+            let d = p - r.threshold
+            return abs(d.x * r.direction.y - d.y * r.direction.x) < r.width / 2 + 5 && r.along(p) > -60 && r.along(p) < r.length + 60
+        }
+        return (on.first { active.contains($0) } ?? on.first).map { runways[$0].ident }
+    }
+
+    /// The runway in use a point is holding short of (within 70 m of its entry), or nil.
+    public func holdingShort(at p: SIMD2<Double>) -> String? {
+        for r in active {
+            if let entry = runways[r].entries.first, simd_distance(graph.nodes[entry.off], p) < 70 { return runways[r].ident }
+        }
+        return nil
+    }
+
+    /// The runway end in use nearest a point (for an arrival), by distance to its threshold.
+    public func arrivalRunway(near p: SIMD2<Double>) -> String? {
+        active.min { simd_distance(runways[$0].threshold, p) < simd_distance(runways[$1].threshold, p) }.map { runways[$0].ident }
     }
 
     /// Test helpers: ids now, ids of aircraft on the ground near a point, and how many were

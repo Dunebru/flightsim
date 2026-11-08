@@ -1,5 +1,6 @@
 import FlightModel
 import Weather
+import ATC
 import Autopilot
 import Nav
 import Renderer
@@ -210,6 +211,11 @@ public struct FlightHUDView: View {
         default: break
         }
         session = s
+        model.atcLog = []
+        // `-FlightATC atis,taxi`: make those calls once the airport is ready (scripts).
+        s.scriptedATC = (UserDefaults.standard.string(forKey: "FlightATC") ?? "").split(separator: ",")
+            .compactMap { ATCRequest(rawValue: String($0)) }
+        model.onATC = { [weak s, weak model] r in if let model { s?.sayATC(r, hud: model) } }
         let hud = model
         let settings = self.settings
         engine.dateProvider = { settings.flightDate() }
@@ -359,9 +365,7 @@ public struct FlightHUDView: View {
                 case .map:
                     EmptyView()
                 case .atc:
-                    GlassPanel(title: "ATC", onClose: close) {
-                        NotYetPanel(title: "No ATC yet", symbol: "antenna.radiowaves.left.and.right", detail: "Ground, tower, departure and approach arrive in M9.")
-                    }
+                    GlassPanel(title: "ATC", onClose: close) { ATCPanel(model: model) }
                 }
             }
             .fixedSize()

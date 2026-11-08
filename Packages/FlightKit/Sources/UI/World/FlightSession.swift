@@ -6,6 +6,7 @@ import Renderer
 import SimCore
 import Terrain
 import Weather
+import ATC
 import Autopilot
 import Nav
 import Traffic
@@ -25,6 +26,14 @@ final class FlightSession {
     /// AI traffic at the departure airport, once built (off the main thread: the taxiway graph
     /// and a warm-up take a moment).
     private var traffic: AirportTraffic?
+    /// ATC at the departure airport, and the voice that speaks it.
+    let atc: ATCController
+    private let voice = ATCVoice()
+    /// Calls made by a launch argument (scripts), once traffic is ready.
+    var scriptedATC: [ATCRequest] = []
+    private var lastScripted = 0.0
+    /// Where the aircraft is on the airport (airport frame), from the last frame.
+    private var lastPosition = SIMD2<Double>.zero
     private(set) var error: String?
     let frame: LocalFrame
     let tilt = TiltInput()
@@ -81,6 +90,10 @@ final class FlightSession {
         declination = MagneticModel.declination(latitude: site.layout.reference.lat, longitude: site.layout.reference.lon,
                                                 year: MagneticModel.year(of: Date()))
         approaches = ApproachCatalog.approaches(at: site)
+        let names = Self.facilities(site.layout.icao)
+        atc = ATCController(city: names.city, approachFacility: names.approach,
+                            callsign: profile.isTurbine ? "Flight 214" : "N172SP",
+                            spokenCallsign: profile.isTurbine ? "flight two one four" : "Cessna one seven two sierra papa")
         let first = site.startSpots.first ?? .runway("")
         self.spot = site.placement(spot) == nil ? first : spot
         placement = site.placement(spot) ?? site.placement(first) ?? StartPlacement(position: .zero, heading: 0, altitude: nil)
@@ -181,8 +194,9 @@ final class FlightSession {
     func tick(dt: Double, hud: HUDModel, scene: inout SceneDescription, holdForScenery: Bool = false) {
         guard let physics else { return }
         scene.clouds = cloudLayers
+        lastPosition = SIMD2(scene.aircraftPosition.x, scene.aircraftPosition.y)
         if let traffic, let s = lastState {
-            traffic.player = (SIMD2(scene.aircraftPosition.x, scene.aircraftPosition.y), s.onGround)
+            traffic.player = (lastPosition, s.onGround)
             if let eye = scene.cameraPose?.position { traffic.viewer = SIMD2(eye.x, eye.y) }
             traffic.update(dt: min(dt, 0.1))
             var moving = TrafficInstances(narrow: [], wide: [])
@@ -287,7 +301,50 @@ final class FlightSession {
             // The thrust lever follows the autothrottle, as on the real aircraft, and stays where
             // it left it when the autothrottle is switched off.
             if st.autothrottle { hud.setThrottle(s.throttle) }
+            if let traffic, let situation = atcSituation(s) {
+                hud.atcRequests = atc.requests(situation, traffic: traffic)
+                if let next = scriptedATC.first, clock - lastScripted > 2 {
+                    scriptedATC.removeFirst()
+                    lastScripted = clock
+                    sayATC(next, hud: hud)
+                }
+            }
         }
+    }
+
+    /// Facility names: the city controllers use, and the approach control's.
+    static func facilities(_ icao: String) -> (city: String, approach: String) {
+        switch icao {
+        case "KPHX": ("Phoenix", "Phoenix")
+        case "KLAX": ("Los Angeles", "SoCal")
+        default: (icao, icao)
+        }
+    }
+
+    private func atcSituation(_ s: FlightState) -> ATCSituation? {
+        let ahead = ApproachCatalog.approachAhead(approaches, state: s)?.name.replacingOccurrences(of: "ILS ", with: "")
+        return ATCSituation(position: lastPosition, heightAboveGroundFeet: s.heightAboveGroundFeet, altitudeFeet: s.altitudeFeet,
+                            groundSpeedKnots: s.groundSpeedKnots, onGround: s.onGround, approachRunway: ahead)
+    }
+
+    /// The METAR as the ATIS reads it.
+    private var atisWeather: ATISWeather {
+        let covers: [Metar.Cover: String] = [.few: "few", .scattered: "scattered", .broken: "broken", .overcast: "overcast",
+                                             .verticalVisibility: "sky obscured"]
+        return ATISWeather(windFrom: weather.windFromDegrees, windKnots: weather.windKnots, gust: weather.gustKnots,
+                           visibilityMiles: weather.visibilityMetres / 1_609.344,
+                           clouds: weather.clouds.map { (covers[$0.cover] ?? "few", $0.baseFeet) },
+                           temperature: Int(weather.temperatureC.rounded()), dewpoint: weather.dewpointC.map { Int($0.rounded()) },
+                           altimeterHPa: weather.altimeterHPa, observed: Date())
+    }
+
+    /// Makes a call to ATC: the answer goes in the log and the controller's words are spoken.
+    func sayATC(_ request: ATCRequest, hud: HUDModel) {
+        guard let traffic, let s = lastState, let situation = atcSituation(s) else { return }
+        let messages = atc.say(request, situation, traffic: traffic, weather: atisWeather)
+        hud.atcLog = atc.log
+        for m in messages where !m.isPilot { voice.speak(m.spoken) }
+        hud.atcRequests = atc.requests(situation, traffic: traffic)
     }
 
     /// Hands the glareshield's settings to the autopilot (on the physics thread), with the ILS
