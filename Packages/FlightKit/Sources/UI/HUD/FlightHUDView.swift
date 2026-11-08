@@ -88,9 +88,7 @@ public struct FlightHUDView: View {
                             AutopilotStatus(model: model)
                                 .transition(.move(edge: .top).combined(with: .opacity))
                         }
-                        if isLoadingScenery {
-                            loadingTag
-                        } else if model.openPanel == nil {
+                        if model.openPanel == nil {
                             demoTag
                             #if os(iOS)
                             if engine.showStats { FrameStatsOverlay(engine: engine) }
@@ -143,6 +141,15 @@ public struct FlightHUDView: View {
             }
         }
         #endif
+        // Until the airport and the ground around it are ready, a loading screen instead of a
+        // half-built world.
+        .overlay {
+            if isLoadingScenery {
+                LoadingScreen(airport: settings.airport, place: settings.spot.label)
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeOut(duration: 0.45), value: isLoadingScenery)
         #if os(iOS)
         .onChange(of: engine.site?.layout.icao) { _, icao in
             if icao != nil && session == nil { startSession() }
@@ -340,18 +347,6 @@ public struct FlightHUDView: View {
         #else
         false
         #endif
-    }
-
-    private var loadingTag: some View {
-        HStack(spacing: 6) {
-            ProgressView().controlSize(.mini).tint(.white)
-            Text("Loading scenery")
-        }
-        .font(.system(size: 11, weight: .semibold))
-        .foregroundStyle(.white)
-        .padding(.horizontal, 10)
-        .frame(height: 22)
-        .glassEffect(HUDStyle.glass, in: .capsule)
     }
 
     private var demoTag: some View {

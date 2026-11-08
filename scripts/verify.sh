@@ -113,11 +113,23 @@ run_on_sim() {
   xcrun simctl terminate "$udid" "$BUNDLE_ID" >/dev/null 2>&1 || true
   # Pinned to midday in Phoenix so the capture shows the lit world whatever the clock says (at
   # night the frame is legitimately near black, which this check could not tell from a failure).
+  # The app writes Library/Caches/flight-ready.txt once the airport is built and the terrain has
+  # streamed in; wait for that (a capture during loading would show the loading screen).
+  local data ready
+  data=$(xcrun simctl get_app_container "$udid" "$BUNDLE_ID" data 2>/dev/null || true)
+  ready="$data/Library/Caches/flight-ready.txt"
+  [ -n "$data" ] && rm -f "$ready"
   run_logged "launch-hud-$label" xcrun simctl launch "$udid" "$BUNDLE_ID" -FlightStartScreen hud \
     -FlightTimeUTC 2026-06-21T19:30:00Z
-  settle "$LAUNCH_SETTLE_SECONDS"
+  local waited=0
+  until [ -f "$ready" ] || [ "$waited" -ge 90 ]; do settle 3; waited=$((waited + 3)); done
+  if [ ! -f "$ready" ]; then
+    echo "    FAILED: the flight on $name was not ready ${waited}s after launch"; exit 1
+  fi
+  echo "    ok: flight ready on $name after about ${waited}s ($(cut -c1-20 "$ready"))"
+  settle 3
   if ! xcrun simctl spawn "$udid" launchctl list | grep -F "$BUNDLE_ID" | grep -qE '^[0-9]+'; then
-    echo "    FAILED: HUD not running on $name ${LAUNCH_SETTLE_SECONDS}s after launch (crashed?)"; exit 1
+    echo "    FAILED: HUD not running on $name after launch (crashed?)"; exit 1
   fi
   capture "$udid" "$OUT/$label-hud.png" "screenshot-hud-$label"
   w=$(sips -g pixelWidth "$OUT/$label-hud.png" | awk '/pixelWidth/ {print $2}')

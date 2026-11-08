@@ -73,6 +73,7 @@ final class WorldEngine: NSObject {
         let defaults = UserDefaults.standard
         timeOverride = defaults.string(forKey: "FlightTimeUTC").flatMap { ISO8601DateFormatter().date(from: $0) }
         scene = .phoenixTest(date: timeOverride ?? Date())
+        scene.showRunway = false        // airports are generated; the M1 stand-in runway is for tests
         scenery = Bundle.main.resourceURL.map { SceneryLibrary(directory: $0.appendingPathComponent("Bundle/Scenery")) }
             .flatMap { $0.packs.isEmpty ? nil : $0 }
         // Layouts are small; the scene origin (the departure airport's reference point) is known
@@ -110,6 +111,14 @@ final class WorldEngine: NSObject {
         loadAirports()
     }
 
+    /// Writes Library/Caches/flight-ready.txt when a flight starts, so scripts (verify.sh) know
+    /// the world is ready before they take a screenshot.
+    static func markReady(airport: String) {
+        guard let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else { return }
+        try? "ready \(airport) \(ISO8601DateFormatter().string(from: Date()))\n"
+            .write(to: caches.appendingPathComponent("flight-ready.txt"), atomically: true, encoding: .utf8)
+    }
+
     struct BuiltAirports: Sendable {
         var assets: [AirportAssets]
         var overrides: [GroundOverride]
@@ -119,8 +128,10 @@ final class WorldEngine: NSObject {
     /// (which needs the airports' ground overrides) and hands the airports to the renderer.
     private func loadAirports() {
         let layouts = pendingLayouts, origin = scene.origin, icao = departureICAO
+        let started = Date()
         Task { [weak self] in
-            let built = await Self.buildAirports(layouts, sceneOrigin: origin, scenery: self?.scenery)
+            let built = await Self.buildAirports(layouts, sceneOrigin: origin, scenery: self?.scenery, cityFor: icao)
+            print(String(format: "AIRPORTS ready in %.1f s", Date().timeIntervalSince(started)))
             guard let self else { return }
             self.overrides = built.overrides
             self.cameraGround = GroundModel(scenery: self.scenery, frame: LocalFrame(origin: origin), flatten: built.overrides)
@@ -135,14 +146,16 @@ final class WorldEngine: NSObject {
     }
 
     @concurrent
+    /// Surroundings (city buildings) only for `cityFor`, the departure airport: the other is
+    /// hundreds of kilometres away, and its 80,000 buildings would only slow the start.
     private nonisolated static func buildAirports(_ layouts: [AirportLayout], sceneOrigin: Geodetic,
-                                                  scenery: SceneryLibrary?) async -> BuiltAirports {
+                                                  scenery: SceneryLibrary?, cityFor: String?) async -> BuiltAirports {
         let frame = LocalFrame(origin: sceneOrigin)
         let sites = layouts.map { AirportSite(layout: $0) }
         let folder = Bundle.main.resourceURL?.appendingPathComponent("Bundle/Airports")
         let assets = sites.map { site -> AirportAssets in
             var city: [CityChunk] = []
-            if let url = folder?.appendingPathComponent("\(site.layout.icao)-city.json"),
+            if site.layout.icao == cityFor, let url = folder?.appendingPathComponent("\(site.layout.icao)-city.json"),
                let surroundings = try? SurroundingBuildings.load(url) {
                 var ground = GroundModel(scenery: scenery, frame: site.frame, flatten: site.overrides)
                 city = CityGeometry.build(surroundings, site: site) { p in ground.groundZ(atENU: SIMD3(p.x, p.y, 0)) }
@@ -217,10 +230,15 @@ final class WorldEngine: NSObject {
         scene.showAircraft = rig.drawsAircraft
         renderer.render(scene, to: update.drawable.texture, drawable: update.drawable)
         renderer.exposureAdaptation = 0.05
-        if loadingScenery {
+        // The flight starts once the airports are built and the terrain around the camera has
+        // streamed in (or 15 s after the airports, whichever is first).
+        if loadingScenery && airportsReady {
             if firstFrame == 0 { firstFrame = t }
             quietFrames = renderer.terrainPending == 0 ? quietFrames + 1 : 0
-            if (scenery == nil || quietFrames >= 3) && airportsReady || t - firstFrame > 15 { loadingScenery = false }
+            if scenery == nil || quietFrames >= 3 || t - firstFrame > 15 {
+                loadingScenery = false
+                Self.markReady(airport: site?.layout.icao ?? "")
+            }
         }
         if logStats {
             framesSinceLog += 1
