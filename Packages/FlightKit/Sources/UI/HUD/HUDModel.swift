@@ -1,4 +1,5 @@
 import Autopilot
+import Nav
 import FlightModel
 import Foundation
 import Observation
@@ -98,6 +99,8 @@ final class HUDModel {
     var distanceToActive: Double?
     /// Airports to fly direct to.
     var airports: [NavPoint] = []
+    /// Navaids and fixes for the map.
+    var navData: NavData?
 
     // MARK: Flight data (live from the flight model on iOS; zero elsewhere)
 

@@ -11,7 +11,7 @@ public enum ToolCommand: String, CaseIterable, Sendable {
 
     public var plannedFor: String? {
         switch self {
-        case .navImport: "M5/M8"
+        case .navImport: nil
         case .airportImport: nil
         case .terrainBake: nil
         case .assetCook: "M6"
@@ -22,6 +22,7 @@ public enum ToolCommand: String, CaseIterable, Sendable {
         "usage: flight-tools <command>\n" + allCases.map { c in
             if let m = c.plannedFor { return "  \(c.rawValue)  (not implemented, planned for \(m))" }
             if c == .airportImport { return "  \(c.rawValue)  --icao <ICAO> --nasr <dir> --osm-cache <dir> --out <file.json> [--surroundings <km>]" }
+            if c == .navImport { return "  \(c.rawValue)  --nasr <dir> --box <south,west,north,east> --out <file.json>" }
             return "  \(c.rawValue)  " + (c == .terrainBake
                 ? "(--center <lat,lon> | --world <max zoom>) --name <name> --out <dir> [--dem <raster.bin> --dem-info <gdalinfo.json>]\n"
                   + "      [--terrarium-cache <dir> [--terrarium-max-zoom 11]] [--imagery-cache <dir> [--usgs-from-zoom 12]]"
@@ -96,6 +97,25 @@ public func runTool(_ arguments: [String], log: @Sendable @escaping (String) -> 
             return (0, "baked \(index.tiles.count) tiles, zoom \(index.minZoom)-\(index.maxZoom), into \(out)")
         } catch {
             return (1, "terrain-bake failed: \(error)")
+        }
+    case .navImport:
+        let known: Set<String> = ["--nasr", "--box", "--out"]
+        if let unknown = options.names.first(where: { !known.contains($0) }) {
+            return (64, "nav-import: unknown option \(unknown)\n" + ToolCommand.usage)
+        }
+        guard let nasr = options["--nasr"], let box = options["--box"], let out = options["--out"] else { return (64, ToolCommand.usage) }
+        let b = box.split(separator: ",").compactMap { Double($0) }
+        guard b.count == 4, b[0] < b[2], b[1] < b[3] else { return (64, "--box must be south,west,north,east") }
+        do {
+            let data = try NavImporter.run(nasr: URL(fileURLWithPath: nasr), south: b[0], west: b[1], north: b[2], east: b[3])
+            let url = URL(fileURLWithPath: out)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys]
+            try encoder.encode(data).write(to: url)
+            return (0, "wrote \(out): \(data.navaids.count) navaids, \(data.fixes.count) fixes")
+        } catch {
+            return (1, "nav-import failed: \(error)")
         }
     case .airportImport:
         let known: Set<String> = ["--icao", "--nasr", "--osm-cache", "--out", "--surroundings"]

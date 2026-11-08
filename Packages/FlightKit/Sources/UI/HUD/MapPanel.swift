@@ -1,5 +1,6 @@
 import Autopilot
 import MapKit
+import Nav
 import SwiftUI
 
 /// The moving map: satellite imagery with the aircraft, the route in magenta and the point NAV
@@ -10,6 +11,17 @@ struct MapPanel: View {
     @State private var camera: MapCameraPosition = .automatic
     @State private var follow = true
     @State private var distance: Double = 40_000
+    @State private var region: MKCoordinateRegion?
+
+    /// Navaids and fixes in view, when zoomed in far enough to read them.
+    private var shown: (navaids: [Navaid], fixes: [Fix]) {
+        guard let nav = model.navData, let r = region, r.span.latitudeDelta < 2.5 else { return ([], []) }
+        let c = r.center, s = r.span
+        let all = nav.inside(south: c.latitude - s.latitudeDelta / 2, west: c.longitude - s.longitudeDelta / 2,
+                             north: c.latitude + s.latitudeDelta / 2, east: c.longitude + s.longitudeDelta / 2, limit: 80)
+        // Fixes only when closer in: there are many.
+        return (all.navaids, s.latitudeDelta < 1.0 ? all.fixes : [])
+    }
 
     private var aircraft: CLLocationCoordinate2D { CLLocationCoordinate2D(latitude: model.latitude, longitude: model.longitude) }
 
@@ -19,6 +31,23 @@ struct MapPanel: View {
     var body: some View {
         MapReader { proxy in
             Map(position: $camera) {
+                let visible = shown
+                ForEach(visible.fixes, id: \.self) { f in
+                    Annotation(f.id, coordinate: CLLocationCoordinate2D(latitude: f.latitude, longitude: f.longitude), anchor: .center) {
+                        Image(systemName: "triangle")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.white.opacity(0.85))
+                            .allowsHitTesting(false)
+                    }
+                }
+                ForEach(visible.navaids, id: \.self) { n in
+                    Annotation(n.id, coordinate: CLLocationCoordinate2D(latitude: n.latitude, longitude: n.longitude), anchor: .center) {
+                        Image(systemName: n.isNDB ? "circle.dotted" : "hexagon")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundStyle(n.isNDB ? Color(red: 0.85, green: 0.55, blue: 1.0) : HUDStyle.selected)
+                            .allowsHitTesting(false)
+                    }
+                }
                 let route = model.route
                 if !route.isEmpty {
                     if active > 0 {
@@ -45,11 +74,26 @@ struct MapPanel: View {
             .mapStyle(.hybrid(elevation: .flat, pointsOfInterest: .excludingAll))
             .mapControls { MapScaleView() }
             .onTapGesture { point in
-                guard let c = proxy.convert(point, from: .local) else { return }
-                model.route.append(NavPoint(name: "WPT\(model.route.count + 1)", latitude: c.latitude, longitude: c.longitude))
+                // A tap near a navaid or fix takes it, by name; elsewhere it makes a new point.
+                let visible = shown
+                let candidates = visible.navaids.map { NavPoint(name: $0.id, latitude: $0.latitude, longitude: $0.longitude) }
+                    + visible.fixes.map { NavPoint(name: $0.id, latitude: $0.latitude, longitude: $0.longitude) }
+                let near = candidates.compactMap { p -> (NavPoint, CGFloat)? in
+                    guard let q = proxy.convert(CLLocationCoordinate2D(latitude: p.latitude, longitude: p.longitude), to: .local) else { return nil }
+                    let d = hypot(q.x - point.x, q.y - point.y)
+                    return d < 24 ? (p, d) : nil
+                }.min { $0.1 < $1.1 }?.0
+                if let near {
+                    model.route.append(near)
+                } else if let c = proxy.convert(point, from: .local) {
+                    model.route.append(NavPoint(name: "WPT\(model.route.count + 1)", latitude: c.latitude, longitude: c.longitude))
+                }
             }
             .simultaneousGesture(DragGesture(minimumDistance: 10).onChanged { _ in follow = false })
-            .onMapCameraChange(frequency: .onEnd) { context in distance = context.camera.distance }
+            .onMapCameraChange(frequency: .onEnd) { context in
+                distance = context.camera.distance
+                region = context.region
+            }
         }
         .clipShape(.rect(cornerRadius: 24, style: .continuous))
         .overlay(alignment: .top) { header }

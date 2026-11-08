@@ -1,6 +1,7 @@
 import FlightModel
 import Weather
 import Autopilot
+import Nav
 import Renderer
 public import SwiftUI
 import Foundation
@@ -86,7 +87,7 @@ public struct FlightHUDView: View {
                         MetricsBar(model: model)
                         if model.stallWarning { StallWarning() }
                         // The status is redundant while the autopilot panel itself is open.
-                        if model.apMaster && model.openPanel != .autopilot {
+                        if model.apMaster && model.openPanel != .autopilot && model.openPanel != .map {
                             AutopilotStatus(model: model)
                                 .transition(.move(edge: .top).combined(with: .opacity))
                         }
@@ -186,10 +187,16 @@ public struct FlightHUDView: View {
                               scenery: engine.scenery, overrides: engine.overrides)
         s.configureHUD(model)
         model.airports = FreeFlightSetupView.layouts.map { NavPoint(name: $0.icao, latitude: $0.reference.lat, longitude: $0.reference.lon) }
+        model.navData = Self.navData
         // `-FlightAutopilot appr`: autopilot, autothrottle and APPR engaged at the start (scripts).
         // `-FlightRoute KLAX` (airports, comma separated) and `-FlightAutopilot nav`: a route flown by NAV.
         if let route = UserDefaults.standard.string(forKey: "FlightRoute") {
-            model.route = route.split(separator: ",").compactMap { id in model.airports.first { $0.name == id } }
+            let near = site.layout.reference
+            model.route = route.split(separator: ",").compactMap { id -> NavPoint? in
+                if let airport = model.airports.first(where: { $0.name == id }) { return airport }
+                return model.navData?.find(String(id), near: near.lat, near.lon)
+                    .map { NavPoint(name: $0.name, latitude: $0.latitude, longitude: $0.longitude) }
+            }
         }
         switch UserDefaults.standard.string(forKey: "FlightAutopilot") {
         case "appr":
@@ -222,6 +229,11 @@ public struct FlightHUDView: View {
             }
         }
     }
+
+    /// The region's navaids and fixes, read once.
+    private static let navData: NavData? = Bundle.main.resourceURL
+        .map { $0.appendingPathComponent("Bundle/Nav/navdata.json") }
+        .flatMap { try? NavData.load($0) }
 
     private func switchAircraft(to profile: AircraftProfile) {
         guard profile != model.profile else { return }
@@ -313,7 +325,7 @@ public struct FlightHUDView: View {
                 // The map takes the room between the lever columns, under the flight data.
                 MapPanel(model: model, onClose: close)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .padding(.top, 96)
+                    .padding(.top, 62)
                     .transition(.scale(scale: 0.96, anchor: .bottom).combined(with: .opacity))
             } else {
             Group {
