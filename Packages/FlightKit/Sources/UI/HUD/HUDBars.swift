@@ -21,7 +21,13 @@ struct MetricsBar: View {
             metric("ALT", model.altitude.formatted(.number.locale(Locale(identifier: "en_US"))), "ft")
             metric("V/S", model.verticalSpeed > 0 ? "+\(model.verticalSpeed)" : "\(model.verticalSpeed)", "fpm")
             metric("HDG", String(format: "%03d°", model.heading), nil)
-            if level >= 2 { metric("N1", String(format: "%.1f", model.n1), "%") }
+            if level >= 2 {
+                if model.profile.isTurbine {
+                    metric("N1", String(format: "%.1f", model.n1), "%")
+                } else {
+                    metric("RPM", String(format: "%.0f", model.n1), nil)
+                }
+            }
         }
         .lineLimit(1)
         .padding(.horizontal, 22)

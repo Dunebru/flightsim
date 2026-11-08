@@ -293,3 +293,11 @@ struct TemporalUpscalingTests {
         try RendererTests.savePNG(img, 800, 600, name: "test-\(name)")
     }
 }
+
+/// Attitude conventions: a nose-up pitch raises the nose, a right bank lowers the right wing.
+@Test func attitudeRotationsFollowAviationConventions() {
+    let noseUp = MatrixMath.rotationY(Float(-10 * Double.pi / 180)) * SIMD4<Float>(1, 0, 0, 0)
+    #expect(noseUp.z > 0.17)
+    let rightWing = MatrixMath.rotationX(Float(20 * Double.pi / 180)) * SIMD4<Float>(0, -1, 0, 0)   // -y is right
+    #expect(rightWing.z < -0.3)
+}

@@ -3,9 +3,8 @@ import Testing
 
 @Test func moduleIdentity() {
     #expect(FlightModelModule.info.name == "FlightModel")
-    #expect(FlightModelModule.info.status == .stub(plannedFor: "M2"))
 }
 
-@Test func engineStubIsLinked() {
-    #expect(FlightModelModule.engineVersion == "stub")
+@Test func linksJSBSim133() {
+    #expect(FlightModelModule.engineVersion == "1.3.3")
 }

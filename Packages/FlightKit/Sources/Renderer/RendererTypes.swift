@@ -88,6 +88,10 @@ public struct SceneDescription: Sendable {
     /// Aircraft reference point on the ground, world metres, and heading (radians from north).
     public var aircraftPosition: SIMD3<Double>
     public var aircraftHeading: Double
+    /// Bank angle, radians, right wing down positive.
+    public var aircraftRoll: Double = 0
+    /// Pitch attitude, radians, nose up positive.
+    public var aircraftPitch: Double = 0
     public var showGround = true
     public var showRunway = true
     public var showAircraft = true

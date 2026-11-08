@@ -146,7 +146,10 @@ public final class FlightDynamics {
         set("ic/lat-geod-deg", ic.latitude)
         set("ic/long-gc-deg", ic.longitude)
         set("ic/terrain-elevation-ft", ic.terrainElevationFeet)
-        set("ic/h-agl-ft", ic.heightAboveGroundFeet)
+        // On the ground: start the reference point a little above the gear (never buried, which
+        // launches and tips the aircraft), then let JSBSim's ground trim settle it.
+        let onGround = ic.heightAboveGroundFeet <= 0
+        set("ic/h-agl-ft", onGround ? Self.groundStartHeightFeet : ic.heightAboveGroundFeet)
         set("ic/psi-true-deg", ic.headingDegrees)
         set("ic/vc-kts", ic.airspeedKnots)
         set("ic/gamma-deg", 0)
@@ -156,8 +159,15 @@ public final class FlightDynamics {
         guard jsb_run_ic(handle, &error, Int32(error.count)) == 1 else {
             throw FlightModelError.engine("RunIC: \(String(cString: error))")
         }
+        if onGround {
+            try? trim(.ground)
+        }
         if enginesRunning { startEngines() }
     }
+
+    /// Initial height of the reference point for an on-ground start, feet: above any of the
+    /// library aircraft's gear legs so nothing starts buried.
+    static let groundStartHeightFeet = 12.0
 
     public func startEngines() {
         set("propulsion/magneto_cmd", 3)

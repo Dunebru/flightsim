@@ -1,3 +1,4 @@
+import FlightModel
 import Renderer
 import SwiftUI
 
@@ -81,6 +82,9 @@ struct AutopilotPanel: View {
                 adjust("+\(s.fine.formatted())", s.fine)
                 adjust("+\(s.coarse.formatted())", s.coarse)
             }
+            Text("Autopilot logic arrives in M8: these targets do not fly the aircraft yet.")
+                .font(.system(size: 12))
+                .foregroundStyle(HUDStyle.secondaryText)
             HStack(spacing: 6) {
                 mode("A/THR", isOn: model.autothrottle) { model.autothrottle.toggle() }
                 mode("LOC", isOn: model.locArmed) { model.locArmed.toggle() }
@@ -205,12 +209,39 @@ struct LightsPanel: View {
 struct SettingsPanel: View {
     #if os(iOS)
     @Bindable var engine: WorldEngine
+    let profile: AircraftProfile
+    let onSelectAircraft: (AircraftProfile) -> Void
+    let onReset: () -> Void
+    let onCalibrateTilt: () -> Void
     #endif
     let onEndFlight: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             #if os(iOS)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Aircraft")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(HUDStyle.secondaryText)
+                Picker("Aircraft", selection: Binding(get: { profile }, set: { onSelectAircraft($0) })) {
+                    ForEach(AircraftProfile.all) { Text($0.name).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                Text(profile.fidelityNote)
+                    .font(.system(size: 12))
+                    .foregroundStyle(HUDStyle.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            HStack(spacing: 8) {
+                Button(action: onReset) {
+                    Text("Reset to runway").font(.system(size: 14, weight: .semibold)).frame(maxWidth: .infinity).frame(height: 40)
+                }
+                .buttonStyle(.glass)
+                Button(action: onCalibrateTilt) {
+                    Text("Level tilt").font(.system(size: 14, weight: .semibold)).frame(maxWidth: .infinity).frame(height: 40)
+                }
+                .buttonStyle(.glass)
+            }
             VStack(alignment: .leading, spacing: 6) {
                 Text("Upscaling")
                     .font(.system(size: 13, weight: .semibold))
@@ -234,7 +265,7 @@ struct SettingsPanel: View {
                 .foregroundStyle(.white)
                 .tint(HUDStyle.engaged)
             #endif
-            Text("Controls and realism settings arrive in M3.")
+            Text("More control and realism settings arrive in M3.")
                 .font(.system(size: 13))
                 .foregroundStyle(HUDStyle.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
@@ -247,7 +278,7 @@ struct SettingsPanel: View {
             .buttonStyle(.glass)
             .tint(.red)
         }
-        .frame(width: 300)
+        .frame(width: 320)
         .padding(.trailing, 10)
     }
 }

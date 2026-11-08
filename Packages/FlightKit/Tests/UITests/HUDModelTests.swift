@@ -1,4 +1,5 @@
 import Testing
+import FlightModel
 @testable import UI
 #if canImport(AppKit)
 import AppKit
@@ -38,9 +39,16 @@ struct HUDModelTests {
 
     @Test func gearGoesThroughTransit() {
         let model = HUDModel()
+        model.profile = .a320          // retractable gear
         #expect(model.gear == .down)
         model.toggleGear()
         #expect(model.gear == .transit(toDown: false))
+    }
+
+    @Test func fixedGearIgnoresTheLever() {
+        let model = HUDModel()          // C172: fixed gear
+        model.toggleGear()
+        #expect(model.gear == .down)
     }
 
     #if canImport(AppKit)

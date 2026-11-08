@@ -1,3 +1,4 @@
+import FlightModel
 import Foundation
 import Observation
 
@@ -35,12 +36,21 @@ final class HUDModel {
     // MARK: Controls
 
     /// Thrust lever, 0 (idle) ... 1 (max). With `reverse` on, it sets reverse thrust instead.
-    var throttle: Double = 0.72
+    var throttle: Double = 0
     /// Reverse thrust armed: the same slider then commands reverse, shown in orange.
     var reverse = false
 
-    let flapDetents = ["UP", "1", "2", "3", "FULL"]
-    var flapIndex = 1
+    /// The aircraft being flown; its levers and gauges follow.
+    var profile: AircraftProfile = .c172 {
+        didSet {
+            flapIndex = 0
+            spoilerIndex = 0
+        }
+    }
+    var flapDetents: [String] { profile.flapLabels }
+    var flapIndex = 0
+    /// "RPM" for piston engines, "N1" for turbines.
+    var engineLabel: String { profile.isTurbine ? "N1" : "RPM" }
     let spoilerDetents = ["RET", "ARM", "½", "FULL"]
     var spoilerIndex = 0
 
@@ -50,9 +60,9 @@ final class HUDModel {
     static let gearTravelTime: Duration = .seconds(6)
     private var gearTask: Task<Void, Never>?
 
-    var parkingBrake = false
+    var parkingBrake = true
     /// Elevator trim, -1 (nose down) ... 1 (nose up).
-    var trim: Double = 0.12
+    var trim: Double = 0
     var lights: Set<Light> = [.nav, .beacon]
     var camera: Camera = .chase
     var paused = false
@@ -60,8 +70,8 @@ final class HUDModel {
 
     // MARK: Autopilot targets (pilot-selected, shown cyan)
 
-    var apMaster = true
-    var autothrottle = true
+    var apMaster = false
+    var autothrottle = false
     var locArmed = false
     var approachArmed = false
     var targetSpeed = 250
@@ -69,15 +79,15 @@ final class HUDModel {
     var targetAltitude = 5_000
     var targetVerticalSpeed = 1_500
 
-    // MARK: Demo flight data (prototype: fixed numbers, not simulated)
+    // MARK: Flight data (live from the flight model on iOS; zero elsewhere)
 
-    var indicatedAirspeed = 142
-    var groundSpeed = 151
-    var altitude = 2_350
-    var verticalSpeed = 1_200
-    var heading = 271
-    var angleOfAttack = 4.2
-    var n1 = 84.2
+    var indicatedAirspeed = 0
+    var groundSpeed = 0
+    var altitude = 0
+    var verticalSpeed = 0
+    var heading = 90
+    var angleOfAttack = 0.0
+    var n1 = 0.0
 
     // MARK: Behavior
 
@@ -92,6 +102,7 @@ final class HUDModel {
     }
 
     func toggleGear() {
+        guard profile.retractableGear else { return }
         let toDown: Bool
         switch gear {
         case .up: toDown = true

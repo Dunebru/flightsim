@@ -4,6 +4,7 @@ import Foundation
 import Metal
 import Observation
 import QuartzCore
+import FlightModel
 import Renderer
 import SimCore
 import SwiftUI
@@ -22,6 +23,17 @@ final class WorldEngine: NSObject {
     /// `devicectl ... --console` can collect device frame times.
     @ObservationIgnored private let logStats = UserDefaults.standard.bool(forKey: "FlightLogStats")
     @ObservationIgnored private var framesSinceLog = 0
+
+    /// Called every display frame before rendering with the frame time (s); a flight session
+    /// uses it to move the aircraft.
+    @ObservationIgnored var frameHook: ((Double, inout SceneDescription) -> Void)?
+    /// Latest flight state, for the stats log.
+    @ObservationIgnored var physicsProbe: (() -> FlightState?)?
+    /// Chase camera relative to the aircraft: yaw offset from its heading, look-down angle,
+    /// distance. Drag and pinch change these.
+    @ObservationIgnored var orbitYawOffset: Double = -25 * .pi / 180
+    @ObservationIgnored var orbitPitch: Double = 8 * .pi / 180
+    @ObservationIgnored var orbitDistance: Double = 15
 
     private(set) var framesPerSecond: Double = 0
     private(set) var startupError: String?
@@ -108,12 +120,21 @@ final class WorldEngine: NSObject {
     fileprivate func draw(_ update: CAMetalDisplayLink.Update) {
         guard let renderer else { return }
         let t = update.targetPresentationTimestamp
+        var dt = 1.0 / 60
         if lastPresentation > 0, t > lastPresentation {
+            dt = min(t - lastPresentation, 0.1)
             let fps = 1 / (t - lastPresentation)
             framesPerSecond = framesPerSecond == 0 ? fps : framesPerSecond * 0.9 + fps * 0.1
         }
         lastPresentation = t
         scene.date = timeOverride ?? Date()
+        frameHook?(dt, &scene)
+        scene.camera = OrbitCamera(
+            target: scene.aircraftPosition + SIMD3(0, 0, 1.2),
+            yaw: scene.aircraftHeading + orbitYawOffset,
+            pitch: orbitPitch,
+            distance: orbitDistance
+        )
         renderer.render(scene, to: update.drawable.texture, drawable: update.drawable)
         renderer.exposureAdaptation = 0.05
         if logStats {
@@ -123,6 +144,11 @@ final class WorldEngine: NSObject {
                 let st = renderer.stats
                 let passes = ["Atmosphere", "Shadow", "Scene", "Post"]
                     .map { String(format: "%@=%.2f", $0, st.gpuMilliseconds[$0] ?? 0) }.joined(separator: " ")
+                if let s = physicsProbe?() {
+                    print(String(format: "FLIGHTSTATE ias=%.1f alt=%.0f agl=%.1f hdg=%.1f pitch=%.1f roll=%.1f vs=%.0f eng=%.0f ground=%d t=%.1f",
+                                 s.indicatedAirspeedKnots, s.altitudeFeet, s.heightAboveGroundFeet, s.heading * 180 / .pi,
+                                 s.pitch * 180 / .pi, s.roll * 180 / .pi, s.verticalSpeedFPM, s.engineIndication, s.onGround ? 1 : 0, s.time))
+                }
                 print(String(format: "FLIGHTSTATS fps=%.1f gpuFrame=%.2fms gpuStageSum=%.2fms cpu=%.2fms %@ render=%dx%d output=%dx%d upscaler=%@ thermal=%d",
                              framesPerSecond, st.gpuFrameMilliseconds, st.gpuTotalMilliseconds, st.cpuMilliseconds, passes,
                              st.renderSize.x, st.renderSize.y, st.outputSize.x, st.outputSize.y,
@@ -135,12 +161,12 @@ final class WorldEngine: NSObject {
     // MARK: Camera
 
     func orbit(byPoints delta: CGSize) {
-        scene.camera.yaw += Double(delta.width) * 0.008
-        scene.camera.pitch = min(max(scene.camera.pitch + Double(delta.height) * 0.006, -0.15), 1.4)
+        orbitYawOffset += Double(delta.width) * 0.008
+        orbitPitch = min(max(orbitPitch + Double(delta.height) * 0.006, -0.15), 1.4)
     }
 
     func zoom(by factor: Double) {
-        scene.camera.distance = min(max(scene.camera.distance / factor, 6), 250)
+        orbitDistance = min(max(orbitDistance / factor, 6), 400)
     }
 }
 

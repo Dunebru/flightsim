@@ -1,3 +1,4 @@
+import FlightModel
 public import SwiftUI
 import Foundation
 
@@ -14,6 +15,7 @@ public struct FlightHUDView: View {
     @State private var model = HUDModel()
     #if os(iOS)
     @State private var engine = WorldEngine()
+    @State private var session: FlightSession?
     #endif
     private let onExit: () -> Void
 
@@ -104,6 +106,9 @@ public struct FlightHUDView: View {
         .preferredColorScheme(.dark)
         .animation(.spring(duration: 0.35, bounce: 0.15), value: model.apMaster)
         .onAppear {
+            #if os(iOS)
+            startSession()
+            #endif
             // `-FlightOpenPanel autopilot` opens a panel at launch, so scripts can screenshot it.
             if let key = UserDefaults.standard.string(forKey: "FlightOpenPanel") {
                 model.openPanel = HUDModel.Panel(rawValue: key)
@@ -116,6 +121,26 @@ public struct FlightHUDView: View {
             }
         }
     }
+
+    #if os(iOS)
+    private func startSession() {
+        let s = FlightSession(profile: model.profile, origin: engine.scene.origin)
+        session = s
+        let hud = model
+        engine.frameHook = { dt, scene in s.tick(dt: dt, hud: hud, scene: &scene) }
+        engine.physicsProbe = { s.physics?.state }
+    }
+
+    private func switchAircraft(to profile: AircraftProfile) {
+        guard profile != model.profile else { return }
+        model.profile = profile
+        model.setThrottle(0)
+        model.parkingBrake = true
+        engine.frameHook = nil
+        session = nil
+        startSession()
+    }
+    #endif
 
     // MARK: Regions
 
@@ -163,6 +188,7 @@ public struct FlightHUDView: View {
                 GearButton(model: model)
             }
             HStack(alignment: .bottom, spacing: HUDStyle.gap) {
+                if model.profile.hasSpoilers {
                 GlassSlider(
                     value: detentBinding(\.spoilerIndex, count: model.spoilerDetents.count),
                     detents: model.spoilerDetents,
@@ -172,6 +198,7 @@ public struct FlightHUDView: View {
                     width: 52,
                     accessibilityLabel: "Spoilers"
                 )
+                }
                 GlassSlider(
                     value: detentBinding(\.flapIndex, count: model.flapDetents.count),
                     detents: model.flapDetents,
@@ -206,7 +233,13 @@ public struct FlightHUDView: View {
                 case .settings:
                     GlassPanel(title: "Settings", onClose: close) {
                         #if os(iOS)
-                        SettingsPanel(engine: engine, onEndFlight: onExit)
+                        SettingsPanel(
+                            engine: engine, profile: model.profile,
+                            onSelectAircraft: { switchAircraft(to: $0) },
+                            onReset: { session?.resetToRunway(hud: model) },
+                            onCalibrateTilt: { session?.tilt.calibrate() },
+                            onEndFlight: onExit
+                        )
                         #else
                         SettingsPanel(onEndFlight: onExit)
                         #endif
@@ -250,7 +283,7 @@ public struct FlightHUDView: View {
     }
 
     private var demoTag: some View {
-        Text("Prototype · instrument values are demo data until the flight model (M2)")
+        Text("Prototype · JSBSim \(model.profile.name) · tilt to fly")
             .font(.system(size: 11, weight: .semibold))
             .foregroundStyle(.white)
             .padding(.horizontal, 10)
@@ -275,7 +308,7 @@ struct GearButton: View {
         GlassCircleToggle(
             isOn: model.gear != .up,
             onColor: model.gear == .down ? HUDStyle.engaged : HUDStyle.caution,
-            accessibilityLabel: "Landing gear"
+            accessibilityLabel: model.profile.retractableGear ? "Landing gear" : "Landing gear, fixed"
         ) {
             model.toggleGear()
         } label: {

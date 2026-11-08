@@ -59,6 +59,22 @@ enum MatrixMath {
         ))
     }
 
+    /// Rotation about +X.
+    static func rotationX(_ angle: Float) -> simd_float4x4 {
+        let c = cos(angle), s = sin(angle)
+        return simd_float4x4(columns: (
+            SIMD4(1, 0, 0, 0), SIMD4(0, c, s, 0), SIMD4(0, -s, c, 0), SIMD4(0, 0, 0, 1)
+        ))
+    }
+
+    /// Rotation about +Y.
+    static func rotationY(_ angle: Float) -> simd_float4x4 {
+        let c = cos(angle), s = sin(angle)
+        return simd_float4x4(columns: (
+            SIMD4(c, 0, -s, 0), SIMD4(0, 1, 0, 0), SIMD4(s, 0, c, 0), SIMD4(0, 0, 0, 1)
+        ))
+    }
+
     /// Halton low-discrepancy sequence, used for sub-pixel jitter.
     static func halton(_ index: Int, base: Int) -> Float {
         var f: Float = 1, r: Float = 0, i = index

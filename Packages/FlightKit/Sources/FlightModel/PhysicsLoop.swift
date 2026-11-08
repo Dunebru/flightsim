@@ -41,8 +41,11 @@ public final class PhysicsLoop: Sendable {
         self.rate = rate
         let fdm = try FlightDynamics(model: model, root: root, rate: rate)
         try fdm.initialize(initial)
-        // Let the gear settle so the resting height is meaningful.
-        fdm.apply(ControlInputs())
+        // Let the gear settle so the resting height is meaningful; hold the brakes so idle
+        // thrust does not creep and turn the aircraft meanwhile.
+        var settle = ControlInputs()
+        settle.parkingBrake = true
+        fdm.apply(settle)
         fdm.step(Int(rate))
         let settled = fdm.state
         shared.withLock {

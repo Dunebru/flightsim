@@ -282,7 +282,12 @@ public final class SceneRenderer {
         var aircraftPrev = matrix_identity_float4x4
         var shadowOn = false
         if let aircraft {
-            let orient = MatrixMath.rotationZ(Float(.pi / 2 - scene.aircraftHeading)) * aircraft.modelToBody
+            // Body frame: x forward, y left, z up. Heading about z, then pitch (nose up is a
+            // negative rotation about +y), then bank (right wing down is positive about +x).
+            let orient = MatrixMath.rotationZ(Float(.pi / 2 - scene.aircraftHeading))
+                * MatrixMath.rotationY(Float(-scene.aircraftPitch))
+                * MatrixMath.rotationX(Float(scene.aircraftRoll))
+                * aircraft.modelToBody
             aircraftModel = MatrixMath.translation(relative(aircraftWorld, to: camera)) * orient
             aircraftPrev = reset ? aircraftModel : MatrixMath.translation(relative(aircraftWorld, to: previousCam)) * orient
             // Sun shadow map around the aircraft.
