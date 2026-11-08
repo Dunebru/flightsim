@@ -75,12 +75,21 @@ public struct BakePlan: Sendable {
 
     /// The default airport region: coarse to the horizon, detailed near the field.
     public static let airportRegion = BakePlan(rings: [
-        Ring(zooms: 8...11, radiusKilometres: 150),
+        Ring(zooms: 6...7, radiusKilometres: 700),      // to the horizon from cruise altitude
+        Ring(zooms: 8...9, radiusKilometres: 350),
+        Ring(zooms: 10...11, radiusKilometres: 150),
         Ring(zooms: 12...13, radiusKilometres: 40),
         Ring(zooms: 14...14, radiusKilometres: 12),
+        Ring(zooms: 15...15, radiusKilometres: 5),      // the airport and its approaches
+        Ring(zooms: 16...16, radiusKilometres: 2.6),
     ])
 
     public init(rings: [Ring]) { self.rings = rings }
+
+    /// Every tile from zoom 0 to `maxZoom`: the coarse global base under the regions.
+    public static func world(maxZoom: Int) -> [TileKey] {
+        (0...maxZoom).flatMap { z in (0..<(1 << z)).flatMap { x in (0..<(1 << z)).map { y in TileKey(z: z, x: x, y: y) } } }
+    }
 
     /// Tiles whose centre lies within each ring's radius of the centre (great-circle distance).
     public func tiles(latitude: Double, longitude: Double) -> [TileKey] {
@@ -102,6 +111,14 @@ public struct BakePlan: Sendable {
                 }
             }
         }
+        // A tile refines only when all four children exist, so complete every sibling set: the
+        // ring edges would otherwise stop refining a level early.
+        // At the coarsest level the parents live in another pack (the world base), so complete
+        // those sets unconditionally.
+        let minZoom = rings.flatMap(\.zooms).min() ?? 0
+        for k in set.sorted() {
+            if let p = k.parent, k.z == minZoom || set.contains(p) { set.formUnion(p.children) }
+        }
         return set.sorted()
     }
 
@@ -113,60 +130,115 @@ public struct BakePlan: Sendable {
     }
 }
 
-/// Bakes a scenery pack: heights from the DEM and imagery from EOX Sentinel-2 cloudless.
+/// Bakes a scenery pack. Heights: AWS Terrain Tiles for the regional levels (out to the
+/// horizon), the local 30 m DEM for the detailed levels. Imagery: EOX Sentinel-2 cloudless for
+/// the regional levels, USGS orthoimagery for the detailed ones, colour-matched to the EOX
+/// mosaic so detail levels do not show a seam.
 public struct TerrainBaker: Sendable {
-    public let dem: DEMRaster
+    public let dem: DEMRaster?
+    public let terrarium: TerrariumSource?
+    /// Levels at or below this take their heights from `terrarium` (when given).
+    public let terrariumMaxZoom: Int
     public let output: URL
     public let name: String
-    public let downloadImagery: Bool
-    /// EOX Sentinel-2 cloudless 2025 (CC BY-NC-SA 4.0), Web Mercator, {z}/{row}/{column}.
-    public static let imageryTemplate = "https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2025_3857/default/GoogleMapsCompatible/%d/%d/%d.jpg"
+    /// Raw downloads, per source: <cache>/<source>/<z>/<x>/<y>.jpg. nil: heights only.
+    public let imageryCache: URL?
+    /// Levels at or above this use USGS imagery; nil: EOX everywhere.
+    public let usgsFromZoom: Int?
 
-    public init(dem: DEMRaster, output: URL, name: String, downloadImagery: Bool) {
+    public init(dem: DEMRaster?, terrarium: TerrariumSource?, terrariumMaxZoom: Int, output: URL, name: String,
+                imageryCache: URL?, usgsFromZoom: Int?) {
         self.dem = dem
+        self.terrarium = terrarium
+        self.terrariumMaxZoom = terrariumMaxZoom
         self.output = output
         self.name = name
-        self.downloadImagery = downloadImagery
+        self.imageryCache = imageryCache
+        self.usgsFromZoom = usgsFromZoom
     }
 
-    /// Writes heights (and imagery) for every tile the DEM fully covers; returns the index.
+    func source(for k: TileKey) -> ImagerySource {
+        if let z = usgsFromZoom, k.z >= z { return .usgs }
+        return .eox
+    }
+
+    /// Writes heights and imagery for every tile with a height source; returns the index.
     public func bake(tiles: [TileKey], log: @Sendable (String) -> Void = { _ in }) async throws -> SceneryPackIndex {
         let fm = FileManager.default
         var baked: [TileKey] = []
+        var fromTerrarium = 0
+        if let terrarium {
+            // Regional levels always use the terrain tiles; detailed levels only past the DEM.
+            let needed = tiles.filter { $0.z <= terrariumMaxZoom || dem?.heights(for: $0) == nil }
+            try await terrarium.prefetch(needed, log: log)
+        }
         for k in tiles {
-            guard let h = dem.heights(for: k) else { continue }
+            var h: [Float]?
+            if let terrarium, k.z <= terrariumMaxZoom {
+                h = try await terrarium.heights(for: k)
+                fromTerrarium += 1
+            } else {
+                h = dem?.heights(for: k)
+                // Past the DEM's edge, fall back to the terrain tiles so sibling sets stay whole.
+                if h == nil, let terrarium {
+                    h = try await terrarium.heights(for: k)
+                    fromTerrarium += 1
+                }
+            }
+            guard let h else { continue }
             let url = output.appendingPathComponent(SceneryPack.heightsPath(k))
             try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             try SceneryPack.encodeHeights(h).write(to: url)
             baked.append(k)
         }
-        log("heights: \(baked.count) of \(tiles.count) tiles inside the DEM")
+        log("heights: \(baked.count) of \(tiles.count) tiles (\(fromTerrarium) from terrain tiles, the rest from the DEM)")
 
-        if downloadImagery {
-            let missing = baked.filter { !fm.fileExists(atPath: output.appendingPathComponent(SceneryPack.imageryPath($0)).path) }
-            log("imagery: \(missing.count) tiles to download")
-            try await withThrowingTaskGroup(of: Void.self) { group in
-                var iterator = missing.makeIterator()
-                func next() -> TileKey? { iterator.next() }
-                for _ in 0..<4 {
-                    guard let k = next() else { break }
-                    group.addTask { try await Self.download(k, to: output) }
+        var sources: [String] = []
+        if let cache = imageryCache {
+            // Raw downloads for every tile, plus EOX at the first USGS level as the colour reference.
+            let reference = usgsFromZoom.map { z in baked.filter { $0.z == z } } ?? []
+            try await Self.ensureCached(baked.map { ($0, source(for: $0)) } + reference.map { ($0, .eox) }, cache: cache, log: log)
+            var transfer: (ColourStats, ColourStats)?
+            if !reference.isEmpty {
+                func stats(_ s: ImagerySource) throws -> ColourStats {
+                    ColourStats.of(try reference.compactMap { k in ImageCodec.decode(try Data(contentsOf: Self.cached(k, s, cache)))?.pixels })
                 }
-                var done = 0
-                while try await group.next() != nil {
-                    done += 1
-                    if done % 100 == 0 { log("imagery: \(done) of \(missing.count)") }
-                    if let k = next() { group.addTask { try await Self.download(k, to: output) } }
+                let usgs = try stats(.usgs), eox = try stats(.eox)
+                transfer = (usgs, eox)
+                log(String(format: "colour match at zoom %d: USGS mean %.0f %.0f %.0f -> EOX %.0f %.0f %.0f",
+                           usgsFromZoom!, usgs.mean.x, usgs.mean.y, usgs.mean.z, eox.mean.x, eox.mean.y, eox.mean.z))
+            }
+            for k in baked {
+                let raw = try Data(contentsOf: Self.cached(k, source(for: k), cache))
+                var out = raw
+                if source(for: k) == .usgs, let (from, to) = transfer, let img = ImageCodec.decode(raw),
+                   let jpeg = ImageCodec.encodeJPEG(from.transfer(img.pixels, to: to), width: img.width, height: img.height) {
+                    out = jpeg
                 }
+                let dest = output.appendingPathComponent(SceneryPack.imageryPath(k))
+                try fm.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try out.write(to: dest)
+            }
+            let used = Set(baked.map { source(for: $0) })
+            sources = ImagerySource.allCases.filter(used.contains).map { s in
+                let zooms = baked.filter { source(for: $0) == s }.map(\.z)
+                return "\(s.attribution), zoom \(zooms.min()!)-\(zooms.max()!)"
             }
         }
         let zooms = baked.map(\.z)
+        var elevation: [String] = []
+        if fromTerrarium > 0 {
+            elevation.append("AWS Terrain Tiles (Mapzen/Tilezen terrarium; SRTM, NED, GMTED2010, ETOPO1), zoom \(zooms.min()!)-\(terrariumMaxZoom)")
+        }
+        if baked.count > fromTerrarium {
+            elevation.append("Copernicus GLO-30 DEM (produced using Copernicus WorldDEM-30), zoom \(terrariumMaxZoom + 1)-\(zooms.max()!)")
+        }
         let index = SceneryPackIndex(
             name: name, heightSamples: 65, minZoom: zooms.min() ?? 0, maxZoom: zooms.max() ?? 0,
             tiles: baked.map(\.description),
-            heightDatum: "EGM2008 (mean sea level)",
-            imagerySource: "EOX Sentinel-2 cloudless 2025 (CC BY-NC-SA 4.0), https://s2maps.eu",
-            elevationSource: "Copernicus GLO-30 DEM (produced using Copernicus WorldDEM-30)"
+            heightDatum: "mean sea level (EGM2008 / NAVD88 / EGM96 by source)",
+            imagerySource: sources.joined(separator: "; "),
+            elevationSource: elevation.joined(separator: "; ")
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -174,22 +246,31 @@ public struct TerrainBaker: Sendable {
         return index
     }
 
-    static func download(_ k: TileKey, to output: URL) async throws {
-        let url = URL(string: String(format: imageryTemplate, k.z, k.y, k.x))!
-        var request = URLRequest(url: url)
-        request.setValue("flightsim-personal-test", forHTTPHeaderField: "User-Agent")
-        for attempt in 0..<3 {
-            do {
-                let (data, response) = try await URLSession.shared.data(for: request)
-                guard (response as? HTTPURLResponse)?.statusCode == 200, data.count > 100 else {
-                    throw URLError(.badServerResponse)
+    static func cached(_ k: TileKey, _ s: ImagerySource, _ cache: URL) -> URL {
+        cache.appendingPathComponent("\(s.rawValue)/\(k.z)/\(k.x)/\(k.y).jpg")
+    }
+
+    /// Downloads whatever is not cached yet, four at a time.
+    static func ensureCached(_ wanted: [(TileKey, ImagerySource)], cache: URL, log: @Sendable (String) -> Void) async throws {
+        let missing = wanted.filter { !FileManager.default.fileExists(atPath: cached($0.0, $0.1, cache).path) }
+        log("imagery: \(missing.count) of \(wanted.count) tiles to download")
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            var iterator = missing.makeIterator()
+            func add() {
+                guard let (k, s) = iterator.next() else { return }
+                group.addTask {
+                    let data = try await Downloader.get(s.url(k))
+                    let dest = cached(k, s, cache)
+                    try FileManager.default.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    try data.write(to: dest)
                 }
-                let dest = output.appendingPathComponent(SceneryPack.imageryPath(k))
-                try FileManager.default.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
-                try data.write(to: dest)
-                return
-            } catch where attempt < 2 {
-                try await Task.sleep(for: .seconds(1 << attempt))
+            }
+            for _ in 0..<4 { add() }
+            var done = 0
+            while try await group.next() != nil {
+                done += 1
+                if done % 100 == 0 { log("imagery: \(done) of \(missing.count)") }
+                add()
             }
         }
     }

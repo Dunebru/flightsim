@@ -28,6 +28,13 @@ struct MeshVertex {
     var pad = SIMD2<Float>.zero
 }
 
+/// Must match `TerrainVertex` in 20_Scene.metal (20 bytes).
+struct TerrainVertex {
+    var x, y, z: Float
+    var nx, ny, nz, nw: Int8
+    var u, v: UInt16
+}
+
 struct DrawUniforms {
     var model = matrix_identity_float4x4
     var prevModel = matrix_identity_float4x4
@@ -165,6 +172,10 @@ public struct RenderSettings: Sendable, Equatable {
     public var disableFloatingOrigin = false
     /// Hand MetalFX the opposite jitter sign (test only: proves the sign matters).
     public var flipJitterSignForTest = false
+    /// Draw the procedural ground plane under the terrain (off in tests to expose holes).
+    public var fallbackGround = true
+    /// Leave the sky black (test only: any black pixel below the horizon is a hole).
+    public var blackSkyForTest = false
 
     public init(upscaler: UpscalerMode = .temporal, renderScale: Double = 0.67) {
         self.upscaler = upscaler

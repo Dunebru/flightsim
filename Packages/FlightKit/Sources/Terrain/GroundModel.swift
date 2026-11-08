@@ -5,7 +5,7 @@ public import SimCore
 /// finest tile that covers a point, loaded on demand), with runway areas held flat exactly as the
 /// renderer draws them. Outside the pack the ground is the scene origin's height.
 public struct GroundModel: Sendable {
-    public let pack: SceneryPack?
+    public let scenery: SceneryLibrary?
     public let frame: LocalFrame
     public let flatten: [FlattenArea]
     private var field: HeightField
@@ -14,11 +14,11 @@ public struct GroundModel: Sendable {
     /// Tiles kept in memory (each 65 x 65 floats, 17 KB).
     public var capacity = 96
 
-    public init(pack: SceneryPack?, frame: LocalFrame, flatten: [FlattenArea]) {
-        self.pack = pack
+    public init(scenery: SceneryLibrary?, frame: LocalFrame, flatten: [FlattenArea]) {
+        self.scenery = scenery
         self.frame = frame
         self.flatten = flatten
-        field = HeightField(samples: pack?.index.heightSamples ?? 65, maxZoom: pack?.index.maxZoom ?? 0)
+        field = HeightField(samples: scenery?.heightSamples ?? 65, maxZoom: scenery?.maxZoom ?? 0)
     }
 
     /// Ground height above mean sea level, metres.
@@ -43,13 +43,13 @@ public struct GroundModel: Sendable {
 
     /// Pack height without flattening, or nil outside the pack.
     public mutating func rawHeight(latitude: Double, longitude: Double) -> Double? {
-        guard let pack else { return nil }
-        for z in stride(from: pack.index.maxZoom, through: pack.index.minZoom, by: -1) {
+        guard let scenery else { return nil }
+        for z in stride(from: scenery.maxZoom, through: scenery.minZoom, by: -1) {
             let t = WebMercator.tileCoordinates(latitude: latitude, longitude: longitude, zoom: z)
             let key = TileKey(z: z, x: Int(t.x), y: Int(t.y))
-            guard pack.available.contains(key), !missing.contains(key) else { continue }
+            guard scenery.available.contains(key), !missing.contains(key) else { continue }
             if field.tiles[key] == nil {
-                guard let heights = try? pack.heights(key) else { missing.insert(key); continue }
+                guard let heights = try? scenery.heights(key) else { missing.insert(key); continue }
                 field.insert(key, heights: heights)
                 order.append(key)
                 if order.count > capacity { field.remove(order.removeFirst()) }

@@ -69,6 +69,33 @@ vertex VertexOut sceneVertex(uint vid [[vertex_id]],
     return o;
 }
 
+/// Terrain vertices, 20 bytes: position relative to the tile centre, a snorm8 normal and a
+/// unorm16 texture coordinate (the index buffer is shared by every tile).
+struct TerrainVertex {
+    packed_float3 position;
+    packed_char4 normal;
+    packed_ushort2 uv;
+};
+
+vertex VertexOut terrainVertex(uint vid [[vertex_id]],
+                               const device TerrainVertex *vertices [[buffer(0)]],
+                               constant FrameUniforms &u [[buffer(1)]],
+                               constant DrawUniforms &d [[buffer(2)]])
+{
+    TerrainVertex v = vertices[vid];
+    float4 local = float4(float3(v.position), 1.0);
+    float4 world = d.model * local;
+    float4 prevWorld = d.prevModel * local;
+    VertexOut o;
+    o.position = u.viewProj * world;
+    o.worldPos = world.xyz;
+    o.normal = normalize(float3(char3(v.normal.xyz)) / 127.0);
+    o.uv = float2(ushort2(v.uv)) / 65535.0;
+    o.currentClip = u.viewProjNoJitter * world;
+    o.previousClip = u.prevViewProjNoJitter * prevWorld;
+    return o;
+}
+
 inline float2 motionVector(float4 currentClip, float4 previousClip, constant FrameUniforms &u) {
     float2 cur = currentClip.xy / currentClip.w;
     float2 prev = previousClip.xy / previousClip.w;
@@ -97,6 +124,15 @@ inline float shadowFactor(float3 worldPos, constant FrameUniforms &u, depth2d<fl
 
 inline float3 fresnelSchlick(float cosTheta, float3 f0) {
     return f0 + (1.0 - f0) * pow(1.0 - saturate(cosTheta), 5.0);
+}
+
+inline float3 envBRDF(float3 f0, float roughness, float NdotV) {
+    const float4 c0 = float4(-1.0, -0.0275, -0.572, 0.022);
+    const float4 c1 = float4(1.0, 0.0425, 1.04, -0.04);
+    float4 r = roughness * c0 + c1;
+    float a004 = min(r.x * r.x, exp2(-9.28 * NdotV)) * r.x + r.y;
+    float2 ab = float2(-1.04, 1.04) * a004 + r.zw;
+    return f0 * ab.x + ab.y;
 }
 
 inline float ggxSpecular(float NdotH, float NdotV, float NdotL, float roughness) {
@@ -133,11 +169,11 @@ inline float3 shadeSurface(float3 albedo, float roughness, float metallic, float
     float3 R = reflect(-V, N);
     float viewHeight = kBottomRadius + max(u.atmosphere.x + u.atmosphere.y, 0.001);
     float3 skyRadiance = R.z > -0.02 ? skyView.sample(kLinearClamp, skyViewUV(R, L, viewHeight)).rgb : groundE / kPi;
-    float3 Fr = fresnelSchlick(NdotV, f0);
-    float gloss = (1.0 - roughness) * (1.0 - roughness);
-    float3 ambientSpecular = skyRadiance * Fr * gloss;
-    // Rough surfaces still pick up some diffuse sky through the specular lobe.
-    ambientSpecular += (skyE / kPi) * Fr * (1.0 - gloss) * 0.5;
+    // Rough surfaces see a blurred sky: blend the mirror direction toward the mean sky radiance.
+    float3 env = mix(skyRadiance, skyE / kPi, saturate(roughness * roughness * 1.2));
+    // Split-sum environment BRDF (Karis's analytic fit): unlike bare Fresnel it falls off with
+    // roughness at grazing angles, so rough ground does not turn white toward the horizon.
+    float3 ambientSpecular = env * envBRDF(f0, roughness, NdotV);
 
     return direct + ambientDiffuse + ambientSpecular;
 }

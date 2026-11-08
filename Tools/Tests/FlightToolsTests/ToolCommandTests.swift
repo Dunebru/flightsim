@@ -9,6 +9,15 @@ import Terrain
     #expect(result.output.contains("terrain-bake"))
 }
 
+/// Regression: two options passed as one shell word were silently ignored, and the bake ran
+/// without its caches.
+@Test func unknownOptionsAreRejected() async {
+    let r = await runTool(["terrain-bake", "--world", "2", "--name", "w", "--out", "/tmp/x",
+                           "--terrarium-cache Data/raw/terrarium --imagery-cache Data/raw/imagery"])
+    #expect(r.code == 64)
+    #expect(r.output.contains("unknown option"))
+}
+
 @Test func unbuiltCommandsReportTheirMilestone() async {
     for command in ToolCommand.allCases where command.plannedFor != nil {
         let result = await runTool([command.rawValue])
@@ -59,16 +68,29 @@ struct DEMRasterTests {
         for (a, b) in zip(values, back) { #expect(abs(a - b) <= max(0.25, abs(a) * 0.001)) }
     }
 
+    /// The quadtree refines a tile only when all four children exist; the plan must never leave
+    /// a sibling set partial.
+    @Test func planKeepsSiblingSetsWhole() {
+        let tiles = Set(BakePlan.airportRegion.tiles(latitude: 33.44085, longitude: -112.011))
+        let minZoom = tiles.map(\.z).min()!
+        for k in tiles {
+            guard let p = k.parent, k.z == minZoom || tiles.contains(p) else { continue }
+            #expect(p.children.allSatisfy(tiles.contains), "\(p) has a partial set of children")
+        }
+        #expect(BakePlan.world(maxZoom: 2).count == 1 + 4 + 16)
+    }
+
     @Test func planPutsTheDetailNearTheCentre() {
         let tiles = BakePlan.airportRegion.tiles(latitude: 33.4342, longitude: -112.0116)
         let z14 = tiles.filter { $0.z == 14 }
         #expect(!z14.isEmpty)
         #expect(z14.contains(TileKey(z: 14, x: 3094, y: 6575)))
         #expect(tiles.filter { $0.z == 8 }.count >= 1)
-        // Every zoom-14 tile centre is within 12 km.
+        // Every zoom-14 tile centre is within the 12 km ring, plus at most one tile diagonal
+        // (2 km x 1.42) where sibling sets are completed.
         for k in z14 {
             let c = WebMercator.coordinate(x: Double(k.x) + 0.5, y: Double(k.y) + 0.5, zoom: 14)
-            #expect(BakePlan.distanceKm(33.4342, -112.0116, c.latitude, c.longitude) <= 12)
+            #expect(BakePlan.distanceKm(33.4342, -112.0116, c.latitude, c.longitude) <= 12 + 2.9)
         }
     }
 }

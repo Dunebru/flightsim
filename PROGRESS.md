@@ -4,7 +4,34 @@ What is done, what is a placeholder, and what is next. Honest status only: anyth
 
 Last updated: 2026-11-07.
 
-## Current milestone: M2 Flight dynamics (code complete; in-app flight on the phone not yet verified)
+## Current milestone: M4 Terrain streaming (met on the Mac and simulators; device timing owed)
+
+### M4 report (2026-11-07), against PLAN.md section 13
+
+1. **Quadtree tiles with crack-free level of detail: met.** Web Mercator tiles of 65 x 65 height samples, built through real WGS84 geodesy (Earth's curvature is exact), streamed off the main thread with at most six GPU uploads a frame. Neighbours at the same level share their edge samples exactly (tested); between levels, skirts hide the gaps. A tile splits only when all four children are loaded, so the drawn set never has holes or overlaps (tested). Out of view, refinement is three times coarser.
+2. **Ground to FL450 without holes: met.** From 13,716 m over KPHX, looking 20 degrees down in eight directions with the sky and the fallback ground switched off, no pixel below the horizon is empty. Negative control: the same views with the coarse levels removed show holes, so the check can fail. Aerial perspective now reaches 80 km plus the distance to the horizon (up to 450 km), so distant terrain fades into the sky.
+3. **Pops above a stated threshold: met.** Threshold: when tiles switch level, the frame changes by less than 3 of 255 on average. Measured by rendering each view with tiles split at the normal distance and at twice it: final approach 0.21 (99th percentile 5.5), pattern altitude 0.49 (7.6), climb at 3,000 m 0.90 (10.1), cruise at 10,000 m 1.43 (19.9). There is no geomorphing, so a switch is a cut, just a small one.
+4. **Memory budget enforced and logged: met.** 256 MB by default. Least recently used tiles are evicted; tiles in use (drawn, their ancestors, children being waited on) never are. When a view needs more than the budget, refinement backs off until it fits. Test: a five-point tour with a 64 MB budget stays at 64 MB (detail backed off 6x); the same tour without a budget reaches 314 MB. `-FlightLogStats YES` prints a `TERRAINSTATS` line (selected, drawn, resident, budget, pending, back-off) every two seconds. Two churn bugs were found by these gates and fixed: evicting a drawn tile's ancestors made the subtree reload forever, as did evicting children a parent was waiting on.
+5. **KPHX and KLAX baked: met (KLAX as data only).** KPHX: 1,325 tiles, zoom 6 to 16, 58 MB (Copernicus 30 m heights near the field). KLAX: 1,346 tiles, zoom 6 to 16, 45 MB (heights from AWS Terrain Tiles throughout, which carry USGS 10 m data in the US; no local DEM needed). A render over LAX from the Phoenix scene frame, 590 km away, checks both the second region and the floating origin at that distance. Flying at KLAX needs per-airport scene origins, which arrive with airports in M5.
+6. **Global base layer: met.** 1,365 tiles, zoom 0 to 5, 27 MB, from AWS Terrain Tiles and Sentinel-2. Coarse (about 20 km between height samples at zoom 5), so it is a backstop past the regions, not scenery.
+
+Also in M4: physics stands on the same ground the renderer draws (JSBSim's terrain elevation is set from the scenery every frame; the runway areas are flattened identically for both). The scene origin moved to the published runway 8/26 midpoint: the old origin was 740 m south of the real runway, which showed once satellite imagery was under it. The runway is drawn at its true heading (090.17) and 6.7 m slope. Imagery near the airport is USGS orthophotography (about 2 m per pixel), colour-matched to the Sentinel-2 mosaic used farther out. A "Loading scenery" hold keeps the flight paused until the ground around the camera has streamed in. Terrain vertices are 20 bytes and every tile shares one index buffer (about 0.42 MB per tile, mostly the texture).
+
+Not yet verified: frame time on the phone with terrain (the phone is away). Close to the ground the 2 m imagery is still soft compared with MSFS's 30 cm aerial photos and 3D ground cover; finer imagery (NAIP at 0.6 m) is a bake-time option once its export service responds.
+
+## M3 HUD and controls: largely met (2026-11-07)
+
+### M3 report (2026-11-07), against PLAN.md section 13
+
+1. **HUD elements: met for everything this milestone owns.** Metrics bar (IAS, GS, altitude, vertical speed, heading, RPM or N1), thrust lever with idle and reverse, flaps with the aircraft's own detents, spoilers, gear (fixed on the C172), parking brake, hold-to-brake, trim, stall warning, camera, lights and settings panels, pause. Elements that belong to later milestones are present but say so on screen instead of pretending: the map ("No map yet", M5/M8), ATC (M9) and the autopilot panel ("Autopilot logic arrives in M8").
+2. **Input with calibration: met.** Tilt (the primary mode, with Level to recalibrate, dead zone and expo), an on-screen stick, and game controllers; sensitivity and pitch inversion in Settings. Nosewheel steering follows the roll input on the ground and fades out by 60 kt.
+3. **Five cameras with transitions: met.** Cockpit, chase, tower, wing and free orbit, blended over 0.6 s; drag and pinch adjust the current view. The cockpit view hides the exterior model because the C172 panel is not imported yet (M6).
+4. **Settings persisted: met.** Aircraft, start position, time of day, control mode, sensitivity, inversion, upscaler and the stats overlay survive relaunch (tested).
+5. **Side-by-side screenshot review: done once (the Apple-style redesign of 2026-11-07, reviewed against `DESIGN.md`).** Not repeated against Infinite Flight screenshots; the design direction is now Apple's platform language, not a copy.
+
+Not verified on the phone this milestone (it was away): tilt feel, the stick, and controller input on device.
+
+## M2 Flight dynamics: met except the on-device flight recording
 
 ### M2 report (2026-11-07), against PLAN.md section 13
 
@@ -45,21 +72,29 @@ Build warnings: 1, the deprecated `UIRequiresFullScreen`, kept on purpose (see K
 
 | Module | Status |
 |---|---|
-| SimCore | **Partial.** WGS84 geodesy (geodetic to ECEF and back) implemented and tested against PROJ reference values. SimState, time and signposts not started. |
-| CJSBSim | **Placeholder (M0 stub).** C API header with `jsb_version()` returning "stub"; compiled as C++17. JSBSim sources arrive in M2. |
-| FlightModel | **Placeholder (M0 stub).** Links CJSBSim; no physics. |
-| Weather, Nav, Autopilot, Airports, Terrain, Aircraft, Renderer, Traffic, ATC | **Placeholder (M0 stubs).** Module identity only. |
-| UI | **Prototype.** Original "glass cockpit" design language (PLAN.md section 8). In-flight HUD with working touch controls: thrust lever with idle/reverse gate, trim, detented flaps and spoilers, gear with a 6 s transit and position lights, parking brake, mode annunciator, autopilot panel with steppable targets, lights and camera panels. All values are **demo data**; the world behind is a flat gradient stand-in. Map, ATC and Settings panels say "not built yet". Main menu restyled; only Free Flight is active. |
-| Tools (`flight-tools`) | **Placeholder (M0 stub).** Declares `nav-import`, `airport-import`, `terrain-bake`, `asset-cook`; each prints "not implemented". |
+| SimCore | **Working.** WGS84 geodesy (tested against PROJ), local ENU frames, solar ephemeris (tested against NREL SPA). |
+| CJSBSim | **Working.** JSBSim 1.3.3 vendored unmodified, C wrapper with a process-wide lock. |
+| FlightModel | **Working.** 120 Hz physics thread; C172P (one tuning change) and a tuned generic A320 pass their published-number tests; the ground under the aircraft comes from the scenery every frame. |
+| Terrain | **Working.** Web Mercator tiles, scenery packs layered into a library, crack-hiding skirts, quadtree selection, flattened runway areas, a ground model for physics and cameras. |
+| Aircraft | **Partial.** AC3D loader for the C172P. No asset pipeline, liveries or animation (M6). |
+| Renderer | **Working.** Physically based sky and aerial perspective, streamed satellite terrain, the KPHX 8/26 runway with markings, the aircraft with a sun shadow, MetalFX. No night lighting, stars, clouds or water yet. |
+| UI | **Working.** Apple-style HUD with live data, free-flight setup, persisted settings, five cameras, tilt, stick and controller input. |
+| Tools (`flight-tools`) | **Partial.** `terrain-bake` works (DEM, AWS terrain tiles, Sentinel-2 and USGS imagery with colour matching); `nav-import`, `airport-import` and `asset-cook` say "not implemented" and name their milestone. |
+| Weather, Nav, Autopilot, Airports, Traffic, ATC | **Placeholders.** Module identity only (M5 to M9). |
 
 ## Placeholders in the app today
 
-The HUD is labeled on screen "PROTOTYPE · DEMO DATA · 3D VIEW ARRIVES IN M1": its numbers are fixed demo values and the sky and ground are a flat gradient. The main menu is labeled "PLACEHOLDER MENU · M0". No aircraft, terrain, airports or flight model exist yet.
+Only runway 8/26 at KPHX is drawn as geometry; the other two runways, the taxiways and the terminals exist only in the satellite imagery, with no buildings (M5). The HUD carries a small "Prototype" tag. The autopilot panel's targets do nothing (M8). The map and ATC panels say they are not built. The tower camera position is a guess, not the real tower.
 
 ## Known issues
+
+- Night is near black: no stars, moon or city lights yet (stars and moon M7, night lighting M10).
+- Imagery comes from two sources (Sentinel-2 below zoom 12, USGS from zoom 12). Colour is matched statistically at bake time, so a faint tone change can remain where the levels meet.
+- The runway 08 displaced threshold (898 ft) is not drawn; markings assume none (M5).
+- The sea is satellite imagery on flat ground at sea level: no reflections, waves or shoreline foam (water rendering, M10). Terrain-tile heights are clamped at sea level to remove ocean depths, which also raises land below sea level (Death Valley, the Salton Sea) to sea level where no local DEM is used.
 
 - iPad landscape lock relies on `UIRequiresFullScreen`, deprecated since iOS 26 (one build warning). Verified on 2026-11-07 that iPadOS 27 still honors it: without it the iPad simulator rendered the app in portrait. When Apple stops honoring it, the iPad needs a different approach (likely a rotate-to-landscape prompt).
 
 ## Next
 
-M1 Renderer core (criteria in `PLAN.md` section 13).
+Finish M4 (gates on the final packs, KLAX region, device timing when the phone is back), then M5 Airports: runways, taxiways, lighting and buildings generated from OSM and FAA data, starting with KPHX and KLAX. Owed from earlier milestones when the phone is back: `scripts/verify.sh --device`, a hand-flown circuit recording (M2), and on-device input checks (M3).

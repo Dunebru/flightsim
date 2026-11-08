@@ -14,7 +14,7 @@ struct GroundModelTests {
                                     angle: (90 - 90.168) * .pi / 180, height: 0, gradient: 0.0019)
 
     @Test func runwayFollowsItsPublishedElevations() throws {
-        var g = GroundModel(pack: try SceneryPack(root: Self.packURL), frame: LocalFrame(origin: Self.origin), flatten: [Self.runway])
+        var g = GroundModel(scenery: SceneryLibrary(try SceneryPack(root: Self.packURL)), frame: LocalFrame(origin: Self.origin), flatten: [Self.runway])
         let frame = LocalFrame(origin: Self.origin)
         func height(at s: Double) -> Double {
             let a = Self.runway.angle
@@ -28,7 +28,7 @@ struct GroundModelTests {
 
     /// South Mountain's summit area (Mount Suppoa, about 2,690 ft) stands well above the valley.
     @Test func realHeightsAwayFromTheRunway() throws {
-        var g = GroundModel(pack: try SceneryPack(root: Self.packURL), frame: LocalFrame(origin: Self.origin), flatten: [Self.runway])
+        var g = GroundModel(scenery: SceneryLibrary(try SceneryPack(root: Self.packURL)), frame: LocalFrame(origin: Self.origin), flatten: [Self.runway])
         let summit = g.height(latitude: 33.3337, longitude: -112.0610)
         #expect(summit > 700 && summit < 840, "South Mountain summit: \(summit) m")
         let valley = g.height(latitude: 33.4500, longitude: -112.0700)

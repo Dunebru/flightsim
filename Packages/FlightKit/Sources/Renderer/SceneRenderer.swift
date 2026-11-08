@@ -26,6 +26,7 @@ public final class SceneRenderer {
     private let scenePipeline: any MTLRenderPipelineState
     private let skyPipeline: any MTLRenderPipelineState
     private let glassPipeline: any MTLRenderPipelineState
+    private let terrainPipeline: any MTLRenderPipelineState
     private let shadowPipeline: any MTLRenderPipelineState
     private let tonemapPipeline: any MTLRenderPipelineState
     private var finalPipelines: [MTLPixelFormat.RawValue: any MTLRenderPipelineState] = [:]
@@ -128,6 +129,7 @@ public final class SceneRenderer {
         let gbuffer: [MTLPixelFormat] = [Self.colorFormat, Self.motionFormat]
         scenePipeline = try render("sceneVertex", "sceneFragment", colors: gbuffer, depth: Self.depthFormat)
         skyPipeline = try render("skyVertex", "skyFragment", colors: gbuffer, depth: Self.depthFormat)
+        terrainPipeline = try render("terrainVertex", "sceneFragment", colors: gbuffer, depth: Self.depthFormat)
         glassPipeline = try render("sceneVertex", "glassFragment", colors: gbuffer, depth: Self.depthFormat) { d in
             let c = d.colorAttachments[0]!
             c.isBlendingEnabled = true
@@ -257,7 +259,11 @@ public final class SceneRenderer {
         u.sunDirection = SIMD4(sunDir, 0)
         u.sunIlluminance = SIMD4(1, 1, 1, 0)
         let cameraAboveGround = max(camera.z - offset.z, 0.5)
-        u.atmosphere = SIMD4(Float(cameraAboveGround / 1000), Float(scene.origin.height / 1000), 32,
+        // Aerial perspective reaches past the farthest terrain in view: 80 km plus the distance
+        // to the horizon (about 357 km from 10 km up), so distant ranges fade into the sky.
+        let horizonKm = (2 * 6_371 * max(cameraAboveGround, 1) / 1000).squareRoot()
+        let aerialRangeKm = Float(min(80 + horizonKm, 450))
+        u.atmosphere = SIMD4(Float(cameraAboveGround / 1000), Float(scene.origin.height / 1000), aerialRangeKm,
                              Float(scene.date.timeIntervalSince1970.truncatingRemainder(dividingBy: 10_000)))
         // Procedural detail is anchored to the scene frame (not the floating-origin offset), so
         // patterns stay put as the camera moves.
@@ -267,8 +273,12 @@ public final class SceneRenderer {
         u.debug = SIMD4(scene.showGround ? 1 : 0, 0, 0, 0)
 
         // Draws. With terrain loaded the procedural ground is only a fallback past the scenery's
-        // edge, so it sits below the lowest terrain.
-        let groundLevel: Double = terrain == nil ? 0 : -200
+        // edge, so it sits just below sea level (under all the terrain, whose heights are clamped
+        // at sea level). Without terrain it is level with the low end of the sloped runway, so no
+        // pavement is buried.
+        let groundLevel: Double = terrain == nil
+            ? -Double(runway.gradient * runway.length / 2) - 0.05
+            : -scene.origin.height - 30
         let groundZ = Float(offset.z + groundLevel - camera.z)
         var groundDraw = DrawUniforms()
         groundDraw.model = MatrixMath.translation(SIMD3(0, 0, groundZ))
@@ -338,10 +348,11 @@ public final class SceneRenderer {
         }
         // Terrain: upload finished tiles (mipmaps go into this command buffer) and select the
         // tiles for this camera.
-        let terrainTiles = scene.showGround ? (terrain?.update(camera: camera - offset, commandBuffer: cbAtmosphere) ?? []) : []
+        let frustum = MatrixMath.frustumPlanes(viewProjNoJitter)
+        let terrainTiles = scene.showGround
+            ? (terrain?.update(camera: camera - offset, frustum: frustum, commandBuffer: cbAtmosphere) ?? []) : []
         cbAtmosphere.commit()
         signposter.endInterval("Encode atmosphere", encodeAtmosphere)
-        let frustum = MatrixMath.frustumPlanes(viewProjNoJitter)
 
         if shadowOn, let aircraft {
             let cbShadow = makeCommandBuffer(label: "Shadow")
@@ -404,8 +415,11 @@ public final class SceneRenderer {
                 e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: count)
             }
             if scene.showGround {
-                draw(groundBuffer, count: groundVertexCount, groundDraw, texture: nil)
+                if settings.fallbackGround || terrain == nil {
+                    draw(groundBuffer, count: groundVertexCount, groundDraw, texture: nil)
+                }
                 var drawn = 0
+                if !terrainTiles.isEmpty { e.setRenderPipelineState(terrainPipeline) }
                 for tile in terrainTiles {
                     let world = tile.centre + offset
                     let rel = relative(world, to: camera)
@@ -419,11 +433,14 @@ public final class SceneRenderer {
                     e.setVertexBytes(&d, length: MemoryLayout<DrawUniforms>.stride, index: 2)
                     e.setFragmentBytes(&d, length: MemoryLayout<DrawUniforms>.stride, index: 2)
                     e.setFragmentTexture(tile.texture, index: 0)
-                    e.drawIndexedPrimitives(type: .triangle, indexCount: tile.indexCount, indexType: .uint16,
-                                            indexBuffer: tile.indices, indexBufferOffset: 0)
+                    if let terrain {
+                        e.drawIndexedPrimitives(type: .triangle, indexCount: terrain.indexCount, indexType: .uint16,
+                                                indexBuffer: terrain.indices, indexBufferOffset: 0)
+                    }
                     drawn += 1
                 }
                 terrainDrawn = drawn
+                e.setRenderPipelineState(scenePipeline)
             }
             if scene.showRunway {
                 draw(runwayBuffer, count: runwayVertexCount, runwayDraw, texture: nil)
@@ -439,9 +456,11 @@ public final class SceneRenderer {
                     draw(part.vertices, count: part.vertexCount, d, texture: part.texture)
                 }
             }
-            e.setRenderPipelineState(skyPipeline)
-            e.setDepthStencilState(depthSky)
-            e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+            if !settings.blackSkyForTest {
+                e.setRenderPipelineState(skyPipeline)
+                e.setDepthStencilState(depthSky)
+                e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+            }
             if let aircraft, scene.showAircraft {
                 e.setRenderPipelineState(glassPipeline)
                 e.setDepthStencilState(depthTestOnly)
@@ -538,10 +557,22 @@ public final class SceneRenderer {
 
     /// Streams terrain from a scenery pack, in the scene frame of `origin`. `flatten` areas
     /// are held just under the drawn pavement. Pass nil to remove terrain.
-    public func setTerrain(_ pack: SceneryPack?, origin: Geodetic, flatten: [FlattenArea]) {
+    public func setTerrain(_ pack: SceneryLibrary?, origin: Geodetic, flatten: [FlattenArea]) {
         let lowered = flatten.map { a in var a = a; a.height -= 0.25; return a }
         terrain = pack.map { TerrainRenderer(pack: $0, frame: LocalFrame(origin: origin), flatten: lowered, device: device) }
         previousCamera = nil
+    }
+
+    /// Terrain refinement: a tile splits while its radius over its distance exceeds this.
+    public var terrainDetail: Double {
+        get { terrain?.detail ?? 0.55 }
+        set { terrain?.detail = newValue }
+    }
+
+    /// GPU memory budget for terrain, megabytes.
+    public var terrainBudgetMegabytes: Int {
+        get { (terrain?.budgetBytes ?? 0) / 1_048_576 }
+        set { terrain?.budgetBytes = newValue * 1_048_576 }
     }
 
     /// Multiplies the satellite imagery to give surface albedo.
@@ -552,6 +583,15 @@ public final class SceneRenderer {
         (terrain?.loadedCount ?? 0, Double(terrain?.residentBytes ?? 0) / 1_048_576)
     }
     public var terrainPending: Int { terrain?.pendingCount ?? 0 }
+    /// True while terrain needs more memory than its budget (detail is backing off).
+    public var terrainOverBudget: Bool { terrain?.overBudget ?? false }
+    /// One line on the streamer's state, for logs and test failures.
+    public var terrainDebug: String {
+        guard let t = terrain else { return "no terrain" }
+        return String(format: "selected %d, drawn %d, resident %d (%.0f MB, budget %d MB), pending %d, broken %d, detail back-off %.2f",
+                      t.lastSelected, terrainDrawn, t.loadedCount, Double(t.residentBytes) / 1_048_576,
+                      t.budgetBytes / 1_048_576, t.pendingCount, t.broken.count, t.pressure)
+    }
 
     /// Replaces the aircraft (models load in the background after the first frame).
     public func setAircraft(_ model: AC3DModel, textures: URL?) throws {

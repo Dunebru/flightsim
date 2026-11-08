@@ -21,7 +21,8 @@ public enum ToolCommand: String, CaseIterable, Sendable {
         "usage: flight-tools <command>\n" + allCases.map { c in
             if let m = c.plannedFor { return "  \(c.rawValue)  (not implemented, planned for \(m))" }
             return "  \(c.rawValue)  " + (c == .terrainBake
-                ? "--dem <raster.bin> --dem-info <gdalinfo.json> --center <lat,lon> --name <name> --out <dir> [--no-imagery]"
+                ? "(--center <lat,lon> | --world <max zoom>) --name <name> --out <dir> [--dem <raster.bin> --dem-info <gdalinfo.json>]\n"
+                  + "      [--terrarium-cache <dir> [--terrarium-max-zoom 11]] [--imagery-cache <dir> [--usgs-from-zoom 12]]"
                 : "")
         }.joined(separator: "\n")
     }
@@ -39,18 +40,36 @@ public func runTool(_ arguments: [String], log: @Sendable @escaping (String) -> 
     let options = Options(Array(arguments.dropFirst()))
     switch command {
     case .terrainBake:
-        guard let dem = options["--dem"], let info = options["--dem-info"], let center = options["--center"],
-              let name = options["--name"], let out = options["--out"] else {
+        // An option the tool does not know is a mistake, not something to ignore: a mistyped
+        // cache path once produced a pack with no imagery and no regional heights.
+        let known: Set<String> = ["--dem", "--dem-info", "--center", "--world", "--name", "--out", "--terrarium-cache",
+                                  "--terrarium-max-zoom", "--imagery-cache", "--usgs-from-zoom"]
+        if let unknown = options.names.first(where: { !known.contains($0) }) {
+            return (64, "terrain-bake: unknown option \(unknown)\n" + ToolCommand.usage)
+        }
+        guard let name = options["--name"], let out = options["--out"] else { return (64, ToolCommand.usage) }
+        let tiles: [TileKey]
+        if let world = options["--world"].flatMap(Int.init) {
+            tiles = BakePlan.world(maxZoom: world)
+        } else if let center = options["--center"] {
+            let parts = center.split(separator: ",").compactMap { Double($0) }
+            guard parts.count == 2 else { return (64, "--center must be lat,lon") }
+            tiles = BakePlan.airportRegion.tiles(latitude: parts[0], longitude: parts[1])
+        } else {
             return (64, ToolCommand.usage)
         }
-        let parts = center.split(separator: ",").compactMap { Double($0) }
-        guard parts.count == 2 else { return (64, "--center must be lat,lon") }
         do {
-            let raster = try DEMRaster(binary: URL(fileURLWithPath: dem), info: URL(fileURLWithPath: info))
-            let tiles = BakePlan.airportRegion.tiles(latitude: parts[0], longitude: parts[1])
+            var raster: DEMRaster?
+            if let dem = options["--dem"], let info = options["--dem-info"] {
+                raster = try DEMRaster(binary: URL(fileURLWithPath: dem), info: URL(fileURLWithPath: info))
+            }
             log("plan: \(tiles.count) tiles")
-            let baker = TerrainBaker(dem: raster, output: URL(fileURLWithPath: out), name: name,
-                                     downloadImagery: !options.has("--no-imagery"))
+            let terrarium = options["--terrarium-cache"].map { TerrariumSource(cache: URL(fileURLWithPath: $0)) }
+            let baker = TerrainBaker(dem: raster, terrarium: terrarium,
+                                     terrariumMaxZoom: options["--terrarium-max-zoom"].flatMap(Int.init) ?? 11,
+                                     output: URL(fileURLWithPath: out), name: name,
+                                     imageryCache: options["--imagery-cache"].map { URL(fileURLWithPath: $0) },
+                                     usgsFromZoom: options["--usgs-from-zoom"].flatMap(Int.init))
             let index = try await baker.bake(tiles: tiles, log: log)
             return (0, "baked \(index.tiles.count) tiles, zoom \(index.minZoom)-\(index.maxZoom), into \(out)")
         } catch {
@@ -81,5 +100,7 @@ struct Options {
     }
 
     subscript(_ key: String) -> String? { values[key] }
+    /// Every option name given, with or without a value.
+    var names: [String] { Array(values.keys) + Array(flags) }
     func has(_ flag: String) -> Bool { flags.contains(flag) || values[flag] != nil }
 }

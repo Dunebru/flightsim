@@ -83,7 +83,9 @@ public struct FlightHUDView: View {
                             AutopilotStatus(model: model)
                                 .transition(.move(edge: .top).combined(with: .opacity))
                         }
-                        if model.openPanel == nil {
+                        if isLoadingScenery {
+                            loadingTag
+                        } else if model.openPanel == nil {
                             demoTag
                             #if os(iOS)
                             if engine.showStats { FrameStatsOverlay(engine: engine) }
@@ -163,7 +165,9 @@ public struct FlightHUDView: View {
         let hud = model
         let settings = self.settings
         engine.dateProvider = { settings.flightDate() }
-        engine.frameHook = { dt, scene in s.tick(dt: dt, hud: hud, scene: &scene) }
+        engine.frameHook = { [weak engine] dt, scene in
+            s.tick(dt: dt, hud: hud, scene: &scene, holdForScenery: engine?.loadingScenery ?? false)
+        }
         engine.physicsProbe = { s.physics?.state }
     }
 
@@ -317,6 +321,26 @@ public struct FlightHUDView: View {
             }
         }
         .transition(.opacity)
+    }
+
+    private var isLoadingScenery: Bool {
+        #if os(iOS)
+        engine.loadingScenery
+        #else
+        false
+        #endif
+    }
+
+    private var loadingTag: some View {
+        HStack(spacing: 6) {
+            ProgressView().controlSize(.mini).tint(.white)
+            Text("Loading scenery")
+        }
+        .font(.system(size: 11, weight: .semibold))
+        .foregroundStyle(.white)
+        .padding(.horizontal, 10)
+        .frame(height: 22)
+        .glassEffect(HUDStyle.glass, in: .capsule)
     }
 
     private var demoTag: some View {

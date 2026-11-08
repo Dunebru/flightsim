@@ -182,9 +182,13 @@ License facts that drive decisions are kept here. At your request (2026-11-07) t
 - **Copernicus GLO-30**: `s3://copernicus-dem-30m/` (public, no sign-in), 1x1 degree COGs. Required attribution text recorded.
 - **EOX Sentinel-2 cloudless**: WMTS `https://tiles.maps.eox.at/wmts/1.0.0/WMTSCapabilities.xml`, layer `s2cloudless-2025_3857`. 2018+ mosaics are CC BY-NC-SA 4.0; 2016/2017 are CC BY 4.0. **Bulk caching terms are not stated**; EOX asks bulk users to contact cloudless@eox.at. Plan: email them before baking more than a test region (listed in `ASSETS_NEEDED.md` as an action for you, since it should come from you).
 - **NAIP**: `s3://naip-visualization` (requester pays, a few dollars per state on your AWS account) or Microsoft Planetary Computer (free). Public domain with attribution.
+- **USGS The National Map, USGSImageryOnly** (public domain, "USDA, USGS The National Map: Orthoimagery", refreshed June 2024): tile cache `https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}`, Web Mercator, cached to zoom 16 (about 2 m per pixel at Phoenix; NAIP-based at large scales). Used for zoom 12 to 16 around US airports, colour-matched at bake time to the Sentinel-2 mosaic (per-channel mean and spread at zoom 12) so detail levels do not show a seam. Zoom 17 and finer would need the NAIP ImageServer `exportImage`, which returned 504 when tried on 2026-11-07.
+- **AWS Terrain Tiles** (Mapzen/Tilezen "terrarium" PNG, AWS Open Data, `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png`): global elevation assembled from public sources (SRTM, NED, GMTED2010, ETOPO1 and others; a few regional sources carry CC BY or OGL attribution, none of them in Arizona). Height = R x 256 + G + B / 256 - 32768 m. Used for the world base (zoom 0 to 5) and each region's outer levels (zoom 6 to 11), and past the edge of a local DEM.
 - **ESA WorldCover** 10 m (CC BY 4.0): `s3://esa-worldcover/v200/2021/map`.
 - **NASA Black Marble** night lights (public domain / CC0).
 - Ruled out: **Esri World Imagery** and **Mapbox Satellite** both forbid offline export and caching.
+
+How a pack is made (`flight-tools terrain-bake`): heights at zoom 11 and coarser from the terrain tiles, zoom 12 and finer from the 30 m DEM where one is given; imagery from Sentinel-2 below zoom 12 and USGS from zoom 12; rings of 700 km (zoom 6 to 7), 350 km (8 to 9), 150 km (10 to 11), 40 km (12 to 13), 12 km (14), 5 km (15) and 2.6 km (16), with every sibling set completed so the quadtree can refine everywhere inside a ring.
 
 ### 7.3 Weather
 - **aviationweather.gov Data API**: `/api/data/metar?ids=...&format=json`, `/api/data/taf`, bulk `/data/cache/metars.cache.csv.gz`. Tested live. Limit 100 requests/minute.
@@ -304,7 +308,7 @@ Criteria for M3 to M10 are written in full before each starts; outlines are here
 ### M3 to M10 (outlines)
 - **M3 HUD and controls:** every HUD element in section 8 functional, tilt and on-screen and controller input with calibration, five cameras with transitions, pause, settings persisted; side-by-side screenshot review against the layout spec.
 - **M4 Terrain streaming:** quadtree tiles with crack-free LOD, ground to FL450 without holes or pops above a stated threshold, memory budget enforced and logged, KPHX and KLAX regions baked, base layer global.
-- **M5 Airports:** importer from OSM + FAA, generated runways with correct markings and lighting systems, taxiways with signs and lights, gates, generic buildings; KPHX and KLAX first, then the remaining 18 of the top 20 (proposed: KATL, KORD, KDFW, KDEN, KJFK, KSFO, KSEA, KLAS, KMCO, KMIA, KBOS, EGLL, EHAM, LFPG, EDDF, OMDB, RJTT, VHHH).
+- **M5 Airports:** importer from OSM + FAA, generated runways with correct markings and lighting systems, taxiways with signs and lights, gates, generic buildings. **Scope (your decision, 2026-11-07): KPHX and KLAX only, made as good as possible, before any other airport.** The other 18 of the top 20 (KATL, KORD, KDFW, KDEN, KJFK, KSFO, KSEA, KLAS, KMCO, KMIA, KBOS, EGLL, EHAM, LFPG, EDDF, OMDB, RJTT, VHHH) are deferred.
 - **M6 Fleet:** asset-cook pipeline, all six slots with animations, lights, liveries; cockpits for C172 and A320; per-aircraft honest quality note.
 - **M7 Weather and time:** live METAR, Open-Meteo winds, clouds from layers, turbulence and gusts in physics, rain/snow, wet runways, seasons.
 - **M8 Navigation and autopilot:** FMC-style editor, CIFP procedures, LNAV/VNAV, ILS autoland on KPHX/KLAX with touchdown dispersion tests, moving map.

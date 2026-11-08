@@ -34,12 +34,17 @@ final class WorldEngine: NSObject {
     @ObservationIgnored var physicsProbe: (() -> FlightState?)?
     /// Cockpit, chase, tower, wing and free-orbit views; drag and pinch adjust the current one.
     @ObservationIgnored var rig = CameraRig()
-    /// The bundled scenery pack (terrain heights and imagery around KPHX), if present.
-    @ObservationIgnored let scenery: SceneryPack?
+    /// The bundled scenery (regional packs over a world base), if present.
+    @ObservationIgnored let scenery: SceneryLibrary?
     /// Ground under the camera, so no view goes underground.
     @ObservationIgnored private var cameraGround: GroundModel
 
     private(set) var framesPerSecond: Double = 0
+    /// True until the terrain around the camera has streamed in (or 10 s have passed), so a
+    /// flight does not start over half-loaded ground.
+    private(set) var loadingScenery = true
+    @ObservationIgnored private var quietFrames = 0
+    @ObservationIgnored private var firstFrame: CFTimeInterval = 0
     private(set) var startupError: String?
     var showStats = true
 
@@ -56,8 +61,9 @@ final class WorldEngine: NSObject {
         let defaults = UserDefaults.standard
         timeOverride = defaults.string(forKey: "FlightTimeUTC").flatMap { ISO8601DateFormatter().date(from: $0) }
         scene = .phoenixTest(date: timeOverride ?? Date())
-        scenery = Bundle.main.resourceURL.flatMap { try? SceneryPack(root: $0.appendingPathComponent("Bundle/Scenery/kphx")) }
-        cameraGround = GroundModel(pack: scenery, frame: LocalFrame(origin: scene.origin), flatten: PhoenixSite.flatten)
+        scenery = Bundle.main.resourceURL.map { SceneryLibrary(directory: $0.appendingPathComponent("Bundle/Scenery")) }
+            .flatMap { $0.packs.isEmpty ? nil : $0 }
+        cameraGround = GroundModel(scenery: scenery, frame: LocalFrame(origin: scene.origin), flatten: PhoenixSite.flatten)
         var made: SceneRenderer?
         var error: String?
         if let device = MTLCreateSystemDefaultDevice() {
@@ -144,6 +150,11 @@ final class WorldEngine: NSObject {
         scene.showAircraft = rig.drawsAircraft
         renderer.render(scene, to: update.drawable.texture, drawable: update.drawable)
         renderer.exposureAdaptation = 0.05
+        if loadingScenery {
+            if firstFrame == 0 { firstFrame = t }
+            quietFrames = renderer.terrainPending == 0 ? quietFrames + 1 : 0
+            if scenery == nil || quietFrames >= 3 || t - firstFrame > 10 { loadingScenery = false }
+        }
         if logStats {
             framesSinceLog += 1
             if framesSinceLog >= 120 {
@@ -156,6 +167,7 @@ final class WorldEngine: NSObject {
                                  s.indicatedAirspeedKnots, s.altitudeFeet, s.heightAboveGroundFeet, s.heading * 180 / .pi,
                                  s.pitch * 180 / .pi, s.roll * 180 / .pi, s.verticalSpeedFPM, s.engineIndication, s.onGround ? 1 : 0, s.time))
                 }
+                print("TERRAINSTATS \(renderer.terrainDebug)")
                 print(String(format: "FLIGHTSTATS fps=%.1f gpuFrame=%.2fms gpuStageSum=%.2fms cpu=%.2fms %@ render=%dx%d output=%dx%d upscaler=%@ thermal=%d",
                              framesPerSecond, st.gpuFrameMilliseconds, st.gpuTotalMilliseconds, st.cpuMilliseconds, passes,
                              st.renderSize.x, st.renderSize.y, st.outputSize.x, st.outputSize.y,

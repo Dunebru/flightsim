@@ -99,6 +99,29 @@ public struct TerrainTileGeometry: Sendable {
         uvs.reserveCapacity(n * n)
         for j in 0..<n { for i in 0..<n { uvs.append(SIMD2(Float(Double(i) * step), Float(Double(j) * step))) } }
 
+        // Skirts: a copy of each edge, dropped by a depth proportional to the tile's size.
+        var radius = 0.0
+        for p in positions { radius = max(radius, Double(simd_length(p))) }
+        let depth = Float(max(radius * 0.04, 5))
+        for edge in edges(n) {
+            for idx in edge {
+                positions.append(positions[idx] - SIMD3(0, 0, depth))
+                normals.append(normals[idx])
+                uvs.append(uvs[idx])
+            }
+        }
+        return TerrainTileGeometry(key: key, centre: centre, positions: positions, normals: normals,
+                                   uvs: uvs, indices: indices(samples: n), radius: radius)
+    }
+
+    /// Edge vertex indices: north (west to east), south, west (north to south), east.
+    static func edges(_ n: Int) -> [[Int]] {
+        [(0..<n).map { $0 }, (0..<n).map { (n - 1) * n + $0 }, (0..<n).map { $0 * n }, (0..<n).map { $0 * n + n - 1 }]
+    }
+
+    /// Triangle list for a tile of `samples` squared: the grid, then the four skirts. The same for
+    /// every tile, so the renderer shares one index buffer.
+    public static func indices(samples n: Int) -> [UInt16] {
         var indices = [UInt16]()
         indices.reserveCapacity((n - 1) * (n - 1) * 6 + 4 * (n - 1) * 6)
         for j in 0..<(n - 1) {
@@ -107,33 +130,16 @@ public struct TerrainTileGeometry: Sendable {
                 indices += [a, c, b, b, c, d]
             }
         }
-
-        // Skirts: a copy of each edge, dropped by a depth proportional to the tile's size.
-        var radius = 0.0
-        for p in positions { radius = max(radius, Double(simd_length(p))) }
-        let depth = Float(max(radius * 0.04, 5))
-        let edges: [[Int]] = [
-            (0..<n).map { $0 },                      // north edge, west to east
-            (0..<n).map { (n - 1) * n + $0 },        // south edge
-            (0..<n).map { $0 * n },                  // west edge, north to south
-            (0..<n).map { $0 * n + n - 1 },          // east edge
-        ]
-        for edge in edges {
-            let base = UInt16(positions.count)
-            for idx in edge {
-                positions.append(positions[idx] - SIMD3(0, 0, depth))
-                normals.append(normals[idx])
-                uvs.append(uvs[idx])
-            }
+        var base = n * n
+        for edge in edges(n) {
             for k in 0..<(n - 1) {
                 let top0 = UInt16(edge[k]), top1 = UInt16(edge[k + 1])
-                let bot0 = base + UInt16(k), bot1 = base + UInt16(k + 1)
-                // Both windings: the renderer does not cull terrain.
+                let bot0 = UInt16(base + k), bot1 = UInt16(base + k + 1)
                 indices += [top0, bot0, top1, top1, bot0, bot1]
             }
+            base += n
         }
-        return TerrainTileGeometry(key: key, centre: centre, positions: positions, normals: normals,
-                                   uvs: uvs, indices: indices, radius: radius)
+        return indices
     }
 }
 
@@ -152,13 +158,18 @@ public enum TileSelector {
                               tileCentre: (TileKey) -> (centre: SIMD3<Double>, radius: Double),
                               isLoaded: (TileKey) -> Bool,
                               wantsChildren: (TileKey) -> Void = { _ in },
-                              detail: Double = 0.55) -> [TileKey] {
+                              detail: Double = 0.55,
+                              isVisible: (SIMD3<Double>, Double) -> Bool = { _, _ in true },
+                              hiddenDetailScale: Double = 1) -> [TileKey] {
         var out: [TileKey] = []
         func visit(_ k: TileKey) {
             let (c, r) = tileCentre(k)
             let distance = max(simd_distance(c, camera) - r, 1)
             let children = k.children
-            let wantsFiner = r / distance > detail && children.allSatisfy { available.contains($0) }
+            // Out of view, refine less: enough to turn the camera without holes, at a fraction of
+            // the memory.
+            let threshold = isVisible(c, r) ? detail : detail * hiddenDetailScale
+            let wantsFiner = r / distance > threshold && children.allSatisfy { available.contains($0) }
             if wantsFiner {
                 if children.allSatisfy(isLoaded) {
                     children.forEach(visit)

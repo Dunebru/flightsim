@@ -113,11 +113,11 @@ public final class FlightDynamics {
         guard let root else { throw FlightModelError.engine("JSBSim data not found in the bundle") }
         var error = [CChar](repeating: 0, count: 512)
         guard let h = jsb_create(root.path, &error, Int32(error.count)) else {
-            throw FlightModelError.engine(String(cString: error))
+            throw FlightModelError.engine(Self.message(error))
         }
         guard jsb_load_model(h, model, &error, Int32(error.count)) == 1 else {
             jsb_destroy(h)
-            throw FlightModelError.engine(String(cString: error))
+            throw FlightModelError.engine(Self.message(error))
         }
         handle = h
         self.model = model
@@ -157,7 +157,7 @@ public final class FlightDynamics {
         set("gear/gear-cmd-norm", ic.gearDown ? 1 : 0)
         var error = [CChar](repeating: 0, count: 512)
         guard jsb_run_ic(handle, &error, Int32(error.count)) == 1 else {
-            throw FlightModelError.engine("RunIC: \(String(cString: error))")
+            throw FlightModelError.engine("RunIC: \(Self.message(error))")
         }
         if onGround {
             try? trim(.ground)
@@ -192,7 +192,7 @@ public final class FlightDynamics {
     public func trim(_ mode: TrimMode = .full) throws {
         var error = [CChar](repeating: 0, count: 512)
         guard jsb_trim(handle, mode.rawValue, &error, Int32(error.count)) == 1 else {
-            throw FlightModelError.trim(String(cString: error))
+            throw FlightModelError.trim(Self.message(error))
         }
     }
 
@@ -222,6 +222,11 @@ public final class FlightDynamics {
     /// as level at this height around the aircraft; update it as the aircraft moves.
     public func setTerrainElevation(feet: Double) {
         set("position/terrain-elevation-asl-ft", feet)
+    }
+
+    /// A NUL-terminated C error buffer as text.
+    static func message(_ buffer: [CChar]) -> String {
+        String(decoding: buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
     }
 
     public var terrainElevationFeet: Double { self.get("position/terrain-elevation-asl-ft") }

@@ -22,12 +22,12 @@ final class FlightSession {
     private var lastHUDUpdate: TimeInterval = 0
     private var lastState: FlightState?
 
-    init(profile: AircraftProfile, origin: Geodetic, start: StartPosition, settings: AppSettings, scenery: SceneryPack?) {
+    init(profile: AircraftProfile, origin: Geodetic, start: StartPosition, settings: AppSettings, scenery: SceneryLibrary?) {
         self.profile = profile
         self.start = start
         self.settings = settings
         frame = LocalFrame(origin: origin)
-        ground = GroundModel(pack: scenery, frame: frame, flatten: PhoenixSite.flatten)
+        ground = GroundModel(scenery: scenery, frame: frame, flatten: PhoenixSite.flatten)
         do {
             physics = try PhysicsLoop(model: profile.id, initial: spawnConditions())
         } catch {
@@ -81,7 +81,7 @@ final class FlightSession {
     }
 
     /// Called once per display frame, before rendering.
-    func tick(dt: Double, hud: HUDModel, scene: inout SceneDescription) {
+    func tick(dt: Double, hud: HUDModel, scene: inout SceneDescription, holdForScenery: Bool = false) {
         guard let physics else { return }
 
         var inputs = ControlInputs()
@@ -119,7 +119,7 @@ final class FlightSession {
         inputs.brakes = hud.wheelBrakes ? 1 : 0
         inputs.pitchTrim = hud.trim
         physics.setInputs(inputs)
-        physics.setPaused(hud.paused)
+        physics.setPaused(hud.paused || holdForScenery)
 
         let s = physics.state
         lastState = s

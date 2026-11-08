@@ -86,6 +86,27 @@ struct TerrainGeometryTests {
         }
     }
 
+    /// Out of view the quadtree refines less; the same tiles in view refine fully.
+    @Test func selectorRefinesLessOutOfView() {
+        let root = TileKey(z: 10, x: 193, y: 410)
+        var available = Set<TileKey>([root])
+        var frontier = [root]
+        for _ in 0..<3 { frontier = frontier.flatMap(\.children); available.formUnion(frontier) }
+        func centre(_ k: TileKey) -> (centre: SIMD3<Double>, radius: Double) {
+            let c = WebMercator.coordinate(x: Double(k.x) + 0.5, y: Double(k.y) + 0.5, zoom: k.z)
+            let size = 40_075_000 * cos(33.4 * .pi / 180) / Double(1 << k.z)
+            return (Self.frame.enu(Geodetic(latitude: c.latitude, longitude: c.longitude, height: 345)), size * 0.71)
+        }
+        let corner = WebMercator.coordinate(x: 193.05, y: 410.95, zoom: 10)
+        let cam = Self.frame.enu(Geodetic(latitude: corner.latitude, longitude: corner.longitude, height: 800))
+        let seen = TileSelector.select(roots: [root], camera: cam, available: available, tileCentre: centre,
+                                       isLoaded: { _ in true }, hiddenDetailScale: 3)
+        let unseen = TileSelector.select(roots: [root], camera: cam, available: available, tileCentre: centre,
+                                         isLoaded: { _ in true }, isVisible: { _, _ in false }, hiddenDetailScale: 3)
+        #expect(unseen.count < seen.count / 2, "out of view \(unseen.count) tiles vs in view \(seen.count)")
+        #expect(seen.contains { $0.z == 13 })
+    }
+
     @Test func selectorDrawsTheParentUntilAllChildrenLoad() {
         let root = TileKey(z: 10, x: 193, y: 410)
         let available = Set([root] + root.children)
