@@ -135,6 +135,12 @@ struct AutopilotStatus: View {
                     .font(.system(size: 13, weight: .bold, design: .rounded))
                     .foregroundStyle(HUDStyle.engaged)
             }
+            // Flight mode annunciations: lateral and vertical modes, green when active; a mode
+            // still capturing carries an asterisk.
+            HStack(spacing: 8) {
+                if !model.apLateral.isEmpty { mode(model.apLateral) }
+                if !model.apVertical.isEmpty { mode(model.apVertical) }
+            }
             if targets >= 4 { target("SPD", "\(model.targetSpeed)") }
             if targets >= 2 { target("HDG", String(format: "%03d", model.targetHeading)) }
             if targets >= 2 { target("ALT", model.targetAltitude.formatted(.number.locale(Locale(identifier: "en_US")))) }
@@ -145,6 +151,12 @@ struct AutopilotStatus: View {
         .padding(.horizontal, 16)
         .frame(height: 34)
         .glassEffect(HUDStyle.glass, in: .capsule)
+    }
+
+    private func mode(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 13, weight: .semibold, design: .rounded))
+            .foregroundStyle(HUDStyle.engaged)
     }
 
     private func target(_ label: String, _ value: String) -> some View {

@@ -4,6 +4,12 @@ import Synchronization
 /// Runs a FlightDynamics model on its own thread at a fixed rate (120 Hz), decoupled from
 /// rendering. Controls go in and state snapshots come out through a mutex; the JSBSim instance
 /// itself is touched only by the physics thread.
+/// Something that flies the aircraft on the physics thread (the autopilot): given the state, it
+/// rewrites the pilot's inputs before each step. Called at the physics rate; must not block.
+public protocol FlightController: AnyObject, Sendable {
+    func control(state: FlightState, inputs: inout ControlInputs, dt: Double)
+}
+
 public final class PhysicsLoop: Sendable {
     public enum Command: Sendable {
         case reset(InitialConditions)
@@ -23,6 +29,7 @@ public final class PhysicsLoop: Sendable {
         /// Ground height under the aircraft (mean sea level, feet), from the scenery.
         var terrainElevationFeet: Double?
         var atmosphere: AtmosphereInputs?
+        var controller: (any FlightController)?
     }
 
     /// Reference wrapper so the physics thread and callers share one (noncopyable) mutex.
@@ -103,6 +110,8 @@ public final class PhysicsLoop: Sendable {
     /// Weather (wind, turbulence, temperature, pressure); applied when it changes.
     public func setAtmosphere(_ a: AtmosphereInputs) { shared.withLock { $0.atmosphere = a } }
     public func send(_ command: Command) { shared.withLock { $0.commands.append(command) } }
+    /// Installs (or removes) the controller that flies the aircraft each step.
+    public func setController(_ controller: (any FlightController)?) { shared.withLock { $0.controller = controller } }
     public func stop() { shared.withLock { $0.running = false } }
 
     // MARK: Thread
@@ -116,10 +125,11 @@ public final class PhysicsLoop: Sendable {
         var appliedTerrain: Double?
         var appliedAtmosphere: AtmosphereInputs?
         while true {
-            let (running, paused, inputs, commands, terrain, atmosphere) = shared.withLock { s -> (Bool, Bool, ControlInputs, [Command], Double?, AtmosphereInputs?) in
+            let (running, paused, inputs, commands, terrain, atmosphere, controller) = shared.withLock {
+                s -> (Bool, Bool, ControlInputs, [Command], Double?, AtmosphereInputs?, (any FlightController)?) in
                 let c = s.commands
                 s.commands = []
-                return (s.running, s.paused, s.inputs, c, s.terrainElevationFeet, s.atmosphere)
+                return (s.running, s.paused, s.inputs, c, s.terrainElevationFeet, s.atmosphere, s.controller)
             }
             if let atmosphere, atmosphere != appliedAtmosphere {
                 fdm.setAtmosphere(atmosphere)
@@ -147,7 +157,9 @@ public final class PhysicsLoop: Sendable {
                 var due = Int((now - lastTick) / dt)
                 if due > Int(rate / 10) { due = Int(rate / 10); lastTick = now - Double(due) * dt }
                 if due > 0 {
-                    fdm.apply(inputs)
+                    var applied = inputs
+                    controller?.control(state: fdm.state, inputs: &applied, dt: Double(due) * dt)
+                    fdm.apply(applied)
                     fdm.step(due)
                     lastTick += Double(due) * dt
                     stepped += due

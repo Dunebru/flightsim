@@ -12,6 +12,8 @@ enum HUDStyle {
     /// Values the pilot selected (autopilot targets). Cyan, not system blue: it is the cockpit
     /// convention for selected targets (PRODUCT.md principle 4), and blue disappears against sky.
     static let selected = Color.cyan
+    /// The active route on the map: magenta, as on every navigation display.
+    static let route = Color(red: 1.0, green: 0.25, blue: 0.85)
     /// Secondary labels over glass.
     static let secondaryText = Color.white.opacity(0.9)
 

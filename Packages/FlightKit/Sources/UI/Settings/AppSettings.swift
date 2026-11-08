@@ -70,6 +70,18 @@ public final class AppSettings {
             airport = forced
             spot = .runway(forced == "KLAX" ? "24R" : "08")
         }
+        // `-FlightSpot final:08` (or runway:25L, stand:C12): start there this launch.
+        if let forced = defaults.string(forKey: "FlightSpot") {
+            let parts = forced.split(whereSeparator: { $0 == " " || $0 == ":" }).map(String.init)
+            if parts.count == 2 {
+                switch parts[0] {
+                case "final": spot = .final(parts[1])
+                case "runway": spot = .runway(parts[1])
+                case "stand": spot = .stand(parts[1])
+                default: break
+                }
+            }
+        }
         // `-FlightMETAR "KPHX 081751Z 27008KT 10SM SCT050 30/05 A2992"`: fly in that weather this launch.
         forcedMetar = defaults.string(forKey: "FlightMETAR").flatMap { $0.isEmpty ? nil : $0 }
         loading = false

@@ -4,6 +4,16 @@ What is done, what is a placeholder, and what is next. Honest status only: anyth
 
 Last updated: 2026-11-07.
 
+## M8 Navigation and autopilot: started (2026-11-07)
+
+1. **Autopilot.** Runs on the physics thread at 120 Hz and flies the JSBSim models through the pilot's own controls. Lateral: HDG (bank proportional to heading error, 20 degrees on the C172 and 25 on the A320), NAV and LOC. Vertical: V/S toward the selected altitude with a smooth capture (ALT*, then ALT), and G/S. A/THR holds the selected speed and moves the thrust lever with it. Tested in flight on both models: the C172 turns 90 degrees at 18.5 degrees of bank holding altitude within 6 ft, climbs at 620 fpm (600 selected) and captures 4,500 ft with an 8 ft overshoot; the A320 holds 248 to 250 kt through a 1,500 fpm descent to 7,000 ft; the A320 intercepts the ILS from 30 degrees below the glidepath and is 0.02 dots off both needles at 200 ft.
+2. **ILS approaches** for every runway end NASR lists with one (KPHX 07L, 07R, 08, 25L, 26; KLAX's), built from the airport data: threshold past any displacement, the runway's true course, the published glidepath and crossing height, the localizer antenna 300 m past the far end (tested). LOC and APPR pick the approach the aircraft is lined up for, within 45 km.
+3. **NAV and the map.** The map panel shows satellite imagery (Apple Maps) with the aircraft, the route in magenta and the point being flown to, with its distance and time. Tap the map to add a point, or add KPHX or KLAX; NAV flies it: direct to the first point, an anticipated turn onto each leg, then along it (tested: 56 m from the last point, under 100 m off a leg). Flying past the last point holds its course.
+4. **Magnetic headings.** The HUD heading and the autopilot's selected heading are magnetic, from the World Magnetic Model 2025 (NOAA, public domain; tested against all 100 of NOAA's published test values within 0.01 degrees): runway 08 at KPHX reads 080. The flight model and the METAR wind stay true.
+5. **On screen.** The autopilot panel has A/THR, NAV, LOC and APPR; the status under the flight data shows the active modes (HDG, NAV, LOC*, LOC; V/S, ALT*, ALT, G/S*, G/S), green.
+
+Checked in the app on the simulator: an A320 started on a 3 nm final with APPR armed captures the localizer and glideslope by itself; with a route to KLAX and NAV, it turns west onto it. Not yet: no VORs, fixes, airways, SIDs or STARs (the FAA data is on disk); no flight plan beyond points on the map; no vertical navigation; no flight director or PFD.
+
 ## M7 Weather: in progress (2026-11-07)
 
 Live weather from the departure airport's METAR (aviationweather.gov), parsed in the app (tested against live, thunderstorm, fractional-visibility and ICAO-format reports), or one of nine typical days chosen in Free Flight (clear, few, scattered, broken, overcast, mist, fog, rain, thunderstorms), each written as a METAR so it takes the same path as a real report.
@@ -124,11 +134,13 @@ Build warnings: 1, the deprecated `UIRequiresFullScreen`, kept on purpose (see K
 | Tools (`flight-tools`) | **Partial.** `terrain-bake` works (DEM, AWS terrain tiles, Sentinel-2 and USGS imagery with colour matching); `nav-import`, `airport-import` and `asset-cook` say "not implemented" and name their milestone. |
 | Airports | **Working (KPHX, KLAX).** Cooked layouts, airport surface, generated runways, markings, taxiways, aprons, buildings, lights and signs, start positions. |
 | Weather | **Partial.** METAR parsing and live fetch, wind, gusts, turbulence, temperature and pressure into the flight model. No clouds yet. |
-| Nav, Autopilot, Traffic, ATC | **Placeholders.** Module identity only (M8, M9). |
+| Autopilot | **Partial (M8).** HDG, NAV, LOC, V/S with altitude capture, G/S, A/THR; tested in flight on both models. |
+| Nav | **Placeholder.** ILS approaches come from the airport data (UI's ApproachCatalog); navaids and procedures not yet. |
+| Traffic, ATC | **Placeholders.** Module identity only (M9). |
 
 ## Placeholders in the app today
 
-Airports are generated, not modelled: terminals are extruded footprints with procedural glass, not the real architecture. Parked airliners are generic shapes in generic liveries, and nothing moves: there is no AI traffic until M9. The HUD carries a small "Prototype" tag. The autopilot panel's targets do nothing (M8). The map and ATC panels say they are not built. The tower camera position is a guess, not the real tower.
+Airports are generated, not modelled: terminals are extruded footprints with procedural glass, not the real architecture. Parked airliners are generic shapes in generic liveries, and nothing moves: there is no AI traffic until M9. The HUD carries a small "Prototype" tag. The ATC panel says it is not built (M9). The tower camera position is a guess, not the real tower.
 
 ## Known issues
 

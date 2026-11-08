@@ -6,12 +6,21 @@ import Renderer
 import SimCore
 import Terrain
 import Weather
+import Autopilot
+import Nav
 
 /// One flight: the physics loop for the chosen aircraft, its control inputs, and the mapping from
 /// its state to the scene and the HUD. Lives on the main actor; physics runs on its own thread.
 final class FlightSession {
     let profile: AircraftProfile
     private(set) var physics: PhysicsLoop?
+    let autopilot: Autopilot
+    /// ILS approaches at this airport (every runway end with one).
+    let approaches: [ApproachPath]
+    private var appliedAutopilot = AutopilotSettings()
+    /// Magnetic declination here (degrees east): headings shown and selected are magnetic, as
+    /// runways are numbered and pilots fly; the flight model works in true.
+    private(set) var declination: Double
     private(set) var error: String?
     let frame: LocalFrame
     let tilt = TiltInput()
@@ -50,6 +59,10 @@ final class FlightSession {
         self.profile = profile
         self.site = site
         self.settings = settings
+        autopilot = Autopilot(gains: .forModel(profile.id))
+        declination = MagneticModel.declination(latitude: site.layout.reference.lat, longitude: site.layout.reference.lon,
+                                                year: MagneticModel.year(of: Date()))
+        approaches = ApproachCatalog.approaches(at: site)
         let first = site.startSpots.first ?? .runway("")
         self.spot = site.placement(spot) == nil ? first : spot
         placement = site.placement(spot) ?? site.placement(first) ?? StartPlacement(position: .zero, heading: 0, altitude: nil)
@@ -57,6 +70,7 @@ final class FlightSession {
         ground = GroundModel(scenery: scenery, frame: frame, flatten: overrides)
         do {
             physics = try PhysicsLoop(model: profile.id, initial: spawnConditions())
+            physics?.setController(autopilot)
         } catch {
             self.error = String(describing: error)
         }
@@ -100,6 +114,20 @@ final class FlightSession {
             hud.flapIndex = 0
         }
         hud.gear = .down
+        // Autopilot off, with targets that make sense for this start: the runway heading, a
+        // pattern-ish altitude or the approach's, and the aircraft's usual speeds and rates.
+        hud.apMaster = false
+        hud.autothrottle = false
+        hud.locArmed = false
+        hud.approachArmed = false
+        var heading = Int((placement.heading - declination).rounded()) % 360
+        if heading <= 0 { heading += 360 }
+        hud.targetHeading = heading
+        let field = site.layout.elevation * 3.280_84
+        let altitude = placement.altitude.map { $0 * 3.280_84 } ?? field + 3_000
+        hud.targetAltitude = Int((altitude / 100).rounded()) * 100
+        hud.targetSpeed = isAirborneStart ? Int(profile.approachKnots) : (profile.isTurbine ? 250 : 100)
+        hud.targetVerticalSpeed = profile.isTurbine ? 1_800 : 700
     }
 
     func resetToStart(hud: HUDModel) {
@@ -165,6 +193,7 @@ final class FlightSession {
         }
         inputs.throttle = hud.throttle
         inputs.reverse = hud.reverse
+        flyAutopilot(hud: hud)
         inputs.flaps = profile.flapCommands[min(hud.flapIndex, profile.flapCommands.count - 1)]
         inputs.spoilers = profile.hasSpoilers ? [0, 0, 0.5, 1][min(hud.spoilerIndex, 3)] : 0
         switch hud.gear {
@@ -203,7 +232,9 @@ final class FlightSession {
             hud.groundSpeed = Int(s.groundSpeedKnots.rounded())
             hud.altitude = Int((s.altitudeFeet / 10).rounded() * 10)
             hud.verticalSpeed = Int((s.verticalSpeedFPM / 10).rounded() * 10)
-            var hdg = Int((s.heading * 180 / .pi).rounded()) % 360
+            declination = MagneticModel.declination(latitude: s.latitude, longitude: s.longitude,
+                                                    year: MagneticModel.year(of: Date()))
+            var hdg = Int((s.heading * 180 / .pi - declination).rounded()) % 360
             if hdg <= 0 { hdg += 360 }
             hud.heading = hdg
             hud.angleOfAttack = s.onGround ? 0 : s.angleOfAttackDegrees
@@ -213,6 +244,43 @@ final class FlightSession {
             hud.windGust = weather.gustKnots.map { Int($0.rounded()) }
             hud.windRelative = weather.windFromDegrees + 180 - s.heading * 180 / .pi
             hud.weatherSource = weather.source
+            let st = autopilot.status
+            hud.apLateral = st.lateral.rawValue
+            hud.apVertical = st.vertical.rawValue
+            hud.apApproach = appliedAutopilot.approach?.name
+            hud.latitude = s.latitude
+            hud.longitude = s.longitude
+            hud.track = s.track * 180 / .pi
+            hud.activeWaypoint = st.activeWaypoint
+            hud.distanceToActive = st.distanceToActiveMetres
+            // The thrust lever follows the autothrottle, as on the real aircraft, and stays where
+            // it left it when the autothrottle is switched off.
+            if st.autothrottle { hud.setThrottle(s.throttle) }
+        }
+    }
+
+    /// Hands the glareshield's settings to the autopilot (on the physics thread), with the ILS
+    /// ahead when LOC or APPR is armed.
+    private func flyAutopilot(hud: HUDModel) {
+        var a = AutopilotSettings()
+        a.engaged = hud.apMaster
+        a.autothrottle = hud.autothrottle
+        a.localizerArmed = hud.locArmed
+        a.approachArmed = hud.approachArmed
+        a.headingDegrees = Double(hud.targetHeading) + declination
+        a.altitudeFeet = Double(hud.targetAltitude)
+        a.verticalSpeedFPM = Double(hud.targetVerticalSpeed)
+        a.speedKnots = Double(hud.targetSpeed)
+        a.navEngaged = hud.navEngaged
+        a.route = hud.route
+        if (a.localizerArmed || a.approachArmed), let s = lastState {
+            // Keep the approach once it is being flown; otherwise pick the one ahead.
+            let flying = autopilot.status.lateral == .localizer || autopilot.status.lateral == .localizerCapture
+            a.approach = flying ? appliedAutopilot.approach : ApproachCatalog.approachAhead(approaches, state: s)
+        }
+        if a != appliedAutopilot {
+            autopilot.update(a)
+            appliedAutopilot = a
         }
     }
 }

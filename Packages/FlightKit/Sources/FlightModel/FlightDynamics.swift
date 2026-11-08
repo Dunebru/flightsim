@@ -89,6 +89,16 @@ public struct FlightState: Sendable, Equatable {
     public var stallWarning = false
     /// Body-axis load factor (g), positive up.
     public var loadFactor: Double = 1
+    /// Body rates (radians per second): roll right, pitch up, yaw right positive.
+    public var rollRate: Double = 0
+    public var pitchRate: Double = 0
+    public var yawRate: Double = 0
+    /// Direction of motion over the ground (radians true, 0 = north).
+    public var track: Double = 0
+    /// Dynamic pressure (pounds per square foot).
+    public var dynamicPressurePSF: Double = 0
+    /// Throttle as last commanded (0 idle to 1 full), autothrottle included.
+    public var throttle: Double = 0
 
     public init() {}
 }
@@ -283,6 +293,13 @@ public final class FlightDynamics {
         s.onGround = get("gear/unit[0]/WOW") > 0.5 || get("gear/unit[1]/WOW") > 0.5 || get("gear/unit[2]/WOW") > 0.5
         s.loadFactor = -get("accelerations/Nz")
         if s.loadFactor.isNaN { s.loadFactor = 1 }
+        s.rollRate = get("velocities/p-rad_sec")
+        s.pitchRate = get("velocities/q-rad_sec")
+        s.yawRate = get("velocities/r-rad_sec")
+        let north = get("velocities/v-north-fps"), east = get("velocities/v-east-fps")
+        s.track = north * north + east * east > 1 ? atan2(east, north) : s.heading
+        s.dynamicPressurePSF = get("aero/qbar-psf")
+        s.throttle = get("fcs/throttle-cmd-norm")
         return s
     }
 }

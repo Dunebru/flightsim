@@ -18,7 +18,7 @@ public struct FreeFlightSetupView: View {
     }
 
     /// The bundled airport layouts (small JSON files), loaded once.
-    private static let layouts: [AirportLayout] = {
+    static let layouts: [AirportLayout] = {
         guard let folder = Bundle.main.resourceURL?.appendingPathComponent("Bundle/Airports"),
               let files = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil) else { return [] }
         return files.filter { $0.pathExtension == "json" && !$0.lastPathComponent.contains("-city") }

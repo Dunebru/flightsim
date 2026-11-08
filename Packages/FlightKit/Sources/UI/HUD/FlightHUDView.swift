@@ -1,5 +1,6 @@
 import FlightModel
 import Weather
+import Autopilot
 import Renderer
 public import SwiftUI
 import Foundation
@@ -184,6 +185,23 @@ public struct FlightHUDView: View {
         let s = FlightSession(profile: model.profile, site: site, spot: settings.spot, settings: settings,
                               scenery: engine.scenery, overrides: engine.overrides)
         s.configureHUD(model)
+        model.airports = FreeFlightSetupView.layouts.map { NavPoint(name: $0.icao, latitude: $0.reference.lat, longitude: $0.reference.lon) }
+        // `-FlightAutopilot appr`: autopilot, autothrottle and APPR engaged at the start (scripts).
+        // `-FlightRoute KLAX` (airports, comma separated) and `-FlightAutopilot nav`: a route flown by NAV.
+        if let route = UserDefaults.standard.string(forKey: "FlightRoute") {
+            model.route = route.split(separator: ",").compactMap { id in model.airports.first { $0.name == id } }
+        }
+        switch UserDefaults.standard.string(forKey: "FlightAutopilot") {
+        case "appr":
+            model.apMaster = true
+            model.autothrottle = true
+            model.approachArmed = true
+        case "nav":
+            model.apMaster = true
+            model.autothrottle = true
+            model.navEngaged = true
+        default: break
+        }
         session = s
         let hud = model
         let settings = self.settings
@@ -291,6 +309,13 @@ public struct FlightHUDView: View {
     private var panel: some View {
         if let open = model.openPanel {
             let close = { withAnimation(.spring(duration: 0.35, bounce: 0.15)) { model.openPanel = nil } }
+            if open == .map {
+                // The map takes the room between the lever columns, under the flight data.
+                MapPanel(model: model, onClose: close)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(.top, 96)
+                    .transition(.scale(scale: 0.96, anchor: .bottom).combined(with: .opacity))
+            } else {
             Group {
                 switch open {
                 case .autopilot:
@@ -320,9 +345,7 @@ public struct FlightHUDView: View {
                         #endif
                     }
                 case .map:
-                    GlassPanel(title: "Map", onClose: close) {
-                        NotYetPanel(title: "No map yet", symbol: "map", detail: "The moving map with your route, traffic and airspace arrives in M8.")
-                    }
+                    EmptyView()
                 case .atc:
                     GlassPanel(title: "ATC", onClose: close) {
                         NotYetPanel(title: "No ATC yet", symbol: "antenna.radiowaves.left.and.right", detail: "Ground, tower, departure and approach arrive in M9.")
@@ -331,6 +354,7 @@ public struct FlightHUDView: View {
             }
             .fixedSize()
             .transition(.scale(scale: 0.92, anchor: .bottom).combined(with: .opacity))
+            }
         }
     }
 

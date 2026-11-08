@@ -1,3 +1,4 @@
+import Autopilot
 import FlightModel
 import Foundation
 import Observation
@@ -78,6 +79,25 @@ final class HUDModel {
     var targetHeading = 271
     var targetAltitude = 5_000
     var targetVerticalSpeed = 1_500
+    /// What the autopilot is doing (flight mode annunciations) and the approach it would fly.
+    var apLateral = ""
+    var apVertical = ""
+    var apApproach: String?
+
+    // MARK: Navigation (the map and NAV)
+
+    /// Aircraft position and ground track (degrees true), updated ten times a second.
+    var latitude = 0.0
+    var longitude = 0.0
+    var track = 0.0
+    /// The route the pilot drew on the map, and whether NAV flies it.
+    var route: [NavPoint] = []
+    var navEngaged = false
+    /// The point NAV is flying to and how far it is (metres); nil past the end of the route.
+    var activeWaypoint: Int?
+    var distanceToActive: Double?
+    /// Airports to fly direct to.
+    var airports: [NavPoint] = []
 
     // MARK: Flight data (live from the flight model on iOS; zero elsewhere)
 

@@ -82,17 +82,28 @@ struct AutopilotPanel: View {
                 adjust("+\(s.fine.formatted())", s.fine)
                 adjust("+\(s.coarse.formatted())", s.coarse)
             }
-            Text("Autopilot logic arrives in M8: these targets do not fly the aircraft yet.")
+            Text(approachNote)
                 .font(.system(size: 12))
                 .foregroundStyle(HUDStyle.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 6) {
                 mode("A/THR", isOn: model.autothrottle) { model.autothrottle.toggle() }
+                mode("NAV", isOn: model.navEngaged) { model.navEngaged.toggle() }
                 mode("LOC", isOn: model.locArmed) { model.locArmed.toggle() }
                 mode("APPR", isOn: model.approachArmed) { model.approachArmed.toggle() }
             }
         }
         .padding(.trailing, 10)
         .sensoryFeedback(.selection, trigger: selected)
+    }
+
+    /// What LOC and APPR would fly, said once.
+    private var approachNote: String {
+        if model.locArmed || model.approachArmed {
+            if let name = model.apApproach { return "\(name) ahead: the autopilot captures it within 2.5 degrees of the course." }
+            return "No ILS ahead. Point toward a runway within 45 km."
+        }
+        return "V/S is the rate toward the selected altitude. LOC and APPR fly the ILS ahead."
     }
 
     private func value(_ target: Target) -> (String, String?) {
