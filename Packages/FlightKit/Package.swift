@@ -11,7 +11,7 @@ let modules: [(name: String, deps: [String])] = [
     ("Weather", ["SimCore"]),
     ("Nav", ["SimCore"]),
     ("Autopilot", ["SimCore", "FlightModel", "Nav"]),
-    ("Airports", ["SimCore", "Nav"]),
+    ("Airports", ["SimCore", "Nav", "Terrain"]),
     ("Terrain", ["SimCore"]),
     ("Aircraft", ["SimCore"]),
     ("Renderer", ["SimCore", "Terrain", "Airports", "Aircraft", "Weather"]),

@@ -23,6 +23,8 @@ constant float kKindRunway = 1.0;
 constant float kKindMarking = 2.0;
 constant float kKindGround = 3.0;
 constant float kKindTerrain = 4.0;
+constant float kKindPavement = 5.0;
+constant float kKindBuilding = 6.0;
 
 constexpr sampler kTerrainSampler(filter::linear, mip_filter::linear, address::clamp_to_edge, max_anisotropy(8));
 
@@ -223,6 +225,82 @@ inline float3 runwayAlbedo(float2 uvMetres, float2 runwaySize) {
     return mix(asphalt, float3(0.035, 0.034, 0.033), rubber * 0.85);
 }
 
+inline float hash21(float2 p) { return fract(sin(dot(p, float2(127.1, 311.7))) * 43758.5453); }
+
+/// Distance (metres) to the nearest joint of a slab grid.
+inline float jointDistance(float2 p, float2 slab) {
+    float2 f = fract(p / slab);
+    float2 d = min(f, 1.0 - f) * slab;
+    return min(d.x, d.y);
+}
+
+inline float3 concreteRunwayAlbedo(float2 uv, float2 size) {
+    // Portland cement concrete: light grey, 7.6 m x 6.1 m slabs, darker joint sealant, tyre
+    // rubber laid down in each touchdown zone and along the centreline.
+    float2 slab = float2(7.6, 6.1);
+    float tone = 0.94 + 0.12 * hash21(floor(uv / slab)) - 0.06;
+    float stain = fbm(uv * 0.02, 3);
+    float3 c = float3(0.34, 0.335, 0.32) * tone * (0.88 + 0.24 * stain);
+    float joint = 1.0 - smoothstep(0.03, 0.09, jointDistance(uv, slab));
+    c *= 1.0 - 0.3 * joint;
+    float halfLen = size.x * 0.5;
+    float fromEnd = halfLen - abs(uv.x);
+    float zone = smoothstep(150.0, 320.0, fromEnd) * (1.0 - smoothstep(650.0, 1000.0, fromEnd));
+    float lane = 1.0 - smoothstep(3.0, 12.0, abs(uv.y));
+    float streaks = fbm(uv * float2(0.05, 1.4), 3);
+    float rubber = zone * lane * (0.45 + 0.55 * streaks);
+    return mix(c, float3(0.05, 0.05, 0.05), saturate(rubber * 0.95));
+}
+
+inline float3 pavementAlbedo(float2 uv, bool asphalt, float distance) {
+    if (asphalt) {
+        float g = fbm(uv * 0.3, 3), p = fbm(uv * 0.01, 3);
+        return float3(0.12, 0.118, 0.112) * (0.85 + 0.3 * p) * (0.92 + 0.16 * g);
+    }
+    // Taxiway and apron concrete: 6 m slabs, each a slightly different tone, oil staining.
+    float2 slab = float2(6.0, 6.0);
+    float tone = 0.93 + 0.14 * hash21(floor(uv / slab));
+    float3 c = float3(0.36, 0.35, 0.33) * tone * (0.9 + 0.2 * fbm(uv * 0.015, 3));
+    float stains = smoothstep(0.62, 0.8, fbm(uv * 0.08 + 7.0, 3));
+    c = mix(c, c * 0.55, stains * 0.6);
+    float joint = (1.0 - smoothstep(0.03, 0.08, jointDistance(uv, slab))) * saturate(1.0 - distance / 400.0);
+    return c * (1.0 - 0.4 * joint);
+}
+
+/// Generic facades: uv.x metres along the wall, uv.y metres up. Returns albedo; sets roughness.
+inline float3 facadeAlbedo(float code, float2 uv, float3 N, thread float &roughness) {
+    if (N.z > 0.7) {
+        roughness = 0.9;
+        return float3(0.36, 0.35, 0.33) * (0.85 + 0.3 * fbm(uv * 0.05, 3));
+    }
+    if (code == 6.0) { roughness = 0.06; return float3(0.025, 0.035, 0.04); }   // tower cab glass
+    if (code == 5.0) { roughness = 0.8; return float3(0.62, 0.60, 0.56); }      // tower shaft
+    if (code == 1.0) {
+        // Terminal: glass curtain wall, 1.5 m mullions, 4.5 m floors.
+        float2 cell = fract(uv / float2(1.5, 4.5));
+        bool frame = cell.x < 0.06 || cell.y < 0.08;
+        roughness = frame ? 0.6 : 0.12;
+        return frame ? float3(0.55, 0.56, 0.57) : float3(0.05, 0.07, 0.09);
+    }
+    if (code == 2.0) {
+        // Hangar: ribbed metal cladding.
+        roughness = 0.55;
+        float rib = 0.5 + 0.5 * cos(uv.x * 6.2831 / 0.3);
+        return float3(0.66, 0.67, 0.68) * (0.9 + 0.1 * rib);
+    }
+    if (code == 4.0) {
+        // Parking structure: concrete floors with open bays.
+        roughness = 0.9;
+        float f = fract(uv.y / 3.2);
+        return f > 0.3 && f < 0.85 ? float3(0.03, 0.03, 0.03) : float3(0.55, 0.54, 0.51);
+    }
+    // Generic: stucco with a band of windows per storey.
+    float2 w = fract(uv / float2(3.0, 3.6));
+    bool window = w.x > 0.25 && w.x < 0.75 && w.y > 0.35 && w.y < 0.75 && uv.y > 1.0;
+    roughness = window ? 0.15 : 0.85;
+    return window ? float3(0.05, 0.06, 0.07) : float3(0.56, 0.50, 0.42) * (0.9 + 0.2 * fbm(uv * 0.2, 2));
+}
+
 fragment GBufferOut sceneFragment(VertexOut in [[stage_in]],
                                   bool frontFacing [[front_facing]],
                                   constant FrameUniforms &u [[buffer(1)]],
@@ -257,13 +335,22 @@ fragment GBufferOut sceneFragment(VertexOut in [[stage_in]],
             albedo *= 1.0 + (n * 0.30 + fine * 0.12) * detail;
         }
     } else if (kind == kKindRunway) {
-        albedo = runwayAlbedo(in.uv, d.emissive.xy);
+        albedo = d.emissive.z > 0.5 ? concreteRunwayAlbedo(in.uv, d.emissive.xy) : runwayAlbedo(in.uv, d.emissive.xy);
         N = float3(0, 0, 1);
     } else if (kind == kKindMarking) {
-        float mask = albedoTexture.sample(kLinearRepeat, in.uv).r;
-        if (mask < 0.5) discard_fragment();
-        albedo = float3(0.78, 0.78, 0.76);
+        // Atlas paint (runway numbers and bars) is masked by the atlas; plain paint is solid.
+        if (d.material.z > 0.5) {
+            float mask = albedoTexture.sample(kLinearRepeat, in.uv).r;
+            if (mask < 0.5) discard_fragment();
+        }
+        float wear = fbm((in.worldPos.xy + u.noiseOrigin.xy) * 0.7, 2);
+        albedo = d.baseColor.rgb * (0.88 + 0.2 * wear);
         N = float3(0, 0, 1);
+    } else if (kind == kKindPavement) {
+        albedo = pavementAlbedo(in.uv, d.emissive.x > 0.5, distance);
+        N = float3(0, 0, 1);
+    } else if (kind == kKindBuilding) {
+        albedo = facadeAlbedo(d.emissive.x, in.uv, N, roughness);
     } else if (d.material.z > 0.5) {
         float4 t = albedoTexture.sample(kLinearRepeat, in.uv);
         albedo *= t.rgb;

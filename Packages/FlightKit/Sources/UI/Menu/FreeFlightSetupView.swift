@@ -1,3 +1,4 @@
+import Airports
 import FlightModel
 public import SwiftUI
 
@@ -13,17 +14,38 @@ public struct FreeFlightSetupView: View {
         self.onBack = onBack
     }
 
-    /// Phoenix keeps UTC-7 all year (Arizona does not observe daylight saving time).
-    private static let phoenixUTCOffset = -7.0
+    /// The bundled airport layouts (small JSON files), loaded once.
+    private static let layouts: [AirportLayout] = {
+        guard let folder = Bundle.main.resourceURL?.appendingPathComponent("Bundle/Airports"),
+              let files = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil) else { return [] }
+        return files.filter { $0.pathExtension == "json" }.compactMap { try? AirportLayout.load($0) }.sorted { $0.icao > $1.icao }
+    }()
+
+    private var layout: AirportLayout? { Self.layouts.first { $0.icao == settings.airport } ?? Self.layouts.first }
+
+    /// Hours the airport's clock is ahead of UTC today (Phoenix keeps UTC-7 all year; Los
+    /// Angeles observes daylight saving time).
+    private var utcOffset: Double {
+        Double((layout?.timeZone ?? .gmt).secondsFromGMT(for: settings.flightDate())) / 3600
+    }
 
     private var localHour: Binding<Double> {
         Binding(
             get: {
                 let utc = settings.fixedUTCHour ?? 19.5
-                return (utc + Self.phoenixUTCOffset + 24).truncatingRemainder(dividingBy: 24)
+                return (utc + utcOffset + 24).truncatingRemainder(dividingBy: 24)
             },
-            set: { local in settings.fixedUTCHour = (local - Self.phoenixUTCOffset + 24).truncatingRemainder(dividingBy: 24) }
+            set: { local in settings.fixedUTCHour = (local - utcOffset + 24).truncatingRemainder(dividingBy: 24) }
         )
+    }
+
+    private var airportBinding: Binding<String> {
+        Binding(get: { settings.airport }, set: { icao in
+            settings.airport = icao
+            if let l = Self.layouts.first(where: { $0.icao == icao }), !l.startSpots.contains(settings.spot) {
+                settings.spot = l.startSpots.first ?? settings.spot
+            }
+        })
     }
 
     private var profile: AircraftProfile {
@@ -44,7 +66,7 @@ public struct FreeFlightSetupView: View {
                     Text("Free Flight")
                         .font(.system(size: 40, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
-                    Text(profile.name + " · " + settings.start.rawValue)
+                    Text(profile.name + " · " + settings.airport + " · " + settings.spot.label)
                         .font(.system(size: 15, weight: .medium))
                         .foregroundStyle(HUDStyle.secondaryText)
                     Spacer(minLength: 0)
@@ -72,14 +94,33 @@ public struct FreeFlightSetupView: View {
                                 .foregroundStyle(HUDStyle.secondaryText)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
-                        section("Start") {
-                            Picker("Start", selection: $settings.start) {
-                                ForEach(StartPosition.allCases) { Text($0.rawValue).tag($0) }
+                        section("Airport") {
+                            Picker("Airport", selection: airportBinding) {
+                                ForEach(Self.layouts, id: \.icao) { Text($0.icao).tag($0.icao) }
                             }
                             .pickerStyle(.segmented)
-                            Text("Phoenix Sky Harbor only until airports are generated from real data (M5).")
-                                .font(.system(size: 12))
-                                .foregroundStyle(HUDStyle.secondaryText)
+                            if let layout {
+                                Text(layout.name.capitalized)
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(HUDStyle.secondaryText)
+                            }
+                        }
+                        section("Start") {
+                            if let spots = layout?.startSpots {
+                                Picker("Start", selection: $settings.spot) {
+                                    Section("Runways") {
+                                        ForEach(spots.filter { if case .runway = $0 { true } else { false } }, id: \.self) { Text($0.label).tag($0) }
+                                    }
+                                    Section("Approaches") {
+                                        ForEach(spots.filter { if case .final = $0 { true } else { false } }, id: \.self) { Text($0.label).tag($0) }
+                                    }
+                                    Section("Gates") {
+                                        ForEach(spots.filter { if case .stand = $0 { true } else { false } }, id: \.self) { Text($0.label).tag($0) }
+                                    }
+                                }
+                                .pickerStyle(.menu)
+                                .tint(.white)
+                            }
                         }
                         section("Time of day") {
                             Toggle("Real time", isOn: Binding(
@@ -96,7 +137,7 @@ public struct FreeFlightSetupView: View {
                                         .foregroundStyle(.white)
                                         .frame(width: 64, alignment: .trailing)
                                 }
-                                Text("Phoenix local time. The sun is placed from the date and time.")
+                                Text("Local time at \(settings.airport). The sun is placed from the date and time.")
                                     .font(.system(size: 12))
                                     .foregroundStyle(HUDStyle.secondaryText)
                             }

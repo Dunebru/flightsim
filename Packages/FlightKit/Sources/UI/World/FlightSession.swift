@@ -1,4 +1,5 @@
 #if os(iOS)
+import Airports
 import FlightModel
 import Foundation
 import Renderer
@@ -15,19 +16,28 @@ final class FlightSession {
     let tilt = TiltInput()
     let gamepad = GamepadInput()
 
-    let start: StartPosition
+    let site: AirportSite
+    let spot: StartSpot
+    let placement: StartPlacement
     let settings: AppSettings
     /// Solid ground under the aircraft, from the same scenery the renderer draws.
     private var ground: GroundModel
     private var lastHUDUpdate: TimeInterval = 0
     private var lastState: FlightState?
 
-    init(profile: AircraftProfile, origin: Geodetic, start: StartPosition, settings: AppSettings, scenery: SceneryLibrary?) {
+    /// - Parameters:
+    ///   - site: the departure airport; its frame is the scene frame.
+    ///   - overrides: every airport's ground overrides in that frame (physics stands on them).
+    init(profile: AircraftProfile, site: AirportSite, spot: StartSpot, settings: AppSettings, scenery: SceneryLibrary?,
+         overrides: [GroundOverride]) {
         self.profile = profile
-        self.start = start
+        self.site = site
         self.settings = settings
-        frame = LocalFrame(origin: origin)
-        ground = GroundModel(scenery: scenery, frame: frame, flatten: PhoenixSite.flatten)
+        let first = site.startSpots.first ?? .runway("")
+        self.spot = site.placement(spot) == nil ? first : spot
+        placement = site.placement(spot) ?? site.placement(first) ?? StartPlacement(position: .zero, heading: 0, altitude: nil)
+        frame = site.frame
+        ground = GroundModel(scenery: scenery, frame: frame, flatten: overrides)
         do {
             physics = try PhysicsLoop(model: profile.id, initial: spawnConditions())
         } catch {
@@ -41,14 +51,16 @@ final class FlightSession {
         tilt.stop()
     }
 
-    var isAirborneStart: Bool { start.placement.heightFeet > 0 }
+    var isAirborneStart: Bool { placement.altitude != nil }
 
     func spawnConditions() -> InitialConditions {
-        let p = start.placement
+        let p = placement
         let g = frame.geodetic(p.position)
+        let terrain = ground.height(latitude: g.latitude, longitude: g.longitude)
+        let agl = p.altitude.map { max(($0 - terrain) / 0.3048, 50) } ?? 0
         var ic = InitialConditions(latitude: g.latitude, longitude: g.longitude,
-                                   terrainElevationFeet: ground.height(latitude: g.latitude, longitude: g.longitude) / 0.3048,
-                                   heightAboveGroundFeet: p.heightFeet, headingDegrees: p.heading,
+                                   terrainElevationFeet: terrain / 0.3048,
+                                   heightAboveGroundFeet: agl, headingDegrees: p.heading,
                                    airspeedKnots: isAirborneStart ? profile.approachKnots : 0)
         if isAirborneStart {
             ic.flaps = profile.flapCommands[min(profile.approachFlapIndex, profile.flapCommands.count - 1)]

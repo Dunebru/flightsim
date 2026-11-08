@@ -62,7 +62,7 @@ public struct TerrainTileGeometry: Sendable {
     /// y + j/(n-1)), at its height above mean sea level, placed through real geodesy so Earth's
     /// curvature is exact. Skirts hang below every edge to hide cracks between levels of detail.
     public static func build(key: TileKey, heights: [Float], samples n: Int, frame: LocalFrame,
-                             flatten: [FlattenArea] = []) -> TerrainTileGeometry {
+                             flatten: [GroundOverride] = []) -> TerrainTileGeometry {
         var world = [SIMD3<Double>]()
         world.reserveCapacity(n * n)
         let step = 1.0 / Double(n - 1)

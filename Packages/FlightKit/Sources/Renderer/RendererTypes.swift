@@ -28,6 +28,20 @@ struct MeshVertex {
     var pad = SIMD2<Float>.zero
 }
 
+/// Must match `GPULight` and `LightUniforms` in 25_Lights.metal.
+struct GPULight {
+    var position: SIMD4<Float>
+    var colour: SIMD4<Float>
+    var direction: SIMD4<Float>
+    var params: SIMD4<Float>
+}
+
+struct LightUniforms {
+    var model = matrix_identity_float4x4
+    var up = SIMD4<Float>(0, 0, 1, 0)
+    var params = SIMD4<Float>.zero
+}
+
 /// Must match `TerrainVertex` in 20_Scene.metal (20 bytes).
 struct TerrainVertex {
     var x, y, z: Float
@@ -44,7 +58,7 @@ struct DrawUniforms {
 }
 
 enum SurfaceKind: Float {
-    case aircraft = 0, runway = 1, marking = 2, ground = 3, terrain = 4
+    case aircraft = 0, runway = 1, marking = 2, ground = 3, terrain = 4, pavement = 5, building = 6
 }
 
 /// Size of the GPU-side lighting state (three float4).
@@ -79,10 +93,11 @@ public struct OrbitCamera: Sendable, Equatable {
     }
 
     /// Camera position in world metres, kept at least 0.5 m above the ground.
+    /// (Keeping the camera above the ground is the caller's job: the ground is the terrain and
+    /// airport surface, not a plane at z = 0. An absolute z clamp here once lifted the chase
+    /// camera 8 m above KPHX runway 08, which sits below the field-elevation origin.)
     public var position: SIMD3<Double> {
-        var p = target - forward * distance
-        p.z = max(p.z, 0.5)
-        return p
+        target - forward * distance
     }
 }
 

@@ -81,7 +81,7 @@ struct TerrainRenderTests {
             let device = try #require(MTLCreateSystemDefaultDevice())
             let r = try SceneRenderer(device: device, aircraftModel: nil, aircraftTextures: nil)
             r.settings = RenderSettings(upscaler: .off, renderScale: 1)
-            let areas = PhoenixSite.flatten.map { a in var a = a; a.height += flattenRaise; return a }
+            let areas = PhoenixSite.flatten.map { $0.raised(by: flattenRaise) }
             r.setTerrain(SceneryLibrary(try SceneryPack(root: Self.packURL)), origin: PhoenixSite.origin, flatten: areas)
             // Straight down over the runway centre from 400 m; the runway runs left to right.
             var s = Self.view(from: SIMD3(0, 0, 400), toward: SIMD3(0, 0, 0), fov: 30)

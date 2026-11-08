@@ -31,8 +31,8 @@ public enum PhoenixSite {
 
     /// Ground held flat (along the runway's slope) under the pavement, its shoulders and the
     /// blast pads, so terrain never covers what is drawn.
-    public static var flatten: [FlattenArea] {
-        [FlattenArea(centre: .zero, halfLength: runwayLength / 2 + 100, halfWidth: 75,
-                     angle: (90 - runwayHeading) * .pi / 180, height: 0, gradient: runwayGradient)]
+    public static var flatten: [GroundOverride] {
+        [.area(FlattenArea(centre: .zero, halfLength: runwayLength / 2 + 100, halfWidth: 75,
+                           angle: (90 - runwayHeading) * .pi / 180, height: 0, gradient: runwayGradient))]
     }
 }

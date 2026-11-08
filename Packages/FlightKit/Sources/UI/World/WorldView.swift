@@ -1,5 +1,6 @@
 #if os(iOS)
 import Aircraft
+import Airports
 import Foundation
 import Metal
 import Observation
@@ -36,8 +37,16 @@ final class WorldEngine: NSObject {
     @ObservationIgnored var rig = CameraRig()
     /// The bundled scenery (regional packs over a world base), if present.
     @ObservationIgnored let scenery: SceneryLibrary?
+    /// The departure airport, whose frame is the scene frame. Set once the airports are built
+    /// (off the main thread); the flight starts then.
+    private(set) var site: AirportSite?
+    /// Every airport's ground overrides in the scene frame.
+    @ObservationIgnored private(set) var overrides: [GroundOverride] = []
+    @ObservationIgnored private var airportsReady = false
     /// Ground under the camera, so no view goes underground.
     @ObservationIgnored private var cameraGround: GroundModel
+    @ObservationIgnored private var pendingLayouts: [AirportLayout] = []
+    @ObservationIgnored private var departureICAO: String?
 
     private(set) var framesPerSecond: Double = 0
     /// True until the terrain around the camera has streamed in (or 10 s have passed), so a
@@ -57,13 +66,25 @@ final class WorldEngine: NSObject {
         return MTLFXSupport.temporal(device)
     }
 
-    override init() {
+    init(airport icao: String = "KPHX") {
         let defaults = UserDefaults.standard
         timeOverride = defaults.string(forKey: "FlightTimeUTC").flatMap { ISO8601DateFormatter().date(from: $0) }
         scene = .phoenixTest(date: timeOverride ?? Date())
         scenery = Bundle.main.resourceURL.map { SceneryLibrary(directory: $0.appendingPathComponent("Bundle/Scenery")) }
             .flatMap { $0.packs.isEmpty ? nil : $0 }
-        cameraGround = GroundModel(scenery: scenery, frame: LocalFrame(origin: scene.origin), flatten: PhoenixSite.flatten)
+        // Layouts are small; the scene origin (the departure airport's reference point) is known
+        // at once. Surfaces, meshes and lights are built in the background.
+        let folder = Bundle.main.resourceURL?.appendingPathComponent("Bundle/Airports")
+        let files = (try? FileManager.default.contentsOfDirectory(at: folder ?? URL(fileURLWithPath: "/"), includingPropertiesForKeys: nil)) ?? []
+        let layouts = files.filter { $0.pathExtension == "json" }.sorted { $0.lastPathComponent < $1.lastPathComponent }
+            .compactMap { try? AirportLayout.load($0) }
+        let current = layouts.first { $0.icao == icao } ?? layouts.first
+        if let current {
+            scene.origin = Geodetic(latitude: current.reference.lat, longitude: current.reference.lon, height: current.elevation)
+        }
+        cameraGround = GroundModel(scenery: scenery, frame: LocalFrame(origin: scene.origin), flatten: [])
+        pendingLayouts = layouts
+        departureICAO = current?.icao
         var made: SceneRenderer?
         var error: String?
         if let device = MTLCreateSystemDefaultDevice() {
@@ -81,8 +102,40 @@ final class WorldEngine: NSObject {
             upscaler = forced
         }
         applyRenderSettings()
-        made?.setTerrain(scenery, origin: scene.origin, flatten: PhoenixSite.flatten)
         loadAircraft()
+        loadAirports()
+    }
+
+    struct BuiltAirports: Sendable {
+        var sites: [(site: AirportSite, geometry: AirportGeometry, lights: [LightPoint])]
+        var overrides: [GroundOverride]
+    }
+
+    /// Builds airport surfaces, meshes and lights off the main thread, then starts the terrain
+    /// (which needs the airports' ground overrides) and hands the airports to the renderer.
+    private func loadAirports() {
+        let layouts = pendingLayouts, origin = scene.origin, icao = departureICAO
+        Task { [weak self] in
+            let built = await Self.buildAirports(layouts, sceneOrigin: origin)
+            guard let self else { return }
+            self.overrides = built.overrides
+            self.cameraGround = GroundModel(scenery: self.scenery, frame: LocalFrame(origin: origin), flatten: built.overrides)
+            self.renderer?.setTerrain(self.scenery, origin: origin, flatten: built.overrides)
+            self.renderer?.setAirports(built.sites, sceneOrigin: origin)
+            let departure = built.sites.first { $0.site.layout.icao == icao }?.site
+            if let cab = departure?.towerCab { self.rig.towerPosition = cab }
+            self.quietFrames = 0
+            self.airportsReady = true
+            self.site = departure
+        }
+    }
+
+    @concurrent
+    private nonisolated static func buildAirports(_ layouts: [AirportLayout], sceneOrigin: Geodetic) async -> BuiltAirports {
+        let frame = LocalFrame(origin: sceneOrigin)
+        let sites = layouts.map { AirportSite(layout: $0) }
+        return BuiltAirports(sites: sites.map { ($0, AirportGeometry.build($0), AirportLights.build($0)) },
+                             overrides: sites.flatMap { $0.overrides(in: frame) })
     }
 
     private func applyRenderSettings() {
@@ -153,7 +206,7 @@ final class WorldEngine: NSObject {
         if loadingScenery {
             if firstFrame == 0 { firstFrame = t }
             quietFrames = renderer.terrainPending == 0 ? quietFrames + 1 : 0
-            if scenery == nil || quietFrames >= 3 || t - firstFrame > 10 { loadingScenery = false }
+            if (scenery == nil || quietFrames >= 3) && airportsReady || t - firstFrame > 15 { loadingScenery = false }
         }
         if logStats {
             framesSinceLog += 1

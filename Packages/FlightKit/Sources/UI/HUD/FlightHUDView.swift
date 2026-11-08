@@ -15,7 +15,7 @@ import Foundation
 public struct FlightHUDView: View {
     @State private var model = HUDModel()
     #if os(iOS)
-    @State private var engine = WorldEngine()
+    @State private var engine: WorldEngine
     @State private var session: FlightSession?
     #endif
     @Bindable private var settings: AppSettings
@@ -24,6 +24,9 @@ public struct FlightHUDView: View {
     public init(settings: AppSettings = AppSettings(), onExit: @escaping () -> Void = {}) {
         self.settings = settings
         self.onExit = onExit
+        #if os(iOS)
+        _engine = State(initialValue: WorldEngine(airport: settings.airport))
+        #endif
     }
 
     /// Width of the right-thumb column: spoiler slider, gap, flap slider.
@@ -138,9 +141,14 @@ public struct FlightHUDView: View {
             }
         }
         #endif
+        #if os(iOS)
+        .onChange(of: engine.site?.layout.icao) { _, icao in
+            if icao != nil && session == nil { startSession() }
+        }
+        #endif
         .onAppear {
             #if os(iOS)
-            startSession()
+            if engine.site != nil { startSession() }
             #endif
             // `-FlightOpenPanel autopilot` opens a panel at launch, so scripts can screenshot it.
             if let key = UserDefaults.standard.string(forKey: "FlightOpenPanel") {
@@ -158,8 +166,9 @@ public struct FlightHUDView: View {
     #if os(iOS)
     private func startSession() {
         model.profile = AircraftProfile.all.first { $0.id == settings.aircraftID } ?? .c172
-        let s = FlightSession(profile: model.profile, origin: engine.scene.origin, start: settings.start, settings: settings,
-                              scenery: engine.scenery)
+        guard let site = engine.site else { return }
+        let s = FlightSession(profile: model.profile, site: site, spot: settings.spot, settings: settings,
+                              scenery: engine.scenery, overrides: engine.overrides)
         s.configureHUD(model)
         session = s
         let hud = model

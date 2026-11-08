@@ -7,14 +7,14 @@ public import SimCore
 public struct GroundModel: Sendable {
     public let scenery: SceneryLibrary?
     public let frame: LocalFrame
-    public let flatten: [FlattenArea]
+    public let flatten: [GroundOverride]
     private var field: HeightField
     private var order: [TileKey] = []
     private var missing: Set<TileKey> = []
     /// Tiles kept in memory (each 65 x 65 floats, 17 KB).
     public var capacity = 96
 
-    public init(scenery: SceneryLibrary?, frame: LocalFrame, flatten: [FlattenArea]) {
+    public init(scenery: SceneryLibrary?, frame: LocalFrame, flatten: [GroundOverride]) {
         self.scenery = scenery
         self.frame = frame
         self.flatten = flatten

@@ -43,7 +43,7 @@ struct TerrainGeometryTests {
         var heights = [Float]()
         for j in 0..<Self.n { for i in 0..<Self.n { heights.append(Float(330 + (i % 7) + (j % 5))) } }
         let area = FlattenArea(centre: .zero, halfLength: 400, halfWidth: 100, angle: 0, height: 0)
-        let g = TerrainTileGeometry.build(key: k, heights: heights, samples: Self.n, frame: Self.frame, flatten: [area])
+        let g = TerrainTileGeometry.build(key: k, heights: heights, samples: Self.n, frame: Self.frame, flatten: [.area(area)])
         var inside = 0
         for idx in 0..<(Self.n * Self.n) {
             let p = SIMD3<Double>(g.positions[idx]) + g.centre

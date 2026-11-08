@@ -136,10 +136,16 @@ run_on_sim() {
   local mean
   mean=$(magick "$OUT/$label-hud.png" -alpha off -resize '100x50!' -crop 40x6+30+12 +repage -colorspace Gray \
     -format "%[fx:round(mean*255)]" info: 2>/dev/null | head -1)
-  if [ -z "$mean" ] || [ "$mean" -lt 60 ]; then
-    echo "    FAILED: world not rendered on $name (sky brightness ${mean:-unknown} of 255)"; exit 1
+  # A blank frame (a white launch screen, or a blown-out render) is bright but has no detail:
+  # the whole frame's spread is near zero. Seen 2026-11-07: an all-white capture passed the
+  # brightness check alone.
+  local spread
+  spread=$(magick "$OUT/$label-hud.png" -alpha off -resize '200x100!' -colorspace Gray \
+    -format "%[fx:round(standard_deviation*255)]" info: 2>/dev/null | head -1)
+  if [ -z "$mean" ] || [ "$mean" -lt 60 ] || [ "$mean" -gt 235 ] || [ -z "$spread" ] || [ "$spread" -lt 12 ]; then
+    echo "    FAILED: world not rendered on $name (sky brightness ${mean:-unknown}, frame spread ${spread:-unknown} of 255)"; exit 1
   fi
-  echo "    ok: world rendered on $name (sky brightness $mean)"
+  echo "    ok: world rendered on $name (sky brightness $mean, frame spread $spread)"
 }
 
 device_udid() {

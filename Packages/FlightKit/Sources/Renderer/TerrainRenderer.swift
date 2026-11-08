@@ -35,7 +35,7 @@ final class TerrainRenderer {
 
     let pack: SceneryLibrary
     let frame: LocalFrame
-    let flatten: [FlattenArea]
+    let flatten: [GroundOverride]
     private let device: any MTLDevice
     private var tiles: [TileKey: GPUTile] = [:]
     private var lastUsed: [TileKey: Int] = [:]
@@ -60,7 +60,7 @@ final class TerrainRenderer {
     /// Refinement threshold: tile radius / distance.
     var detail = 0.55
 
-    init(pack: SceneryLibrary, frame: LocalFrame, flatten: [FlattenArea], device: any MTLDevice) {
+    init(pack: SceneryLibrary, frame: LocalFrame, flatten: [GroundOverride], device: any MTLDevice) {
         self.pack = pack
         self.frame = frame
         self.flatten = flatten

@@ -1,4 +1,5 @@
 public import Aircraft
+public import Airports
 public import Foundation
 public import Metal
 import os
@@ -27,6 +28,7 @@ public final class SceneRenderer {
     private let skyPipeline: any MTLRenderPipelineState
     private let glassPipeline: any MTLRenderPipelineState
     private let terrainPipeline: any MTLRenderPipelineState
+    private let lightPipeline: any MTLRenderPipelineState
     private let shadowPipeline: any MTLRenderPipelineState
     private let tonemapPipeline: any MTLRenderPipelineState
     private var finalPipelines: [MTLPixelFormat.RawValue: any MTLRenderPipelineState] = [:]
@@ -52,6 +54,7 @@ public final class SceneRenderer {
     private let groundBuffer: any MTLBuffer
     private let groundVertexCount: Int
     private var terrain: TerrainRenderer?
+    private var airports: [AirportRenderer] = []
     private let runwayBuffer: any MTLBuffer
     private let runwayVertexCount: Int
     private let markingsBuffer: any MTLBuffer
@@ -130,6 +133,15 @@ public final class SceneRenderer {
         scenePipeline = try render("sceneVertex", "sceneFragment", colors: gbuffer, depth: Self.depthFormat)
         skyPipeline = try render("skyVertex", "skyFragment", colors: gbuffer, depth: Self.depthFormat)
         terrainPipeline = try render("terrainVertex", "sceneFragment", colors: gbuffer, depth: Self.depthFormat)
+        lightPipeline = try render("lightVertex", "lightFragment", colors: gbuffer, depth: Self.depthFormat) { d in
+            let c = d.colorAttachments[0]!
+            c.isBlendingEnabled = true
+            c.sourceRGBBlendFactor = .one
+            c.destinationRGBBlendFactor = .one
+            c.sourceAlphaBlendFactor = .zero
+            c.destinationAlphaBlendFactor = .one
+            d.colorAttachments[1].writeMask = []
+        }
         glassPipeline = try render("sceneVertex", "glassFragment", colors: gbuffer, depth: Self.depthFormat) { d in
             let c = d.colorAttachments[0]!
             c.isBlendingEnabled = true
@@ -442,7 +454,26 @@ public final class SceneRenderer {
                 terrainDrawn = drawn
                 e.setRenderPipelineState(scenePipeline)
             }
-            if scene.showRunway {
+            // Airports: pavement first, then paint with a depth bias, then buildings.
+            for airport in airports {
+                let model = airport.model(relativeTo: camera, offset: offset)
+                let prev = airport.model(relativeTo: previousCam, offset: offset)
+                let centre = SIMD3<Float>(airport.origin + offset - camera)
+                guard MatrixMath.sphereVisible(centre: centre, radius: Float(airport.radius), planes: frustum),
+                      simd_length(centre) < 60_000 else { continue }
+                for item in airport.draws {
+                    var d = item.uniforms
+                    d.model = model
+                    d.prevModel = reset ? model : prev
+                    // Coplanar layers win by depth bias, not by height, so there is no step at
+                    // their edges: runways over crossing taxiways, paint over both.
+                    let bias = Float(item.layer) * 3
+                    e.setDepthBias(bias, slopeScale: bias, clamp: 0)
+                    draw(item.vertices, count: item.count, d, texture: item.atlas ? markingAtlas : nil)
+                }
+            }
+            e.setDepthBias(0, slopeScale: 0, clamp: 0)
+            if scene.showRunway && airports.isEmpty {
                 draw(runwayBuffer, count: runwayVertexCount, runwayDraw, texture: nil)
                 e.setDepthBias(4, slopeScale: 4, clamp: 0)
                 draw(markingsBuffer, count: markingsVertexCount, markingDraw, texture: markingAtlas)
@@ -460,6 +491,21 @@ public final class SceneRenderer {
                 e.setRenderPipelineState(skyPipeline)
                 e.setDepthStencilState(depthSky)
                 e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+            }
+            // Airport lights over everything opaque (and the sky), depth-tested, not written.
+            e.setRenderPipelineState(lightPipeline)
+            e.setDepthStencilState(depthTestOnly)
+            e.setVertexTexture(aerialVolume, index: 0)
+            let pixelAngle = 2 * tan(fov / 2) / Float(renderSize.y)
+            for airport in airports {
+                guard let buffer = airport.lights, simd_distance(airport.origin + offset, camera) < 80_000 else { continue }
+                var l = LightUniforms()
+                l.model = airport.model(relativeTo: camera, offset: offset)
+                l.up = SIMD4(SIMD3<Float>(airport.rotation.columns.2), 0)
+                l.params = SIMD4(Float(scene.date.timeIntervalSince1970.truncatingRemainder(dividingBy: 3_600)), pixelAngle, 1.3, 0)
+                e.setVertexBuffer(buffer, offset: 0, index: 0)
+                e.setVertexBytes(&l, length: MemoryLayout<LightUniforms>.stride, index: 2)
+                e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: airport.lightCount)
             }
             if let aircraft, scene.showAircraft {
                 e.setRenderPipelineState(glassPipeline)
@@ -557,9 +603,19 @@ public final class SceneRenderer {
 
     /// Streams terrain from a scenery pack, in the scene frame of `origin`. `flatten` areas
     /// are held just under the drawn pavement. Pass nil to remove terrain.
-    public func setTerrain(_ pack: SceneryLibrary?, origin: Geodetic, flatten: [FlattenArea]) {
-        let lowered = flatten.map { a in var a = a; a.height -= 0.25; return a }
+    public func setTerrain(_ pack: SceneryLibrary?, origin: Geodetic, flatten: [GroundOverride]) {
+        let lowered = flatten.map { $0.raised(by: -0.25) }
         terrain = pack.map { TerrainRenderer(pack: $0, frame: LocalFrame(origin: origin), flatten: lowered, device: device) }
+        previousCamera = nil
+    }
+
+    /// Airports to draw, each built in its own frame and placed into the scene frame of
+    /// `sceneOrigin`. Replaces the stand-in runway.
+    public func setAirports(_ sites: [(site: AirportSite, geometry: AirportGeometry, lights: [LightPoint])], sceneOrigin: Geodetic) {
+        let frame = LocalFrame(origin: sceneOrigin)
+        airports = sites.compactMap {
+            AirportRenderer(site: $0.site, geometry: $0.geometry, lights: $0.lights, sceneFrame: frame, device: device)
+        }
         previousCamera = nil
     }
 

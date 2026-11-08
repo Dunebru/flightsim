@@ -11,7 +11,7 @@ public enum ToolCommand: String, CaseIterable, Sendable {
     public var plannedFor: String? {
         switch self {
         case .navImport: "M5/M8"
-        case .airportImport: "M5"
+        case .airportImport: nil
         case .terrainBake: nil
         case .assetCook: "M6"
         }
@@ -20,6 +20,7 @@ public enum ToolCommand: String, CaseIterable, Sendable {
     public static var usage: String {
         "usage: flight-tools <command>\n" + allCases.map { c in
             if let m = c.plannedFor { return "  \(c.rawValue)  (not implemented, planned for \(m))" }
+            if c == .airportImport { return "  \(c.rawValue)  --icao <ICAO> --nasr <dir> --osm-cache <dir> --out <file.json>" }
             return "  \(c.rawValue)  " + (c == .terrainBake
                 ? "(--center <lat,lon> | --world <max zoom>) --name <name> --out <dir> [--dem <raster.bin> --dem-info <gdalinfo.json>]\n"
                   + "      [--terrarium-cache <dir> [--terrarium-max-zoom 11]] [--imagery-cache <dir> [--usgs-from-zoom 12]]"
@@ -74,6 +75,25 @@ public func runTool(_ arguments: [String], log: @Sendable @escaping (String) -> 
             return (0, "baked \(index.tiles.count) tiles, zoom \(index.minZoom)-\(index.maxZoom), into \(out)")
         } catch {
             return (1, "terrain-bake failed: \(error)")
+        }
+    case .airportImport:
+        let known: Set<String> = ["--icao", "--nasr", "--osm-cache", "--out"]
+        if let unknown = options.names.first(where: { !known.contains($0) }) {
+            return (64, "airport-import: unknown option \(unknown)\n" + ToolCommand.usage)
+        }
+        guard let icao = options["--icao"], let nasr = options["--nasr"], let cache = options["--osm-cache"],
+              let out = options["--out"] else { return (64, ToolCommand.usage) }
+        do {
+            let layout = try await AirportImporter(nasrDirectory: URL(fileURLWithPath: nasr), osmCache: URL(fileURLWithPath: cache))
+                .run(icao: icao, log: log)
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys]
+            let url = URL(fileURLWithPath: out)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try encoder.encode(layout).write(to: url)
+            return (0, "wrote \(out)")
+        } catch {
+            return (1, "airport-import failed: \(error)")
         }
     default:
         return (69, "\(command.rawValue): not implemented")
