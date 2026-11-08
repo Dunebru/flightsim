@@ -5,6 +5,7 @@ import Metal
 import SimCore
 import Terrain
 import Testing
+import Traffic
 import simd
 @testable import Renderer
 
@@ -204,6 +205,43 @@ struct AirportRenderTests {
             let img = try r.renderImage(s, width: 1600, height: 900)
             try RendererTests.savePNG(img, 1600, 900, name: name)
         }
+    }
+
+    /// KPHX with its traffic running: an arrival on short final over the city, aircraft taxiing
+    /// and lined up, seen from the tower's side of the field.
+    @Test func kphxTraffic() throws {
+        let site = try AirportSite.load(Self.airportsURL.appendingPathComponent("KPHX.json"))
+        let (r, base) = try Self.scene(site, aircraft: false)
+        let traffic = AirportTraffic(site: site, excludingStand: nil, seed: 3)
+        traffic.warmUp(seconds: 900)
+        var instances = TrafficInstances(narrow: [], wide: [])
+        for a in traffic.snapshot {
+            let v = SIMD8<Float>(Float(a.position.x), Float(a.position.y), Float(a.position.z), Float(a.heading),
+                                 Float(a.seed), Float(a.pitch), Float(a.roll), 0)
+            if a.widebody { instances.wide.append(v) } else { instances.narrow.append(v) }
+        }
+        print("TRAFFIC render: \(traffic.snapshot.count) aircraft, \(traffic.snapshot.filter(\.onGround).count) on the ground")
+        var s = base
+        s.traffic = ["KPHX": instances]
+        // Close to one taxiing and to one in the air.
+        let taxiing = try #require(traffic.snapshot.first { $0.onGround })
+        let flying = traffic.snapshot.first { !$0.onGround }
+        var views: [(String, SIMD3<Double>, SIMD3<Double>)] = []
+        let t = taxiing.position
+        views.append(("kphx-traffic-taxi", t + SIMD3(-90, -110, 35), t))
+        if let f = flying {
+            let side = SIMD3(cos(f.heading), -sin(f.heading), 0)
+            views.append(("kphx-traffic-air", f.position + side * 160 + SIMD3(0, 0, 20), f.position))
+        }
+        for (name, eye, look) in views {
+            s.cameraPose = CameraPose(position: eye, forward: simd_normalize(look - eye), up: SIMD3(0, 0, 1), fovY: 50 * .pi / 180)
+            r.exposureAdaptation = 1
+            try TerrainRenderTests.settle(r, s, limit: .seconds(60))
+            r.resetHistory()
+            let img = try r.renderImage(s, width: 1600, height: 900)
+            try RendererTests.savePNG(img, 1600, 900, name: name)
+        }
+        #expect(r.parkedDrawn > traffic.snapshot.count)
     }
 
     /// GPU time for the heaviest views (Mac GPU; the phone is measured separately). Reported, not

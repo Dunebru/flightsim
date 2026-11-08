@@ -190,10 +190,20 @@ struct ParkedInstance {
     float4 params;
 };
 
-inline float3 parkedPoint(float3 p, ParkedInstance t) {
+/// Body axes (x forward, y left, z up) to the airport frame: roll (params.z, right wing down
+/// positive), pitch (params.y, nose up positive), then heading (positionHeading.w, from north).
+inline float3 parkedRotate(float3 p, ParkedInstance t) {
+    float cr = cos(t.params.z), sr = sin(t.params.z);
+    float3 q = float3(p.x, p.y * cr - p.z * sr, p.z * cr + p.y * sr);
+    float cp = cos(t.params.y), sp = sin(t.params.y);
+    q = float3(q.x * cp - q.z * sp, q.y, q.z * cp + q.x * sp);
     float h = t.positionHeading.w;
     float2 fwd = float2(sin(h), cos(h)), left = float2(-cos(h), sin(h));
-    return float3(t.positionHeading.xy + fwd * p.x + left * p.y, t.positionHeading.z + p.z);
+    return float3(fwd * q.x + left * q.y, q.z);
+}
+
+inline float3 parkedPoint(float3 p, ParkedInstance t) {
+    return t.positionHeading.xyz + parkedRotate(p, t);
 }
 
 vertex VertexOut parkedVertex(uint vid [[vertex_id]], uint iid [[instance_id]],
@@ -205,10 +215,7 @@ vertex VertexOut parkedVertex(uint vid [[vertex_id]], uint iid [[instance_id]],
     MeshVertex v = vertices[vid];
     ParkedInstance t = instances[iid];
     float4 local = float4(parkedPoint(v.position.xyz, t), 1.0);
-    float3 n = v.normal.xyz;
-    float h = t.positionHeading.w;
-    float2 fwd = float2(sin(h), cos(h)), left = float2(-cos(h), sin(h));
-    float3 nl = float3(fwd * n.x + left * n.y, n.z);
+    float3 nl = parkedRotate(v.normal.xyz, t);
     float4 world = d.model * local;
     VertexOut o;
     o.position = u.viewProj * world;

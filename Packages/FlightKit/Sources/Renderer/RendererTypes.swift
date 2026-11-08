@@ -193,6 +193,9 @@ public struct SceneDescription: Sendable {
     public var visibilityMetres: Double = 40_000
     /// How quickly mist thins with height (m): shallow for fog, deep for haze.
     public var fogScaleHeight: Double = 500
+    /// Moving AI aircraft per airport (ICAO): instances in that airport's frame, (x, y, z,
+    /// heading) and (seed, pitch, roll, 0).
+    public var traffic: [String: TrafficInstances] = [:]
     /// Rain or snow falling around the camera.
     public var precipitation: Precipitation?
     /// How wet the ground is, 0 dry to 1 soaked: darker, glossier pavement.
@@ -274,6 +277,17 @@ struct CloudUniforms {
         wind.z = Float(used.count)
         bounds.x = Float(used.map(\.baseMetres).min() ?? 0)
         bounds.y = Float(used.map(\.topMetres).max() ?? 0)
+    }
+}
+
+/// Moving aircraft at one airport, by shape.
+public struct TrafficInstances: Sendable, Equatable {
+    public var narrow: [SIMD8<Float>]
+    public var wide: [SIMD8<Float>]
+
+    public init(narrow: [SIMD8<Float>], wide: [SIMD8<Float>]) {
+        self.narrow = narrow
+        self.wide = wide
     }
 }
 

@@ -569,6 +569,14 @@ public final class SceneRenderer {
                         e.setVertexBuffer(buffer, offset: 0, index: 3)
                         e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: mesh.count, instanceCount: count)
                     }
+                    // Moving traffic casts shadows too.
+                    if let moving = scene.traffic[airport.name] {
+                        for (mesh, instances) in [(narrowbody, moving.narrow), (widebody, moving.wide)] where !instances.isEmpty {
+                            e.setVertexBuffer(mesh.buffer, offset: 0, index: 0)
+                            instances.withUnsafeBytes { e.setVertexBytes($0.baseAddress!, length: $0.count, index: 3) }
+                            e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: mesh.count, instanceCount: instances.count)
+                        }
+                    }
                 }
                 // Trees cast too.
                 e.setRenderPipelineState(shadowTreePipeline)
@@ -747,6 +755,26 @@ public final class SceneRenderer {
                     e.setFragmentBytes(&d, length: MemoryLayout<DrawUniforms>.stride, index: 2)
                     e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: mesh.count, instanceCount: count)
                     parked += count
+                }
+            }
+            // Moving traffic: on approach it can be well beyond the parked aircraft's 12 km.
+            for airport in airports {
+                guard let moving = scene.traffic[airport.name], simd_distance(airport.origin + offset, camera) < 40_000 else { continue }
+                let model = airport.model(relativeTo: camera, offset: offset)
+                let prev = airport.model(relativeTo: previousCam, offset: offset)
+                for (mesh, instances, length) in [(narrowbody, moving.narrow, ParkedAircraftMesh.narrowbody.length),
+                                                  (widebody, moving.wide, ParkedAircraftMesh.widebody.length)] where !instances.isEmpty {
+                    var d = DrawUniforms()
+                    d.model = model
+                    d.prevModel = reset ? model : prev
+                    d.material = SIMD4(0.35, 0, 0, SurfaceKind.parked.rawValue)
+                    d.emissive = SIMD4(Float(length), 0, 0, 0)
+                    e.setVertexBuffer(mesh.buffer, offset: 0, index: 0)
+                    instances.withUnsafeBytes { e.setVertexBytes($0.baseAddress!, length: $0.count, index: 3) }
+                    e.setVertexBytes(&d, length: MemoryLayout<DrawUniforms>.stride, index: 2)
+                    e.setFragmentBytes(&d, length: MemoryLayout<DrawUniforms>.stride, index: 2)
+                    e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: mesh.count, instanceCount: instances.count)
+                    parked += instances.count
                 }
             }
             parkedDrawn = parked

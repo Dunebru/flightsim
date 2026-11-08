@@ -4,6 +4,12 @@ What is done, what is a placeholder, and what is next. Honest status only: anyth
 
 Last updated: 2026-11-07.
 
+## M9 Traffic: started (2026-11-07)
+
+AI airliners at the departure airport, on the runways the wind favours (into the wind; the west-facing ends in light wind, as at both airports normally; tested). About an arrival and a departure every two minutes, around 60 movements an hour. Arrivals fly the 3 degree path from 15 km, flare, roll out and leave at the first exit they can make, then taxi over the mapped taxiway network (KPHX: 4,833 nodes, every free gate reaches every runway) to a free gate, where they stay 10 to 25 minutes before pushing back as departures. Departures push back, taxi to the threshold, hold until the runway and the final 5 km are clear, line up, roll and climb out. On the ground they look 60 m along their path: they stop behind anything ahead or standing still, take turns at crossings, and find another way round a head-on meeting; one still stuck after two minutes is withdrawn, never within 2 km of where you are watching. Tested over 40 simulated minutes at each airport: KPHX 14 landings, 18 takeoffs, 10 at gates, closest on the ground 59 m, 2 withdrawn; KLAX 13, 10, 10, 47 m, 3. Traffic stops for you on the ground, and an arrival goes around if you are on its runway (tested). Drawn with the generic narrowbody and widebody shapes, pitched on rotation and approach, with shadows; the airport is already busy when a flight starts.
+
+Not yet: lights on the AI aircraft at night, landing gear on the shapes, traffic at the arrival airport, ATC, anything that talks.
+
 ## M8 Navigation and autopilot: started (2026-11-07)
 
 1. **Autopilot.** Runs on the physics thread at 120 Hz and flies the JSBSim models through the pilot's own controls. Lateral: HDG (bank proportional to heading error, 20 degrees on the C172 and 25 on the A320), NAV and LOC. Vertical: V/S toward the selected altitude with a smooth capture (ALT*, then ALT), and G/S. A/THR holds the selected speed and moves the thrust lever with it. Tested in flight on both models: the C172 turns 90 degrees at 18.5 degrees of bank holding altitude within 6 ft, climbs at 620 fpm (600 selected) and captures 4,500 ft with an 8 ft overshoot; the A320 holds 248 to 250 kt through a 1,500 fpm descent to 7,000 ft; the A320 intercepts the ILS from 30 degrees below the glidepath and is 0.02 dots off both needles at 200 ft.
@@ -136,11 +142,12 @@ Build warnings: 1, the deprecated `UIRequiresFullScreen`, kept on purpose (see K
 | Weather | **Partial.** METAR parsing and live fetch, wind, gusts, turbulence, temperature and pressure into the flight model. No clouds yet. |
 | Autopilot | **Partial (M8).** HDG, NAV, LOC, V/S with altitude capture, G/S, A/THR; tested in flight on both models. |
 | Nav | **Placeholder.** ILS approaches come from the airport data (UI's ApproachCatalog); navaids and procedures not yet. |
-| Traffic, ATC | **Placeholders.** Module identity only (M9). |
+| Traffic | **Partial (M9).** Arrivals, departures and taxiing over the real taxiway network at the departure airport; tested. |
+| ATC | **Placeholder.** Module identity only (M9). |
 
 ## Placeholders in the app today
 
-Airports are generated, not modelled: terminals are extruded footprints with procedural glass, not the real architecture. Parked airliners are generic shapes in generic liveries, and nothing moves: there is no AI traffic until M9. The HUD carries a small "Prototype" tag. The ATC panel says it is not built (M9). The tower camera position is a guess, not the real tower.
+Airports are generated, not modelled: terminals are extruded footprints with procedural glass, not the real architecture. Airliners, parked and moving, are generic shapes in generic liveries. The HUD carries a small "Prototype" tag. The ATC panel says it is not built (M9). The tower camera position is a guess, not the real tower.
 
 ## Known issues
 

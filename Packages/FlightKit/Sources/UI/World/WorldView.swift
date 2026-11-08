@@ -273,7 +273,7 @@ final class WorldEngine: NSObject {
             if framesSinceLog >= 120 {
                 framesSinceLog = 0
                 let st = renderer.stats
-                let passes = ["Atmosphere", "Shadow", "Scene", "Post"]
+                let passes = ["Atmosphere", "Shadow", "Scene", "Clouds", "Precipitation", "Post"]
                     .map { String(format: "%@=%.2f", $0, st.gpuMilliseconds[$0] ?? 0) }.joined(separator: " ")
                 if let s = physicsProbe?() {
                     print(String(format: "FLIGHTSTATE ias=%.1f alt=%.0f agl=%.1f hdg=%.1f pitch=%.1f roll=%.1f vs=%.0f eng=%.0f ground=%d t=%.1f",
@@ -281,6 +281,8 @@ final class WorldEngine: NSObject {
                                  s.pitch * 180 / .pi, s.roll * 180 / .pi, s.verticalSpeedFPM, s.engineIndication, s.onGround ? 1 : 0, s.time))
                 }
                 print("TERRAINSTATS \(renderer.terrainDebug)")
+                let moving = scene.traffic.values.reduce(0) { $0 + $1.narrow.count + $1.wide.count }
+                print("TRAFFICSTATS moving=\(moving) airliners drawn=\(renderer.parkedDrawn)")
                 print(String(format: "FLIGHTSTATS fps=%.1f gpuFrame=%.2fms gpuStageSum=%.2fms cpu=%.2fms %@ render=%dx%d output=%dx%d upscaler=%@ thermal=%d",
                              framesPerSecond, st.gpuFrameMilliseconds, st.gpuTotalMilliseconds, st.cpuMilliseconds, passes,
                              st.renderSize.x, st.renderSize.y, st.outputSize.x, st.outputSize.y,

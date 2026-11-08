@@ -8,6 +8,7 @@ import Terrain
 import Weather
 import Autopilot
 import Nav
+import Traffic
 
 /// One flight: the physics loop for the chosen aircraft, its control inputs, and the mapping from
 /// its state to the scene and the HUD. Lives on the main actor; physics runs on its own thread.
@@ -21,6 +22,9 @@ final class FlightSession {
     /// Magnetic declination here (degrees east): headings shown and selected are magnetic, as
     /// runways are numbered and pilots fly; the flight model works in true.
     private(set) var declination: Double
+    /// AI traffic at the departure airport, once built (off the main thread: the taxiway graph
+    /// and a warm-up take a moment).
+    private var traffic: AirportTraffic?
     private(set) var error: String?
     let frame: LocalFrame
     let tilt = TiltInput()
@@ -36,6 +40,7 @@ final class FlightSession {
     /// The weather the flight uses (clear until a METAR arrives).
     var weather: WeatherConditions = .clear {
         didSet {
+            traffic?.setWind(fromDegrees: weather.windFromDegrees, knots: weather.windKnots)
             cloudLayers = weather.cloudVolumes(fieldElevationMetres: site.layout.elevation).map { v in
                 let kind: CloudLayer.Kind = switch v.kind {
                 case .stratus: .stratus
@@ -48,6 +53,19 @@ final class FlightSession {
         }
     }
     private var cloudLayers: [CloudLayer] = []
+
+    /// Builds the airport's traffic in the background, already under way.
+    private func startTraffic() {
+        let site = self.site
+        let stand: String? = if case .stand(let ref) = spot { ref } else { nil }
+        let wind = (weather.windFromDegrees, weather.windKnots)
+        Task.detached(priority: .utility) {
+            let t = AirportTraffic(site: site, excludingStand: stand, windFromDegrees: wind.0, windKnots: wind.1,
+                                   seed: UInt64(Date().timeIntervalSince1970))
+            t.warmUp(seconds: 900)
+            await MainActor.run { [weak self] in self?.traffic = t }
+        }
+    }
     private var clock = 0.0
     private var lastState: FlightState?
 
@@ -71,6 +89,7 @@ final class FlightSession {
         do {
             physics = try PhysicsLoop(model: profile.id, initial: spawnConditions())
             physics?.setController(autopilot)
+            startTraffic()
         } catch {
             self.error = String(describing: error)
         }
@@ -162,6 +181,18 @@ final class FlightSession {
     func tick(dt: Double, hud: HUDModel, scene: inout SceneDescription, holdForScenery: Bool = false) {
         guard let physics else { return }
         scene.clouds = cloudLayers
+        if let traffic, let s = lastState {
+            traffic.player = (SIMD2(scene.aircraftPosition.x, scene.aircraftPosition.y), s.onGround)
+            if let eye = scene.cameraPose?.position { traffic.viewer = SIMD2(eye.x, eye.y) }
+            traffic.update(dt: min(dt, 0.1))
+            var moving = TrafficInstances(narrow: [], wide: [])
+            for a in traffic.snapshot {
+                let v = SIMD8<Float>(Float(a.position.x), Float(a.position.y), Float(a.position.z), Float(a.heading),
+                                     Float(a.seed), Float(a.pitch), Float(a.roll), 0)
+                if a.widebody { moving.wide.append(v) } else { moving.narrow.append(v) }
+            }
+            scene.traffic = [site.layout.icao: moving]
+        }
         scene.cloudWind = weather.windVectorMetresPerSecond(atHeightFeet: 5_000)
         scene.visibilityMetres = weather.visibilityMetres
         scene.fogScaleHeight = weather.fogScaleHeightMetres

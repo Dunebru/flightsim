@@ -80,7 +80,8 @@ for module in modules {
     ))
     targets.append(.testTarget(
         name: "\(module.name)Tests",
-        dependencies: [.target(name: module.name)],
+        // Renderer tests also draw the airports' moving traffic.
+        dependencies: [.target(name: module.name)] + (module.name == "Renderer" ? [.target(name: "Traffic")] : []),
         swiftSettings: swiftSettings
     ))
 }

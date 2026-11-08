@@ -124,27 +124,13 @@ enum ParkedAircraftMesh {
 enum ParkedTraffic {
     /// Instances in the airport frame: (x, y, z, heading radians) and (seed, 0, 0, 0).
     static func placements(_ site: AirportSite, excluding: String?) -> (narrow: [SIMD8<Float>], wide: [SIMD8<Float>]) {
-        let stops = site.layout.stands.filter { $0.line.count >= 2 }.map { (s: $0, p: site.xy($0.position)) }
         var narrow: [SIMD8<Float>] = [], wide: [SIMD8<Float>] = []
-        for (stand, p) in stops {
-            if let ref = stand.ref, ref == excluding { continue }
-            // Spacing to the nearest other stand says what fits: under 30 m is general aviation.
-            let spacing = stops.filter { $0.p != p }.map { simd_distance($0.p, p) }.min() ?? 100
-            guard spacing >= 30 else { continue }
-            // A fixed hash of the stand's position (hashValue changes every launch).
-            let ix = Int64((p.x * 10).rounded()), iy = Int64((p.y * 10).rounded())
-            var h = UInt64(bitPattern: (ix &* 73_856_093) ^ (iy &* 19_349_663))
-            h = (h ^ (h >> 31)) &* 0x9E37_79B9_7F4A_7C15
-            h ^= h >> 29
-            let r = Double(h % 10_000) / 10_000
-            guard r < 0.75 else { continue }                 // about three in four occupied
-            let placement = site.placement(.stand(stand.ref ?? "")) ?? StartPlacement(position: site.onSurface(p), heading: 0, altitude: nil)
-            let line = stand.line.map(site.xy)
-            let a = line[line.count - 2], b = line[line.count - 1]
-            let heading = atan2(b.x - a.x, b.y - a.y)
-            let isWide = spacing >= 62 && r < 0.4
-            let inst = SIMD8<Float>(Float(p.x), Float(p.y), Float(placement.position.z), Float(heading), Float(r / 0.75), 0, 0, 0)
-            if isWide { wide.append(inst) } else { narrow.append(inst) }
+        for slot in site.airlinerStands where slot.occupied {
+            if let ref = slot.ref, ref == excluding { continue }
+            let placement = site.placement(.stand(slot.ref ?? "")) ?? StartPlacement(position: site.onSurface(slot.position), heading: 0, altitude: nil)
+            let inst = SIMD8<Float>(Float(slot.position.x), Float(slot.position.y), Float(placement.position.z), Float(slot.heading),
+                                    Float(slot.seed / 0.75), 0, 0, 0)
+            if slot.parkedWidebody { wide.append(inst) } else { narrow.append(inst) }
         }
         return (narrow, wide)
     }
