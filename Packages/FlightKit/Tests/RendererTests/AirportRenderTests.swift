@@ -82,6 +82,23 @@ struct AirportRenderTests {
                                         forward: SIMD3(0, 0, -1), up: SIMD3(f.axis.x, f.axis.y, 0), fovY: 50 * .pi / 180)
         views.append(("kphx-08-numbers-top", numbers))
 
+        // At a holding position north of 08/26, looking south at the runway and its signs.
+        let hold = site.layout.holdPositions.first { h in
+            h.runway == "08/26" && h.kind == .runway && abs(h.towardRunway - 180) < 20 && f.local(site.xy(h.position)).x > 600
+        }!
+        let hp = site.xy(hold.position)
+        let ha = hold.towardRunway * .pi / 180
+        let hf = SIMD2(sin(ha), cos(ha))
+        var atHold = base
+        atHold.showAircraft = false
+        let eyeHold = hp - hf * 35
+        atHold.cameraPose = CameraPose(position: site.onSurface(eyeHold) + SIMD3(0, 0, 3.5),
+                                       forward: simd_normalize(SIMD3(hf.x, hf.y, -0.08)), up: SIMD3(0, 0, 1), fovY: 55 * .pi / 180)
+        views.append(("kphx-hold-08-26", atHold))
+        var holdNight = atHold
+        holdNight.date = RendererTests.time(whenSunAt: -20, afternoon: true)
+        views.append(("kphx-hold-08-26-night", holdNight))
+
         // The 07R approach at dusk and at night: approach lights, PAPI, edge and taxiway lights.
         for (label, elevation) in [("dusk", -4.0), ("night", -20.0)] {
             var v = final
@@ -89,6 +106,47 @@ struct AirportRenderTests {
             views.append(("kphx-07r-final-\(label)", v))
         }
 
+        for (name, s) in views {
+            r.exposureAdaptation = 1
+            try TerrainRenderTests.settle(r, s, limit: .seconds(60))
+            r.resetHistory()
+            let img = try r.renderImage(s, width: 1600, height: 900)
+            try RendererTests.savePNG(img, 1600, 900, name: name)
+        }
+    }
+
+    @Test func klaxViews() throws {
+        let site = try AirportSite.load(Self.airportsURL.appendingPathComponent("KLAX.json"))
+        let (r, base) = try Self.scene(site, aircraft: true)
+        let rw = site.layout.runways.first { $0.name == "07L/25R" }!
+        let f = site.runwayFrame(rw)
+        var views: [(String, SceneDescription)] = []
+        // Lined up on 25R (the high end), chase view.
+        var lined = base
+        let start = try #require(site.placement(.runway("25R")))
+        lined.aircraftPosition = start.position
+        lined.aircraftHeading = start.heading * .pi / 180
+        let back = SIMD2(-sin(start.heading * .pi / 180), -cos(start.heading * .pi / 180))
+        let eye = SIMD2(start.position.x, start.position.y) + back * 22
+        lined.cameraPose = CameraPose(position: SIMD3(eye.x, eye.y, start.position.z + 4),
+                                      forward: simd_normalize(SIMD3(-back.x, -back.y, -0.08)), up: SIMD3(0, 0, 1), fovY: 60 * .pi / 180)
+        views.append(("klax-25r-lineup", lined))
+        // The central terminal area from 300 m.
+        var terminals = base
+        terminals.showAircraft = false
+        terminals.cameraPose = CameraPose(position: SIMD3(-200, -1_300, 300), forward: simd_normalize(SIMD3(0, 1, -0.35)),
+                                          up: SIMD3(0, 0, 1), fovY: 60 * .pi / 180)
+        views.append(("klax-terminals", terminals))
+        // 24R final from 3 nm at dusk.
+        var final = base
+        final.showAircraft = false
+        let p = try #require(site.placement(.final("24R")))
+        let h = p.heading * .pi / 180
+        final.cameraPose = CameraPose(position: SIMD3(p.position.x, p.position.y, (p.altitude ?? 0) - site.frame.origin.height),
+                                      forward: simd_normalize(SIMD3(sin(h), cos(h), -0.055)), up: SIMD3(0, 0, 1), fovY: 55 * .pi / 180)
+        final.date = RendererTests.time(whenSunAt: -4, afternoon: true)
+        views.append(("klax-24r-final-dusk", final))
+        _ = f
         for (name, s) in views {
             r.exposureAdaptation = 1
             try TerrainRenderTests.settle(r, s, limit: .seconds(60))

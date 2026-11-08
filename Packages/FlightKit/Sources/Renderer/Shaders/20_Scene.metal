@@ -25,6 +25,7 @@ constant float kKindGround = 3.0;
 constant float kKindTerrain = 4.0;
 constant float kKindPavement = 5.0;
 constant float kKindBuilding = 6.0;
+constant float kKindSign = 7.0;
 
 constexpr sampler kTerrainSampler(filter::linear, mip_filter::linear, address::clamp_to_edge, max_anisotropy(8));
 
@@ -301,6 +302,42 @@ inline float3 facadeAlbedo(float code, float2 uv, float3 N, thread float &roughn
     return window ? float3(0.05, 0.06, 0.07) : float3(0.56, 0.50, 0.42) * (0.9 + 0.2 * fbm(uv * 0.2, 2));
 }
 
+/// One street light's contribution: a world-space disc that never shrinks below about a pixel,
+/// with constant energy, kept only where the city is bright enough (hash against `level`).
+inline float streetLight(float2 p, float2 centre, float level, float r, float salt) {
+    float keep = step(hash21(centre * 0.0137 + salt), level);
+    float2 d = p - centre;
+    return keep * exp(-dot(d, d) / (r * r)) * (1.6 * 1.6) / (r * r);
+}
+
+/// City lights at night. `level` is NASA Black Marble brightness (about 500 m per pixel): it sets
+/// how many lights there are and the faint average glow. The lights themselves follow a US street
+/// grid: local streets every 201 m (1/8 mile) with a light every 46 m, arterials on the mile
+/// lines, brighter, every 30 m on both sides.
+inline float3 cityLights(float level, float2 p, float pixelMetres) {
+    if (level < 0.02) return float3(0.0);
+    float r = max(1.6, pixelMetres * 1.2);
+    float dots = 0.0;
+    const float S = 201.17, A = 45.7;
+    float2 street = round(p / S) * S;
+    dots += streetLight(p, float2(street.x + 6.0, round(p.y / A) * A), level * 1.1, r, 1.0);
+    dots += streetLight(p, float2(round(p.x / A) * A, street.y + 6.0), level * 1.1, r, 2.0);
+    const float M = 1609.34, B = 30.5;
+    float2 artery = round(p / M) * M;
+    for (int side = -1; side <= 1; side += 2) {
+        dots += 2.5 * streetLight(p, float2(artery.x + 18.0 * side, round(p.y / B) * B), level * 1.6 + 0.2, r, 3.0 + side);
+        dots += 2.5 * streetLight(p, float2(round(p.x / B) * B, artery.y + 18.0 * side), level * 1.6 + 0.2, r, 5.0 + side);
+    }
+    // Buildings and parking lots: scattered, dimmer lights on a 23 m lattice.
+    const float P = 23.0;
+    float2 lot = floor(p / P);
+    float2 jitter = float2(hash21(lot + 11.0), hash21(lot + 17.0));
+    dots += 0.55 * streetLight(p, (lot + 0.2 + jitter * 0.6) * P, level * 0.45, r, 9.0);
+    // Sodium and LED mix: warm, slightly whiter on the arterials.
+    float glow = level * level * 0.06;
+    return float3(1.0, 0.68, 0.38) * (dots * 0.6 + glow) * 6.0e-4;
+}
+
 fragment GBufferOut sceneFragment(VertexOut in [[stage_in]],
                                   bool frontFacing [[front_facing]],
                                   constant FrameUniforms &u [[buffer(1)]],
@@ -309,7 +346,8 @@ fragment GBufferOut sceneFragment(VertexOut in [[stage_in]],
                                   texture2d<float> albedoTexture [[texture(0)]],
                                   texture2d<float> skyView [[texture(1)]],
                                   texture3d<float> aerial [[texture(2)]],
-                                  depth2d<float> shadowMap [[texture(3)]])
+                                  depth2d<float> shadowMap [[texture(3)]],
+                                  texture2d<float> nightLights [[texture(5)]])
 {
     float kind = d.material.w;
     float3 N = normalize(in.normal);
@@ -349,6 +387,8 @@ fragment GBufferOut sceneFragment(VertexOut in [[stage_in]],
     } else if (kind == kKindPavement) {
         albedo = pavementAlbedo(in.uv, d.emissive.x > 0.5, distance);
         N = float3(0, 0, 1);
+    } else if (kind == kKindSign) {
+        albedo = albedoTexture.sample(kLinearClamp, in.uv).rgb;
     } else if (kind == kKindBuilding) {
         albedo = facadeAlbedo(d.emissive.x, in.uv, N, roughness);
     } else if (d.material.z > 0.5) {
@@ -359,6 +399,17 @@ fragment GBufferOut sceneFragment(VertexOut in [[stage_in]],
     float shadow = shadowFactor(in.worldPos, u, shadowMap);
     float3 color = shadeSurface(albedo, roughness, d.material.y, N, in.worldPos, shadow, u, light, skyView);
     color += d.emissive.rgb * (kind == kKindAircraft ? 1.0 : 0.0);
+    if (kind == kKindSign) {
+        // Signs are lit from inside at night.
+        color += albedo * 4.0e-4 * smoothstep(0.05, -0.08, u.sunDirection.z);
+    }
+    if (kind == kKindTerrain && d.emissive.w > 0.5) {
+        float dark = smoothstep(0.03, -0.10, u.sunDirection.z);
+        if (dark > 0.0) {
+            color += cityLights(nightLights.sample(kLinearClamp, in.uv * d.emissive.x + d.emissive.yz).r,
+                                in.worldPos.xy + u.noiseOrigin.xy, length(dfdx(in.worldPos.xy))) * dark;
+        }
+    }
     color = applyAerialPerspective(color, in.worldPos, in.position, u, aerial);
 
     GBufferOut o;

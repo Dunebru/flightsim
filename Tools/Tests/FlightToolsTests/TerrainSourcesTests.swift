@@ -116,3 +116,16 @@ struct TerrainSourcesTests {
         }
     }
 }
+
+struct NightLightsTests {
+    /// Pixel values sampled from the Black Marble tile over Phoenix (zoom 8): moonlit land drops
+    /// to zero, city lights stay.
+    @Test func keepsLightsDropsLand() {
+        let samples: [(r: UInt8, g: UInt8, b: UInt8)] = [(14, 15, 31), (23, 21, 44), (31, 29, 53), (58, 51, 67), (247, 211, 174), (255, 240, 221)]
+        let px: [UInt8] = samples.flatMap { [$0.r, $0.g, $0.b, UInt8(255)] }
+        let out = NightLights.lights(fromRGBA: px)
+        #expect(out[0] == 0 && out[1] == 0 && out[2] == 0, "land: \(out.prefix(3))")
+        #expect(out[3] > 10 && out[3] < 60, "city edge \(out[3])")
+        #expect(out[4] > 200 && out[5] > 200, "town and core \(out[4]) \(out[5])")
+    }
+}

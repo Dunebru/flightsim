@@ -181,6 +181,25 @@ public enum ImagerySource: String, Sendable, CaseIterable {
     }
 }
 
+/// NASA Black Marble 2016 night lights (VIIRS, public domain) from NASA GIBS, zoom 0-8.
+public enum NightLights {
+    public static func url(_ k: TileKey) -> String {
+        "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_Black_Marble/default/2016-01-01/GoogleMapsCompatible_Level8/\(k.z)/\(k.y)/\(k.x).png"
+    }
+    public static let attribution = "NASA Black Marble 2016 (VIIRS), via NASA GIBS (public domain)"
+
+    /// The lights alone, 0-255 grey: the composite paints moonlit land dark blue (red about half
+    /// the blue) while lights are warm, so (R - 0.55 B - 5) / 150 keeps the lights and drops the land.
+    public static func lights(fromRGBA px: [UInt8]) -> [UInt8] {
+        var out = [UInt8](repeating: 0, count: px.count / 4)
+        for i in 0..<out.count {
+            let r = Double(px[i * 4]), b = Double(px[i * 4 + 2])
+            out[i] = UInt8(max(0, min(255, ((r - 0.55 * b - 5) / 150 * 255).rounded())))
+        }
+        return out
+    }
+}
+
 /// Per-channel mean and standard deviation of a set of images (sRGB 0-255).
 public struct ColourStats: Sendable, Equatable {
     public var mean: SIMD3<Double>
@@ -228,6 +247,19 @@ enum ImageCodec {
             return true
         }
         return ok ? (px, w, h) : nil
+    }
+
+    /// 8-bit grey PNG.
+    static func encodeGreyPNG(_ px: [UInt8], width: Int, height: Int) -> Data? {
+        let data = NSMutableData()
+        guard let provider = CGDataProvider(data: Data(px) as CFData),
+              let img = CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 8, bytesPerRow: width,
+                                space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue),
+                                provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent),
+              let dest = CGImageDestinationCreateWithData(data, UTType.png.identifier as CFString, 1, nil) else { return nil }
+        CGImageDestinationAddImage(dest, img, nil)
+        guard CGImageDestinationFinalize(dest) else { return nil }
+        return data as Data
     }
 
     static func encodeJPEG(_ px: [UInt8], width: Int, height: Int, quality: Double = 0.9) -> Data? {

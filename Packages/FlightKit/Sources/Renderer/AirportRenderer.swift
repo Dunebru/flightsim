@@ -13,6 +13,8 @@ final class AirportRenderer {
         let count: Int
         var uniforms: DrawUniforms
         let atlas: Bool
+        /// Its own texture (the sign atlas), when it has one.
+        var texture: (any MTLTexture)? = nil
         /// Depth bias layer: 0 ground pavement, 1 runway (over crossing taxiways), 2 paint.
         let layer: Int
     }
@@ -30,7 +32,8 @@ final class AirportRenderer {
     /// Building facade codes for the shader (DrawUniforms.emissive.x).
     enum Facade: Float { case terminal = 1, hangar = 2, generic = 3, parking = 4, tower = 5, glass = 6 }
 
-    init?(site: AirportSite, geometry: AirportGeometry, lights points: [LightPoint], sceneFrame: LocalFrame, device: any MTLDevice) {
+    init?(site: AirportSite, geometry: AirportGeometry, lights points: [LightPoint], signs: [SignPlacement],
+          sceneFrame: LocalFrame, device: any MTLDevice) {
         name = site.layout.icao
         let a = site.frame
         let o = sceneFrame.enu(a.origin)
@@ -99,6 +102,13 @@ final class AirportRenderer {
             }
         }
         add(geometry.glazing, kind: .building, roughness: 0.08, emissive: SIMD4(Facade.glass.rawValue, 0, 0, 0))
+        if let built = SignAtlas.build(signs, device: device), !built.vertices.isEmpty,
+           let b = device.makeBuffer(bytes: built.vertices, length: built.vertices.count * MemoryLayout<MeshVertex>.stride,
+                                     options: .storageModeShared) {
+            var u = DrawUniforms()
+            u.material = SIMD4(0.6, 0, 1, SurfaceKind.sign.rawValue)
+            draws.append(Draw(vertices: b, count: built.vertices.count, uniforms: u, atlas: false, texture: built.texture, layer: 0))
+        }
         if draws.isEmpty { return nil }
     }
 

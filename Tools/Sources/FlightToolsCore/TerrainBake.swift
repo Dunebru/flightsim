@@ -225,6 +225,41 @@ public struct TerrainBaker: Sendable {
                 return "\(s.attribution), zoom \(zooms.min()!)-\(zooms.max()!)"
             }
         }
+        // Night lights for the coarse tiles (the renderer reads finer tiles' lights from their
+        // zoom-8 ancestor).
+        var nightSource: String?
+        if let cache = imageryCache {
+            let coarse = baked.filter { $0.z <= SceneryPack.nightMaxZoom }
+            if !coarse.isEmpty {
+                let fm = FileManager.default
+                let missing = coarse.filter { !fm.fileExists(atPath: cache.appendingPathComponent("night/\($0.z)/\($0.x)/\($0.y).png").path) }
+                log("night lights: \(missing.count) of \(coarse.count) tiles to download")
+                try await withThrowingTaskGroup(of: Void.self) { group in
+                    var iterator = missing.makeIterator()
+                    func add() {
+                        guard let k = iterator.next() else { return }
+                        group.addTask {
+                            let data = try await Downloader.get(NightLights.url(k))
+                            let dest = cache.appendingPathComponent("night/\(k.z)/\(k.x)/\(k.y).png")
+                            try FileManager.default.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
+                            try data.write(to: dest)
+                        }
+                    }
+                    for _ in 0..<6 { add() }
+                    while try await group.next() != nil { add() }
+                }
+                for k in coarse {
+                    let raw = try Data(contentsOf: cache.appendingPathComponent("night/\(k.z)/\(k.x)/\(k.y).png"))
+                    guard let img = ImageCodec.decode(raw),
+                          let png = ImageCodec.encodeGreyPNG(NightLights.lights(fromRGBA: img.pixels), width: img.width, height: img.height) else { continue }
+                    let dest = output.appendingPathComponent(SceneryPack.nightPath(k))
+                    try fm.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    try png.write(to: dest)
+                }
+                nightSource = NightLights.attribution
+            }
+        }
+
         let zooms = baked.map(\.z)
         var elevation: [String] = []
         if fromTerrarium > 0 {
@@ -238,7 +273,8 @@ public struct TerrainBaker: Sendable {
             tiles: baked.map(\.description),
             heightDatum: "mean sea level (EGM2008 / NAVD88 / EGM96 by source)",
             imagerySource: sources.joined(separator: "; "),
-            elevationSource: elevation.joined(separator: "; ")
+            elevationSource: elevation.joined(separator: "; "),
+            nightLightsSource: nightSource
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]

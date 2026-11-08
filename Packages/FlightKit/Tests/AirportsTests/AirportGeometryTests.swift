@@ -168,3 +168,28 @@ struct AirportGroundTests {
         }
     }
 }
+
+struct AirportSignTests {
+    @Test func holdSignsAndDistanceRemaining() throws {
+        let s = try AirportGeometryTests.site("KPHX")
+        let signs = AirportSigns.build(s)
+        let holds = signs.filter { $0.front.style == .mandatory }
+        #expect(holds.count > 100, "\(holds.count) holding position signs")
+        // Every hold sign names a real runway, low-high or high-low.
+        let names = Set(s.layout.runways.flatMap { r in [r.name, r.ends.reversed().map(\.ident).joined(separator: "-")] }
+            .map { $0.replacingOccurrences(of: "/", with: "-") })
+        #expect(holds.allSatisfy { names.contains($0.front.text) })
+        // A hold north of 08/26 facing south: 08 (the west end) is on a southbound pilot's right,
+        // so the sign reads 26-08.
+        let rw = s.layout.runways.first { $0.name == "08/26" }!
+        let f = s.runwayFrame(rw)
+        let north = s.layout.holdPositions.filter { $0.runway == "08/26" && f.local(s.xy($0.position)).y > 0 && $0.kind == .runway }
+        let southbound = try #require(north.first { abs($0.towardRunway - 180) < 30 })
+        let sign = try #require(holds.min { simd_distance(SIMD2($0.position.x, $0.position.y), s.xy(southbound.position)) <
+                                            simd_distance(SIMD2($1.position.x, $1.position.y), s.xy(southbound.position)) })
+        #expect(sign.front.text == "26-08", "southbound hold reads \(sign.front.text)")
+        // Distance remaining: 11,489 ft runway, signs 1 to 10 for each direction.
+        let distance = signs.filter { $0.front.style == .distance }
+        #expect(distance.filter { $0.front.text == "10" }.count >= 2)
+    }
+}

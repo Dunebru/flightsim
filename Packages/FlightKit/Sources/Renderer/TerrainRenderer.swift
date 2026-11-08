@@ -15,6 +15,8 @@ final class TerrainRenderer {
         let key: TileKey
         let vertices: any MTLBuffer
         let texture: any MTLTexture
+        /// Night lights (zoom 8 and coarser tiles only).
+        let night: (any MTLTexture)?
         let centre: SIMD3<Double>
         let radius: Double
         let bytes: Int
@@ -24,6 +26,7 @@ final class TerrainRenderer {
     struct Loaded: Sendable {
         let geometry: TerrainTileGeometry
         let pixels: [UInt8]      // RGBA8, sRGB
+        let night: [UInt8]?      // R8, 256 x 256
         let width: Int
         let height: Int
     }
@@ -151,7 +154,8 @@ final class TerrainRenderer {
                 guard let url = pack.imageryURL(k) else { throw CocoaError(.fileNoSuchFile) }
                 let image = try Data(contentsOf: url)
                 guard let (pixels, w, h) = Self.decode(image) else { throw CocoaError(.fileReadCorruptFile) }
-                inbox.mutex.withLock { $0[k] = Loaded(geometry: geometry, pixels: pixels, width: w, height: h) }
+                let night = pack.nightURL(k).flatMap { try? Data(contentsOf: $0) }.flatMap(Self.decodeGrey)
+                inbox.mutex.withLock { $0[k] = Loaded(geometry: geometry, pixels: pixels, night: night, width: w, height: h) }
             } catch {
                 inbox.failed.withLock { _ = $0.insert(k) }
             }
@@ -172,6 +176,35 @@ final class TerrainRenderer {
             return true
         }
         return ok ? (pixels, w, h) : nil
+    }
+
+    /// A 256 x 256 grey PNG to R8 pixels.
+    nonisolated static func decodeGrey(_ data: Data) -> [UInt8]? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let image = CGImageSourceCreateImageAtIndex(source, 0, nil), image.width == 256, image.height == 256 else { return nil }
+        var pixels = [UInt8](repeating: 0, count: 256 * 256)
+        let ok = pixels.withUnsafeMutableBytes { raw -> Bool in
+            guard let ctx = CGContext(data: raw.baseAddress, width: 256, height: 256, bitsPerComponent: 8, bytesPerRow: 256,
+                                      space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue) else { return false }
+            ctx.draw(image, in: CGRect(x: 0, y: 0, width: 256, height: 256))
+            return true
+        }
+        return ok ? pixels : nil
+    }
+
+    /// The night-lights texture covering a tile and the transform from the tile's uv into it:
+    /// the tile's own (zoom 8 and coarser) or its nearest ancestor's that has one.
+    func nightBinding(for k: TileKey) -> (texture: any MTLTexture, scale: Float, offset: SIMD2<Float>)? {
+        var a: TileKey? = k
+        while let q = a {
+            if q.z <= SceneryPack.nightMaxZoom, let t = tiles[q]?.night {
+                let n = 1 << (k.z - q.z)
+                let scale = 1 / Float(n)
+                return (t, scale, SIMD2(Float(k.x - q.x * n), Float(k.y - q.y * n)) * scale)
+            }
+            a = q.parent
+        }
+        return nil
     }
 
     private func upload() {
@@ -215,8 +248,20 @@ final class TerrainRenderer {
         guard let tex = device.makeTexture(descriptor: desc) else { return nil }
         tex.replace(region: MTLRegionMake2D(0, 0, l.width, l.height), mipmapLevel: 0, withBytes: l.pixels, bytesPerRow: l.width * 4)
         pendingMipmaps.append(tex)
+        var nightTexture: (any MTLTexture)?
+        if let night = l.night {
+            let nd = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .r8Unorm, width: 256, height: 256, mipmapped: true)
+            nd.usage = .shaderRead
+            nd.storageMode = .shared
+            if let nt = device.makeTexture(descriptor: nd) {
+                nt.replace(region: MTLRegionMake2D(0, 0, 256, 256), mipmapLevel: 0, withBytes: night, bytesPerRow: 256)
+                pendingMipmaps.append(nt)
+                nightTexture = nt
+            }
+        }
         let bytes = vb.length + l.width * l.height * 4 * 4 / 3
-        return GPUTile(key: k, vertices: vb, texture: tex, centre: g.centre, radius: g.radius, bytes: bytes)
+        return GPUTile(key: k, vertices: vb, texture: tex, night: nightTexture, centre: g.centre, radius: g.radius,
+                       bytes: bytes + (nightTexture == nil ? 0 : 87_381))
     }
 
     // MARK: Budget

@@ -50,6 +50,7 @@ public final class SceneRenderer {
     private let shadowMap: any MTLTexture
     private let shadowSize = 2048
     private let dummyTexture: any MTLTexture
+    private let blackTexture: any MTLTexture
     private let markingAtlas: any MTLTexture
     private let groundBuffer: any MTLBuffer
     private let groundVertexCount: Int
@@ -199,6 +200,12 @@ public final class SceneRenderer {
         guard let dummy = device.makeTexture(descriptor: dd) else { throw RendererError.resource("dummy") }
         dummy.replace(region: MTLRegionMake2D(0, 0, 1, 1), mipmapLevel: 0, withBytes: [UInt8](repeating: 255, count: 4), bytesPerRow: 4)
         dummyTexture = dummy
+        let bd = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .r8Unorm, width: 1, height: 1, mipmapped: false)
+        bd.usage = .shaderRead
+        bd.storageMode = .shared
+        guard let black = device.makeTexture(descriptor: bd) else { throw RendererError.resource("black") }
+        black.replace(region: MTLRegionMake2D(0, 0, 1, 1), mipmapLevel: 0, withBytes: [UInt8(0)], bytesPerRow: 1)
+        blackTexture = black
         guard let atlas = MarkingAtlas.makeTexture(device: device, queue: queue) else { throw RendererError.resource("marking atlas") }
         markingAtlas = atlas
 
@@ -414,6 +421,7 @@ public final class SceneRenderer {
             e.setFragmentTexture(aerialVolume, index: 2)
             e.setFragmentTexture(shadowMap, index: 3)
             e.setFragmentTexture(transmittanceLUT, index: 4)
+            e.setFragmentTexture(blackTexture, index: 5)
             e.setRenderPipelineState(scenePipeline)
             e.setDepthStencilState(depthWrite)
             e.setCullMode(.none)
@@ -441,6 +449,12 @@ public final class SceneRenderer {
                     d.prevModel = MatrixMath.translation(relative(world, to: previousCam))
                     d.baseColor = SIMD4(terrainAlbedoScale, terrainAlbedoScale, terrainAlbedoScale, 1)
                     d.material = SIMD4(0.92, 0, 1, SurfaceKind.terrain.rawValue)
+                    if let night = terrain?.nightBinding(for: tile.key) {
+                        d.emissive = SIMD4(night.scale, night.offset.x, night.offset.y, 1)
+                        e.setFragmentTexture(night.texture, index: 5)
+                    } else {
+                        e.setFragmentTexture(blackTexture, index: 5)
+                    }
                     e.setVertexBuffer(tile.vertices, offset: 0, index: 0)
                     e.setVertexBytes(&d, length: MemoryLayout<DrawUniforms>.stride, index: 2)
                     e.setFragmentBytes(&d, length: MemoryLayout<DrawUniforms>.stride, index: 2)
@@ -453,6 +467,7 @@ public final class SceneRenderer {
                 }
                 terrainDrawn = drawn
                 e.setRenderPipelineState(scenePipeline)
+                e.setFragmentTexture(blackTexture, index: 5)
             }
             // Airports: pavement first, then paint with a depth bias, then buildings.
             for airport in airports {
@@ -469,7 +484,7 @@ public final class SceneRenderer {
                     // their edges: runways over crossing taxiways, paint over both.
                     let bias = Float(item.layer) * 3
                     e.setDepthBias(bias, slopeScale: bias, clamp: 0)
-                    draw(item.vertices, count: item.count, d, texture: item.atlas ? markingAtlas : nil)
+                    draw(item.vertices, count: item.count, d, texture: item.texture ?? (item.atlas ? markingAtlas : nil))
                 }
             }
             e.setDepthBias(0, slopeScale: 0, clamp: 0)
@@ -614,7 +629,8 @@ public final class SceneRenderer {
     public func setAirports(_ sites: [(site: AirportSite, geometry: AirportGeometry, lights: [LightPoint])], sceneOrigin: Geodetic) {
         let frame = LocalFrame(origin: sceneOrigin)
         airports = sites.compactMap {
-            AirportRenderer(site: $0.site, geometry: $0.geometry, lights: $0.lights, sceneFrame: frame, device: device)
+            AirportRenderer(site: $0.site, geometry: $0.geometry, lights: $0.lights, signs: AirportSigns.build($0.site),
+                            sceneFrame: frame, device: device)
         }
         previousCamera = nil
     }

@@ -18,9 +18,12 @@ public struct SceneryPackIndex: Codable, Sendable, Equatable {
     public var heightDatum: String
     public var imagerySource: String
     public var elevationSource: String
+    /// Source of the night-lights layer (zoom 8 and coarser tiles), when the pack has one.
+    public var nightLightsSource: String?
 
     public init(name: String, heightSamples: Int, minZoom: Int, maxZoom: Int, tiles: [String],
-                heightDatum: String, imagerySource: String, elevationSource: String) {
+                heightDatum: String, imagerySource: String, elevationSource: String, nightLightsSource: String? = nil) {
+        self.nightLightsSource = nightLightsSource
         self.name = name
         self.heightSamples = heightSamples
         self.minZoom = minZoom
@@ -47,6 +50,14 @@ public struct SceneryPack: Sendable {
 
     public static func heightsPath(_ k: TileKey) -> String { "heights/\(k.z)/\(k.x)/\(k.y).h16" }
     public static func imageryPath(_ k: TileKey) -> String { "imagery/\(k.z)/\(k.x)/\(k.y).jpg" }
+    public static func nightPath(_ k: TileKey) -> String { "night/\(k.z)/\(k.x)/\(k.y).png" }
+    /// Night lights exist for tiles at zoom 8 and coarser.
+    public static let nightMaxZoom = 8
+
+    public func nightURL(_ k: TileKey) -> URL? {
+        guard index.nightLightsSource != nil, k.z <= Self.nightMaxZoom else { return nil }
+        return root.appendingPathComponent(Self.nightPath(k))
+    }
 
     public func heightsURL(_ k: TileKey) -> URL { root.appendingPathComponent(Self.heightsPath(k)) }
     public func imageryURL(_ k: TileKey) -> URL { root.appendingPathComponent(Self.imageryPath(k)) }
@@ -125,4 +136,5 @@ public struct SceneryLibrary: Sendable {
     }
 
     public func imageryURL(_ k: TileKey) -> URL? { pack(for: k)?.imageryURL(k) }
+    public func nightURL(_ k: TileKey) -> URL? { pack(for: k)?.nightURL(k) }
 }
