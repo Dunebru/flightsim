@@ -104,6 +104,10 @@ final class WorldEngine: NSObject {
         // Clouds march at 40% of the render resolution on the phone (half on the Mac); the
         // temporal resolve hides most of the difference. Not yet measured on the device.
         made?.cloudResolutionScale = 0.35
+        if let g = Bundle.main.resourceURL?.appendingPathComponent("Bundle/Ground") {
+            try? made?.setGroundDetail(grain: g.appendingPathComponent("concrete-grain.jpg"), cement: g.appendingPathComponent("cement.jpg"),
+                                       asphalt: g.appendingPathComponent("asphalt.jpg"), grainNormal: g.appendingPathComponent("grain-normal.jpg"))
+        }
         #endif
         // The bright star catalogue for the night sky.
         if let url = Bundle.main.resourceURL?.appendingPathComponent("Bundle/Sky/stars.bin"), let list = try? SkyStar.load(url) {

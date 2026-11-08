@@ -3,6 +3,7 @@ import Aircraft
 import Airports
 import FlightModel
 import Foundation
+import Synchronization
 import Renderer
 import SimCore
 import Terrain
@@ -83,6 +84,55 @@ final class FlightSession {
     private var lastState: FlightState?
     private var crash: CrashCheck?
     private var crashCheckAfter = 1.5
+
+    /// The A320's screens, drawn off the main thread about 15 times a second while the
+    /// flight deck is in view.
+    nonisolated final class DisplayBox: Sendable {
+        let pages = Mutex<(images: [String: [UInt8]], version: Int, busy: Bool)>(([:], 0, false))
+    }
+    private let displayBox = DisplayBox()
+    private var displayFrame = 0
+
+    private func updateDisplays(_ s: FlightState, hud: HUDModel, scene: inout SceneDescription) {
+        displayFrame += 1
+        let latest = displayBox.pages.withLock { $0 }
+        if latest.version > 0 {
+            let size = CockpitDisplays.size
+            for (screen, page) in [("pfd1", "pfd"), ("pfd2", "pfd"), ("nd1", "nd"), ("nd2", "nd"), ("ewd", "ewd"), ("sd", "sd")] {
+                if let px = latest.images[page], scene.displays[screen]?.version != latest.version {
+                    scene.displays[screen] = DisplayImage(pixels: px, size: size, version: latest.version)
+                }
+            }
+        }
+        guard displayFrame % 4 == 0, !latest.busy else { return }
+        var d = DisplayInputs()
+        d.ias = s.indicatedAirspeedKnots
+        d.altitude = s.altitudeFeet
+        d.verticalSpeed = s.verticalSpeedFPM
+        d.heading = (s.heading * 180 / .pi - declination + 360).truncatingRemainder(dividingBy: 360)
+        d.track = (s.track * 180 / .pi - declination + 360).truncatingRemainder(dividingBy: 360)
+        d.pitch = s.pitch * 180 / .pi
+        d.roll = s.roll * 180 / .pi
+        d.groundSpeed = s.groundSpeedKnots
+        d.trueAirspeed = s.trueAirspeedKnots
+        d.n1 = s.engineIndication
+        d.throttle = s.throttle
+        d.flaps = s.flapPosition
+        d.gearDown = s.gearPosition
+        d.onGround = s.onGround
+        d.windFrom = Double(hud.windFrom)
+        d.windKnots = Double(hud.windKnots)
+        d.selectedAltitude = Double(hud.targetAltitude)
+        d.fma = [hud.autothrottle ? "SPEED" : "", hud.apVertical, hud.apLateral, hud.apApproach == nil ? "" : "CAT 1",
+                 hud.apMaster ? "AP1" : ""]
+        displayBox.pages.withLock { $0.busy = true }
+        let box = displayBox
+        DispatchQueue.global(qos: .userInitiated).async {
+            var images: [String: [UInt8]] = [:]
+            for page in ["pfd", "nd", "ewd", "sd"] { images[page] = CockpitDisplays.draw(page, d) }
+            box.pages.withLock { $0 = (images, $0.version + 1, false) }
+        }
+    }
 
     /// What the C172's needles, yoke and pedals show, by FlightGear property.
     static func cockpitReadings(_ s: FlightState, inputs: ControlInputs, declination: Double, headingBug: Double) -> [String: Double] {
@@ -345,8 +395,11 @@ final class FlightSession {
         scene.aircraftPivotHeight = pivot
         scene.aircraftPosition = SIMD3(base.x, base.y, base.z + s.heightAboveGroundFeet * 0.3048 - pivot)
         scene.aircraftHeading = s.heading
-        scene.aircraftGearDown = s.gearPosition > 0.5
+        scene.aircraftGearDown = s.gearPosition > 0.97
         scene.propellerSpinning = !s.engineIsTurbine && s.engineIndication > 400
+        if s.engineIsTurbine && hud.camera == .cockpit {
+            updateDisplays(s, hud: hud, scene: &scene)
+        }
         if s.engineIsTurbine {
             scene.instrumentValues = A320Model.readings(
                 leftAileron: s.leftAileronDegrees, rightAileron: s.rightAileronDegrees, elevator: s.elevatorDegrees,

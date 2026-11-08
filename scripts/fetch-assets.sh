@@ -229,6 +229,47 @@ for t in $(grep -h "^texture" "$A320_RAW/FlightDeck/res/fd_complete.ac" | sort -
   fi
 done
 
+# The flight deck's six display quads (Models/Instruments: PFDs, NDs, E/WD, SD), which the sim
+# textures with its own drawn displays.
+fetch_set "$A320_BASE/Instruments" "$A320_RAW/Instruments" \
+  "Lower-ECAM/Lower-ECAM.xml 2c98f14a6b61e93ac76ce6c0b88635fddb35054c9b3bbf0a2c7f66bf3edb99b6" \
+  "Lower-ECAM/res/Lower-ECAM.ac 970d4cab894354b2b4350122a40ac3bbbf9de9555d5392abfc423797205831a8" \
+  "ND/ND_L.xml 55970a38be2d43966a26596d626e69f982e90f2ffa73bfe5d42604adc1847b88" \
+  "ND/ND_R.xml 8f2d134a76e9f214d6f44887ad61837ad3c064b9b974504ad7afa558c5127f1c" \
+  "ND/res/ND.ac 172e3bcdbee82433095d25d1d3899f721cbf8d6ea88e1e3a2e880cc8216a13cc" \
+  "ND/res/ND_R.ac 781dee1bebd4fb8ebf5916c56c4bdd7e2c5d0686dfff8ef9203fde5dc1178ff1" \
+  "PFD/PFD1.xml 51c9b6b7bba9f551a94ae326b905ead4fc03c6aaafea7a463923a817f922ff14" \
+  "PFD/PFD2.xml d9df8c949d11910b39c2fb6c256d86bee0398a11d38b311d107bc4a4afbe9276" \
+  "PFD/res/PFD1.ac f38ee1c9a2b56a96cc19c79c5ef880064d0006e152a906ed8b829c53a02b9004" \
+  "PFD/res/PFD2.ac f2a46370ab9066ed9efa5b66ffc903d65b4918ddaa48071fb7f4225b3a0ce2aa" \
+  "Upper-ECAM/Upper-ECAM.xml 893c41d81bfc4f4dd924eff3fc60a6676933795bb459b560d9ed3a8bceec37ed" \
+  "Upper-ECAM/res/Upper-ECAM.ac 30e1404d72a88483674e444131bdd5f187a3202c59361d095d66ac5eb854386a"
+for f in $(cd "$A320_RAW/Instruments" && find . -name "*.xml" -o -name "*.ac"); do
+  cmp -s "$A320_RAW/Instruments/$f" "$A320_DIR/$(basename "$f")" || cp -f "$A320_RAW/Instruments/$f" "$A320_DIR/$(basename "$f")"
+done
+
+# Pavement detail: three CC0 photo materials from ambientCG (public domain). Concrete grain
+# (Asphalt031, light aggregate), cement mottling (Concrete030), asphalt (Asphalt033), and the
+# grain's normal map. The zips are pinned by SHA-256.
+GROUND_RAW="$ROOT/Data/raw/ground"
+GROUND_DIR="$ROOT/Data/Bundle/Ground"
+mkdir -p "$GROUND_RAW" "$GROUND_DIR"
+for entry in "Concrete030 9101871625bde3ccf3c57ca7af4372196d9ca9f678c786b8de698a576784d403" \
+             "Asphalt031 f98114b8fb083fc65925c3b4568b131e37c9a23357d432a16e59676dbc69f964" \
+             "Asphalt033 c71801b342dbea594dbdd0bd2ddc0a6d13f813c923fca408b9f5b9ee5e58aba2"; do
+  id="${entry%% *}"; sum="${entry##* }"; zip="$GROUND_RAW/$id.zip"
+  if [ ! -f "$zip" ] || [ "$(shasum -a 256 "$zip" | awk '{print $1}')" != "$sum" ]; then
+    curl -fsSL --retry 2 -o "$zip.part" "https://ambientcg.com/get?file=${id}_1K-JPG.zip"
+    [ "$(shasum -a 256 "$zip.part" | awk '{print $1}')" = "$sum" ] || { echo "checksum mismatch for $id" >&2; exit 1; }
+    mv -f "$zip.part" "$zip"
+  fi
+  mkdir -p "$GROUND_RAW/$id" && unzip -oq "$zip" -d "$GROUND_RAW/$id"
+done
+cp -f "$GROUND_RAW/Asphalt031/Asphalt031_1K-JPG_Color.jpg" "$GROUND_DIR/concrete-grain.jpg"
+cp -f "$GROUND_RAW/Asphalt031/Asphalt031_1K-JPG_NormalGL.jpg" "$GROUND_DIR/grain-normal.jpg"
+cp -f "$GROUND_RAW/Concrete030/Concrete030_1K-JPG_Color.jpg" "$GROUND_DIR/cement.jpg"
+cp -f "$GROUND_RAW/Asphalt033/Asphalt033_1K-JPG_Color.jpg" "$GROUND_DIR/asphalt.jpg"
+
 # CFM56 recordings from the same A320 repository (Sounds/SASA/CFM56B, GPL-2.0): outside and
 # flight-deck sets. The app gets mono 16-bit copies named ext-* and ckpt-*.
 fetch_set "https://raw.githubusercontent.com/legoboyvdlp/A320-family/$A320_COMMIT/Sounds/SASA/CFM56B" "$A320_RAW/sounds" \

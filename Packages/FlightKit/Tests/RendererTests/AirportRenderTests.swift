@@ -23,6 +23,9 @@ struct AirportRenderTests {
         }
         let r = try SceneRenderer(device: device, aircraftModel: model, aircraftTextures: aircraft ? RendererTests.c172Dir : nil)
         r.settings = RenderSettings(upscaler: .off, renderScale: 1)
+        let g = RendererTests.repoRoot.appendingPathComponent("Data/Bundle/Ground")
+        try r.setGroundDetail(grain: g.appendingPathComponent("concrete-grain.jpg"), cement: g.appendingPathComponent("cement.jpg"),
+                              asphalt: g.appendingPathComponent("asphalt.jpg"), grainNormal: g.appendingPathComponent("grain-normal.jpg"))
         r.setTerrain(SceneryLibrary(directory: TerrainRenderTests.libraryURL), origin: site.frame.origin, flatten: site.overrides)
         let others = try ["KPHX", "KLAX"].map { try AirportSite.load(airportsURL.appendingPathComponent("\($0).json")) }
         let packs = SceneryLibrary(directory: TerrainRenderTests.libraryURL)

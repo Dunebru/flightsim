@@ -427,8 +427,8 @@ inline float3 concreteRunwayAlbedo(float2 uv, float2 size) {
     float tone = 0.94 + 0.12 * hash21(floor(uv / slab)) - 0.06;
     float stain = fbm(uv * 0.02, 3);
     float3 c = float3(0.34, 0.335, 0.32) * tone * (0.88 + 0.24 * stain);
-    float joint = 1.0 - smoothstep(0.03, 0.09, jointDistance(uv, slab));
-    c *= 1.0 - 0.3 * joint;
+    float joint = 1.0 - smoothstep(0.015, 0.04, jointDistance(uv, slab));
+    c *= 1.0 - 0.2 * joint;
     float halfLen = size.x * 0.5;
     float fromEnd = halfLen - abs(uv.x);
     float zone = smoothstep(150.0, 320.0, fromEnd) * (1.0 - smoothstep(650.0, 1000.0, fromEnd));
@@ -436,6 +436,21 @@ inline float3 concreteRunwayAlbedo(float2 uv, float2 size) {
     float streaks = fbm(uv * float2(0.05, 1.4), 3);
     float rubber = zone * lane * (0.45 + 0.55 * streaks);
     return mix(c, float3(0.05, 0.05, 0.05), saturate(rubber * 0.95));
+}
+
+/// Photographed detail (CC0, ambientCG), each channel levelled so 1 is its average: concrete
+/// aggregate grain on a 1.6 m tile, the cement's mid-scale mottling on 11 m, asphalt grain on
+/// 2.4 m. Mip-mapped, so it fades into the procedural tone with distance.
+inline float3 groundDetail(texture2d<float> t, float2 uvMetres) {
+    return float3(t.sample(kLinearRepeat, uvMetres / 1.6).r, t.sample(kLinearRepeat, uvMetres / 11.0).g,
+                  t.sample(kLinearRepeat, uvMetres / 2.4).b) * 2.0;
+}
+
+/// The grain's surface relief as a normal (z up), strongest close to the eye.
+inline float3 groundNormal(texture2d<float> t, float2 uvMetres, float distance) {
+    float3 n = t.sample(kLinearRepeat, uvMetres / 1.6).xyz * 2.0 - 1.0;
+    float k = 0.55 * saturate(1.0 - distance / 250.0);
+    return normalize(float3(n.xy * k, 1.0));
 }
 
 inline float3 pavementAlbedo(float2 uv, bool asphalt, float distance) {
@@ -449,8 +464,8 @@ inline float3 pavementAlbedo(float2 uv, bool asphalt, float distance) {
     float3 c = float3(0.36, 0.35, 0.33) * tone * (0.9 + 0.2 * fbm(uv * 0.015, 3));
     float stains = smoothstep(0.62, 0.8, fbm(uv * 0.08 + 7.0, 3));
     c = mix(c, c * 0.55, stains * 0.6);
-    float joint = (1.0 - smoothstep(0.02, 0.05, jointDistance(uv, slab))) * saturate(1.0 - distance / 250.0);
-    return c * (1.0 - 0.22 * joint);
+    float joint = (1.0 - smoothstep(0.012, 0.03, jointDistance(uv, slab))) * saturate(1.0 - distance / 140.0);
+    return c * (1.0 - 0.18 * joint);
 }
 
 /// Generic facades: uv.x metres along the wall, uv.y metres up. Returns albedo; sets roughness
@@ -598,7 +613,9 @@ fragment GBufferOut sceneFragment(VertexOut in [[stage_in]],
                                   depth2d<float> shadowMap [[texture(3)]],
                                   texture2d<float> nightLights [[texture(5)]],
                                   depth2d<float> worldShadowMap [[texture(6)]],
-                                  texture2d<float> cloudShadowMap [[texture(7)]])
+                                  texture2d<float> cloudShadowMap [[texture(7)]],
+                                  texture2d<float> groundDetailMap [[texture(8)]],
+                                  texture2d<float> groundNormalMap [[texture(9)]])
 {
     float kind = d.material.w;
     float3 N = normalize(in.normal);
@@ -646,8 +663,12 @@ fragment GBufferOut sceneFragment(VertexOut in [[stage_in]],
             roughness = mix(roughness, 0.07 + 0.15 * saturate(distance / 15000.0), water);
         }
     } else if (kind == kKindRunway) {
-        albedo = d.emissive.z > 0.5 ? concreteRunwayAlbedo(in.uv, d.emissive.xy) : runwayAlbedo(in.uv, d.emissive.xy);
-        N = float3(0, 0, 1);
+        bool concrete = d.emissive.z > 0.5;
+        albedo = concrete ? concreteRunwayAlbedo(in.uv, d.emissive.xy) : runwayAlbedo(in.uv, d.emissive.xy);
+        float3 gd = groundDetail(groundDetailMap, in.uv);
+        albedo *= concrete ? clamp(mix(1.0, gd.x * gd.y, 0.85), 0.5, 1.6) : clamp(gd.z, 0.6, 1.5);
+        N = groundNormal(groundNormalMap, in.uv, distance);
+        roughness = concrete ? 0.88 : 0.92;
     } else if (kind == kKindMarking) {
         // Atlas paint (runway numbers and bars) is masked by the atlas; plain paint is solid.
         if (d.material.z > 0.5) {
@@ -658,8 +679,11 @@ fragment GBufferOut sceneFragment(VertexOut in [[stage_in]],
         albedo = d.baseColor.rgb * (0.88 + 0.2 * wear);
         N = float3(0, 0, 1);
     } else if (kind == kKindPavement) {
-        albedo = pavementAlbedo(in.uv, d.emissive.x > 0.5, distance);
-        N = float3(0, 0, 1);
+        bool asphalt = d.emissive.x > 0.5;
+        albedo = pavementAlbedo(in.uv, asphalt, distance);
+        float3 gd = groundDetail(groundDetailMap, in.uv);
+        albedo *= asphalt ? clamp(gd.z, 0.6, 1.5) : clamp(mix(1.0, gd.x * gd.y, 0.85), 0.5, 1.6);
+        N = groundNormal(groundNormalMap, in.uv, distance);
     } else if (kind == kKindParked) {
         // Generic liveries: white fuselage with a window line and a grey belly, the fin and
         // engines in one of eight colours. No real airline's marks.

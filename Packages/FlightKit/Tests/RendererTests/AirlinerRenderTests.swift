@@ -1,6 +1,8 @@
 import Aircraft
 import Airports
 import Foundation
+import ImageIO
+import CoreGraphics
 import Metal
 import Testing
 import simd
@@ -69,6 +71,20 @@ struct AirlinerRenderTests {
         s.instrumentValues = A320Model.readings(leftAileron: 0, rightAileron: 0, elevator: 0, rudder: 0, flaps: 0, speedbrake: 0,
                                                 steering: 0, gear: 1, compression: .zero, wheelSpeed: .zero, n1: 20, reverser: 0)
         print("gate \(ref): stop point \(placement.position), heading \(placement.heading)")
+        // The screens, from the pages the display test draws (when it has run).
+        let renders = RendererTests.repoRoot.appendingPathComponent("artifacts/renders")
+        for (screen, page) in [("pfd1", "pfd"), ("pfd2", "pfd"), ("nd1", "nd"), ("nd2", "nd"), ("ewd", "ewd"), ("sd", "sd")] {
+            guard let src = CGImageSourceCreateWithURL(renders.appendingPathComponent("display-\(page).png") as CFURL, nil),
+                  let img = CGImageSourceCreateImageAtIndex(src, 0, nil) else { continue }
+            let n = img.width
+            var px = [UInt8](repeating: 0, count: n * n * 4)
+            px.withUnsafeMutableBytes { b in
+                let ctx = CGContext(data: b.baseAddress, width: n, height: n, bitsPerComponent: 8, bytesPerRow: n * 4,
+                                    space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+                ctx?.draw(img, in: CGRect(x: 0, y: 0, width: n, height: n))
+            }
+            s.displays[screen] = DisplayImage(pixels: px, size: n, version: 1)
+        }
         let p = s.aircraftPosition
         let views: [(String, CameraPose)] = [
             ("a320-gate", CameraPose(position: p + left * 38 - fwd * 22 + SIMD3(0, 0, 14),
@@ -110,6 +126,53 @@ struct AirlinerRenderTests {
         try TerrainRenderTests.settle(r, s, limit: .seconds(60))
         r.resetHistory()
         try RendererTests.savePNG(try r.renderImage(s, width: 1600, height: 900), 1600, 900, name: "a320-gear-transit")
+    }
+
+    /// What the pilot sees from the chase camera (60 m behind, as the app), the gear at five
+    /// stages of retraction from below, and the apron surface close up.
+    @Test func a320Review() throws {
+        let site = try AirportSite.load(AirportRenderTests.airportsURL.appendingPathComponent("KPHX.json"))
+        let (r, base) = try AirportRenderTests.scene(site, aircraft: false)
+        let m = try A320Model.loadAnimated(from: Self.a320)
+        let nose = try #require(m.centre(ofObject: "NLGWheels"))
+        try r.setAircraft(m.model, textures: Self.a320, textureMap: A320Model.liveries[0].textures, hiddenParts: ["hidden"],
+                          animation: m, cullsBackFaces: true, noseWheel: (nose, Float((672 - 196.1) * 0.0254)))
+        let rw08 = site.layout.runways.first { $0.name == "08/26" }!
+        let f = site.runwayFrame(rw08)
+        let at = f.point(rw08.ends[0].displacedThreshold + 400, 0)
+        let h = f.heading * .pi / 180
+        let fwd = SIMD3(sin(h), cos(h), 0.0), left = SIMD3(-cos(h), sin(h), 0.0)
+        var s = base
+        s.showAircraft = true
+        s.aircraftHeading = h
+        s.aircraftPivotHeight = (-40 - -142) * 0.0254
+        func readings(gear: Double, n1: Double = 25) -> [String: Double] {
+            A320Model.readings(leftAileron: 0, rightAileron: 0, elevator: 0, rudder: 0, flaps: 0, speedbrake: 0, steering: 0,
+                               gear: gear, compression: gear > 0.99 ? SIMD3(repeating: 0.4) : .zero, wheelSpeed: .zero, n1: n1, reverser: 0)
+        }
+        func shot(_ name: String, _ eye: SIMD3<Double>, _ look: SIMD3<Double>, fov: Double = 50) throws {
+            s.cameraPose = CameraPose(position: eye, forward: simd_normalize(look - eye), up: SIMD3(0, 0, 1), fovY: fov * .pi / 180)
+            r.exposureAdaptation = 1
+            try TerrainRenderTests.settle(r, s, limit: .seconds(60))
+            r.resetHistory()
+            try RendererTests.savePNG(try r.renderImage(s, width: 1600, height: 900), 1600, 900, name: name)
+        }
+        let ground = site.onSurface(at)
+        s.aircraftPosition = ground
+        s.instrumentValues = readings(gear: 1)
+        let p = ground + SIMD3(0, 0, 3)
+        try shot("review-chase", p - fwd * 58 + SIMD3(0, 0, 13), p + fwd * 6, fov: 55)
+        try shot("review-side", p + left * 40 + fwd * 4 + SIMD3(0, 0, 2), p + fwd * 2, fov: 50)
+        try shot("review-front", p + fwd * 38 - left * 14 + SIMD3(0, 0, 1.5), p + fwd * 6, fov: 50)
+        try shot("review-apron", ground + fwd * 30 + left * 20 + SIMD3(0, 0, 1.7), ground + fwd * 45 + left * 10, fov: 60)
+        // In the air, from below and to the side, the gear at five stages.
+        s.aircraftPosition = ground + SIMD3(0, 0, 60)
+        for g in [1.0, 0.75, 0.5, 0.25, 0.0] {
+            s.instrumentValues = readings(gear: g, n1: 80)
+            s.aircraftGearDown = g > 0.97
+            let q = s.aircraftPosition + SIMD3(0, 0, 2)
+            try shot(String(format: "review-gear-%03d", Int(g * 100)), q + left * 22 - fwd * 6 - SIMD3(0, 0, 9), q + fwd * 3, fov: 45)
+        }
     }
 
     /// The C172 outside and from the pilot's seat, after hiding FlightGear's helper objects.

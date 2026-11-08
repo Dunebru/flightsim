@@ -312,6 +312,21 @@ public struct AnimatedModel: Sendable {
             // Fixed geometry is "cabin" (a model inside the airframe); placed sub-models are
             // moved as a whole.
             for i in parsed.groups.indices where parsed.groups[i].part.isEmpty { parsed.groups[i].part = base.isEmpty ? staticPart : base }
+            // Parts named by `special` are not moved by an animation transform, so a placed
+            // sub-model's offset is baked into their vertices.
+            if placement != matrix_identity_double4x4 {
+                let pm = simd_float4x4(SIMD4<Float>(placement.columns.0), SIMD4<Float>(placement.columns.1),
+                                       SIMD4<Float>(placement.columns.2), SIMD4<Float>(placement.columns.3))
+                for i in parsed.groups.indices where !parsed.groups[i].part.hasPrefix("anim:") && parsed.groups[i].part != staticPart {
+                    parsed.groups[i].positions = parsed.groups[i].positions.map { p in
+                        let q = pm * SIMD4(p, 1)
+                        return SIMD3(q.x, q.y, q.z)
+                    }
+                    parsed.groups[i].normals = parsed.groups[i].normals.map { n in
+                        simd_normalize(SIMD3((pm * SIMD4(n, 0)).x, (pm * SIMD4(n, 0)).y, (pm * SIMD4(n, 0)).z))
+                    }
+                }
+            }
             model = model.groups.isEmpty ? parsed : model.merged(with: parsed)
         }
         for sub in root.children(named: "model") {
@@ -324,7 +339,8 @@ public struct AnimatedModel: Sendable {
                 func c(_ n: String) -> Double { o.text(of: n).flatMap(Double.init) ?? 0 }
                 m = m * FGAnimation.translation(FGAnimation.acFrame(SIMD3(c("x-m"), c("y-m"), c("z-m"))))
             }
-            try load(xml: subFile, directory: directory, placement: m, excluding: excluding)
+            try load(xml: subFile, directory: directory, placement: m, excluding: excluding, special: special,
+                     animate: animate, fixedSelects: fixedSelects)
         }
     }
 }

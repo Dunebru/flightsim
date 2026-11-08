@@ -34,7 +34,7 @@ nonisolated struct CameraRig {
     mutating func configure(forAircraft id: String) {
         if id == "A320" {
             // Origin under the flight model's centre of gravity: the nose tip about 17 m ahead.
-            eyeOffset = SIMD3(14.7, 0.53, 5.0)
+            eyeOffset = SIMD3(14.7, 0.53, 4.85)
             wingOffset = SIMD3(-3.07, -2.3, 4.6)
             wingLook = SIMD3(0.45, -1.0, -0.14)
             orbitDistance = 60

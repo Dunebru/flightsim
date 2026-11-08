@@ -239,6 +239,8 @@ public struct SceneDescription: Sendable {
     /// Height of the aircraft's centre of gravity above `aircraftPosition` (the ground plane of
     /// the model with its struts extended): the point the attitude turns it about.
     public var aircraftPivotHeight = 0.0
+    /// Live images for the aircraft's display screens (parts named "display:<name>").
+    public var displays: [String: DisplayImage] = [:]
     /// Readings for the aircraft's animated parts (instrument needles, yoke, pedals), by
     /// FlightGear property path.
     public var instrumentValues: [String: Double] = [:]
@@ -421,4 +423,16 @@ public struct FrameStats: Sendable, Equatable {
     public var frameCount = 0
 
     public init() {}
+}
+
+/// One screen's image: RGBA8 rows top first; `version` changes when the pixels do.
+public struct DisplayImage: Sendable {
+    public var pixels: [UInt8]
+    public var size: Int
+    public var version: Int
+    public init(pixels: [UInt8], size: Int, version: Int) {
+        self.pixels = pixels
+        self.size = size
+        self.version = version
+    }
 }

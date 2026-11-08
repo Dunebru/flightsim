@@ -1,7 +1,10 @@
 public import Aircraft
 public import Airports
 public import Foundation
+import ImageIO
+import CoreGraphics
 public import Metal
+import MetalKit
 import os
 import simd
 public import SimCore
@@ -124,6 +127,10 @@ public final class SceneRenderer {
     private let shadowCompactPipeline: any MTLRenderPipelineState
     public var worldShadows = true
     private let dummyTexture: any MTLTexture
+    /// Ground detail (r: concrete grain, g: cement mottling, b: asphalt grain; 0.5 = average)
+    /// and the grain's normal map.
+    private var groundDetail: any MTLTexture
+    private var groundNormal: any MTLTexture
     private let blackTexture: any MTLTexture
     private let markingAtlas: any MTLTexture
     private let groundBuffer: any MTLBuffer
@@ -140,6 +147,11 @@ public final class SceneRenderer {
     /// animation hides.
     private var partTransforms: [String: simd_float4x4] = [:]
     private var hiddenParts: Set<String> = []
+    /// Live screen images by display name, and the version each holds.
+    private var displayTextures: [String: any MTLTexture] = [:]
+    private var displayVersions: [String: Int] = [:]
+    /// Screen brightness (emission over the image), in the scene's light units.
+    public var displayBrightness: Float = 0.9
     /// The world shadow map's last redraw: where it was centred (scene frame), the sun, its half width.
     private var lastWorldShadow: (centre: SIMD3<Double>, sun: SIMD3<Float>, half: Double)?
     private var worldShadowRedraw = true
@@ -349,6 +361,17 @@ public final class SceneRenderer {
         guard let dummy = device.makeTexture(descriptor: dd) else { throw RendererError.resource("dummy") }
         dummy.replace(region: MTLRegionMake2D(0, 0, 1, 1), mipmapLevel: 0, withBytes: [UInt8](repeating: 255, count: 4), bytesPerRow: 4)
         dummyTexture = dummy
+        func flat(_ rgba: [UInt8]) throws -> any MTLTexture {
+            let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba8Unorm, width: 1, height: 1, mipmapped: false)
+            d.usage = .shaderRead
+            d.storageMode = .shared
+            guard let t = device.makeTexture(descriptor: d) else { throw RendererError.resource("flat texture") }
+            t.replace(region: MTLRegionMake2D(0, 0, 1, 1), mipmapLevel: 0, withBytes: rgba, bytesPerRow: 4)
+            return t
+        }
+        // Neutral until the photographed ground detail is set: average detail, flat normal.
+        groundDetail = try flat([128, 128, 128, 255])
+        groundNormal = try flat([128, 128, 255, 255])
         let bd = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .r8Unorm, width: 1, height: 1, mipmapped: false)
         bd.usage = .shaderRead
         bd.storageMode = .shared
@@ -500,6 +523,9 @@ public final class SceneRenderer {
             // The cabin and flight deck show only through the windows: not worth drawing from
             // more than 35 m (the A320's deck is 440,000 triangles).
             interiorVisible = simd_length(relative(aircraftWorld, to: camera)) < 35
+            for (name, image) in scene.displays where displayVersions[name] != image.version {
+                uploadDisplay(name, image)
+            }
             if let animation = aircraft.animation {
                 // Spinning parts (fans, wheels, propeller) turn at their property's rpm: keep
                 // each one's revolutions.
@@ -719,6 +745,9 @@ public final class SceneRenderer {
                 e.setVertexBytes(&u, length: MemoryLayout<FrameUniforms>.stride, index: 1)
                 for part in aircraft.parts where !part.isGlass && (scene.aircraftGearDown || !part.isGear) && part.variant != (scene.propellerSpinning ? "prop-slow" : "prop-fast") && !hiddenParts.contains(part.animated) && !part.interior {
                     var d = part.draw
+                    // Back faces only (for closed one-sided parts): the sunlit skin cannot then
+                    // shadow itself, which stepped along the fuselage where the light grazes it.
+                    e.setCullMode(part.twoSided ? .none : .back)
                     d.model = aircraftModel * (partTransforms[part.animated] ?? matrix_identity_float4x4)
                     e.setVertexBuffer(part.vertices, offset: 0, index: 0)
                     e.setVertexBytes(&d, length: MemoryLayout<DrawUniforms>.stride, index: 2)
@@ -755,6 +784,8 @@ public final class SceneRenderer {
             e.setFragmentTexture(blackTexture, index: 5)
             e.setFragmentTexture(worldShadowMap, index: 6)
             e.setFragmentTexture(cloud != nil ? cloudShadowMap : dummyTexture, index: 7)
+            e.setFragmentTexture(groundDetail, index: 8)
+            e.setFragmentTexture(groundNormal, index: 9)
             e.setRenderPipelineState(scenePipeline)
             e.setDepthStencilState(depthWrite)
             e.setCullMode(.none)
@@ -942,14 +973,29 @@ public final class SceneRenderer {
                 e.setDepthBias(0, slopeScale: 0, clamp: 0)
             }
             if let aircraft, scene.showAircraft {
-                for part in aircraft.parts where !part.isGlass && (scene.aircraftGearDown || !part.isGear) && part.variant != (scene.propellerSpinning ? "prop-slow" : "prop-fast") && !hiddenParts.contains(part.animated) && (!part.interior || interiorVisible) {
+                for part in aircraft.parts where (!part.isGlass || (part.isWindshield && !interiorVisible)) && (scene.aircraftGearDown || !part.isGear) && part.variant != (scene.propellerSpinning ? "prop-slow" : "prop-fast") && !hiddenParts.contains(part.animated) && (!part.interior || interiorVisible) {
                     var d = part.draw
+                    if part.isGlass {
+                        d.baseColor = SIMD4(0.03, 0.035, 0.045, 1)
+                        d.material = SIMD4(0.12, 0, 0, SurfaceKind.aircraft.rawValue)
+                    }
+                    var texture = part.texture
+                    if !part.display.isEmpty {
+                        // A screen: its live image, lit from within.
+                        texture = displayTextures[part.display]
+                        d.baseColor = texture == nil ? SIMD4(0.01, 0.01, 0.015, 1) : SIMD4(1, 1, 1, 1)
+                        d.material = SIMD4(0.25, 0, texture == nil ? 0 : 1, SurfaceKind.aircraft.rawValue)
+                        d.emissive = SIMD4(displayBrightness, displayBrightness, displayBrightness, 0.3)
+                    }
                     let pt = part.animated.isEmpty ? matrix_identity_float4x4 : (partTransforms[part.animated] ?? matrix_identity_float4x4)
                     d.model = aircraftModel * pt
                     // Last frame's pose of the part, so moving parts get true motion vectors.
                     d.prevModel = aircraftPrev * (part.animated.isEmpty ? pt : (previousPartTransforms[part.animated] ?? pt))
-                    e.setCullMode(part.twoSided ? .none : .front)   // AC3D fronts wind counter-clockwise; Metal's default front is clockwise
-                    draw(part.vertices, count: part.vertexCount, d, texture: part.texture)
+                    e.setCullMode(part.twoSided || !part.display.isEmpty ? .none : .front)   // AC3D fronts wind counter-clockwise; Metal's default front is clockwise
+                    // Screens lie flush with the panel's own dark glass: pulled toward the eye.
+                    if !part.display.isEmpty { e.setDepthBias(8, slopeScale: 4, clamp: 0) }   // reverse Z: larger is nearer
+                    draw(part.vertices, count: part.vertexCount, d, texture: texture)
+                    if !part.display.isEmpty { e.setDepthBias(0, slopeScale: 0, clamp: 0) }
                 }
                 e.setCullMode(.none)
             }
@@ -1021,7 +1067,7 @@ public final class SceneRenderer {
             if let aircraft, scene.showAircraft {
                 e.setRenderPipelineState(glassPipeline)
                 e.setDepthStencilState(depthTestOnly)
-                for part in aircraft.parts where part.isGlass && (scene.aircraftGearDown || !part.isGear) && part.variant != (scene.propellerSpinning ? "prop-slow" : "prop-fast") && !hiddenParts.contains(part.animated) && (!part.interior || interiorVisible) {
+                for part in aircraft.parts where part.isGlass && !(part.isWindshield && !interiorVisible) && (scene.aircraftGearDown || !part.isGear) && part.variant != (scene.propellerSpinning ? "prop-slow" : "prop-fast") && !hiddenParts.contains(part.animated) && (!part.interior || interiorVisible) {
                     var d = part.draw
                     let pt = part.animated.isEmpty ? matrix_identity_float4x4 : (partTransforms[part.animated] ?? matrix_identity_float4x4)
                     d.model = aircraftModel * pt
@@ -1464,6 +1510,58 @@ public final class SceneRenderer {
             e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
             e.endEncoding()
         }
+    }
+
+    private func uploadDisplay(_ name: String, _ image: DisplayImage) {
+        let n = image.size
+        guard image.pixels.count == n * n * 4 else { return }
+        if displayTextures[name]?.width != n {
+            let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba8Unorm_srgb, width: n, height: n, mipmapped: false)
+            d.usage = .shaderRead
+            d.storageMode = .shared
+            displayTextures[name] = device.makeTexture(descriptor: d)
+        }
+        image.pixels.withUnsafeBytes { b in
+            displayTextures[name]?.replace(region: MTLRegionMake2D(0, 0, n, n), mipmapLevel: 0, withBytes: b.baseAddress!, bytesPerRow: n * 4)
+        }
+        displayVersions[name] = image.version
+    }
+
+    /// Photographed pavement detail: three greyscale photos packed into one texture, each
+    /// levelled so its average reads 0.5, and the grain's normal map (OpenGL convention).
+    public func setGroundDetail(grain: URL, cement: URL, asphalt: URL, grainNormal: URL) throws {
+        func grey(_ url: URL, size: Int) throws -> [UInt8] {
+            guard let src = CGImageSourceCreateWithURL(url as CFURL, nil), let img = CGImageSourceCreateImageAtIndex(src, 0, nil),
+                  let ctx = CGContext(data: nil, width: size, height: size, bitsPerComponent: 8, bytesPerRow: size,
+                                      space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue)
+            else { throw RendererError.resource("ground detail \(url.lastPathComponent)") }
+            ctx.interpolationQuality = .high
+            ctx.draw(img, in: CGRect(x: 0, y: 0, width: size, height: size))
+            let p = ctx.data!.bindMemory(to: UInt8.self, capacity: size * size)
+            let v = Array(UnsafeBufferPointer(start: p, count: size * size))
+            let mean = max(Double(v.reduce(0) { $0 + Int($1) }) / Double(v.count), 1)
+            return v.map { UInt8(min(max(Double($0) * 128 / mean, 0), 255)) }
+        }
+        let n = 1024
+        let a = try grey(grain, size: n), b = try grey(cement, size: n), c = try grey(asphalt, size: n)
+        var rgba = [UInt8](repeating: 255, count: n * n * 4)
+        for i in 0..<(n * n) { rgba[i * 4] = a[i]; rgba[i * 4 + 1] = b[i]; rgba[i * 4 + 2] = c[i] }
+        let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba8Unorm, width: n, height: n, mipmapped: true)
+        d.usage = .shaderRead
+        guard let t = device.makeTexture(descriptor: d) else { throw RendererError.resource("ground detail") }
+        t.replace(region: MTLRegionMake2D(0, 0, n, n), mipmapLevel: 0, withBytes: rgba, bytesPerRow: n * 4)
+        let normal = try MTKTextureLoader(device: device).newTexture(URL: grainNormal, options: [
+            .SRGB: false, .generateMipmaps: true, .textureUsage: MTLTextureUsage.shaderRead.rawValue,
+            .textureStorageMode: MTLStorageMode.private.rawValue,
+        ])
+        if let cb = queue.makeCommandBuffer(), let blit = cb.makeBlitCommandEncoder() {
+            blit.generateMipmaps(for: t)
+            blit.endEncoding()
+            cb.commit()
+            cb.waitUntilCompleted()
+        }
+        groundDetail = t
+        groundNormal = normal
     }
 
     /// The catalogue stars to draw (from stars.bin).

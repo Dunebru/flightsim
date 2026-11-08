@@ -57,7 +57,14 @@ public enum A320Model {
     /// doors, struts, wheels, fans, flight controls, spoilers, slats, flaps, reversers).
     public static func loadAnimated(from directory: URL) throws -> AnimatedModel {
         var m = AnimatedModel()
-        let special: (String) -> String? = { ["hidden", "windshield"].contains(part($0)) ? part($0) : nil }
+        // Bracing that FlightGear swings with expressions (which are not read here): shown only
+        // while the gear is fully down, rather than left hanging out of the bays when it is up.
+        let bracing: Set<String> = ["SideStayL1", "SideStayR1", "SideStayL2", "SideStayR2", "MLGLockStayL2", "MLGLockStayR2", "NLGLockStay1", "NLGLockStay2",
+                                    "NLGDragStrutAssembly1", "NLGDragStrutAssembly2", "GearLDoorActuatorL", "GearLDoorActuatorR"]
+        let special: (String) -> String? = { name in
+            if bracing.contains(name) { return "gear" }
+            return ["hidden", "windshield"].contains(part(name)) ? part(name) : nil
+        }
         try m.load(xml: "fuselage.xml", directory: directory, staticPart: "airframe", special: special)
         var engines = matrix_identity_double4x4
         engines.columns.3 = SIMD4(SIMD3<Double>(engineOffset), 1)
@@ -67,8 +74,12 @@ public enum A320Model {
         if FileManager.default.fileExists(atPath: directory.appendingPathComponent("a320.flightdeck.xml").path) {
             var deck = matrix_identity_double4x4
             deck.columns.3 = SIMD4(FGAnimation.acFrame(SIMD3(-16.47411, -0.00015, -0.09483)), 1)
+            // The six screens (PFDs, NDs, E/WD, SD) are the sim's own drawn displays.
+            let screens = ["pfd1.screen": "display:pfd1", "pfd2.screen": "display:pfd2", "ND.screen": "display:nd1",
+                           "ND_R.screen": "display:nd2", "uecam.screen": "display:ewd", "lecam.screen": "display:sd",
+                           "uecam.screen2": "hidden"]
             try m.load(xml: "a320.flightdeck.xml", directory: directory, placement: deck,
-                       excluding: ["Instruments/"], staticPart: "cabin",
+                       excluding: ["IESI", "Effects/"], staticPart: "cabin", special: { screens[$0] },
                        animate: { Self.deckControls.contains($0.property) }, fixedSelects: true)
         }
         return m

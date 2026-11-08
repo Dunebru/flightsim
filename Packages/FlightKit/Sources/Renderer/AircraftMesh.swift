@@ -25,6 +25,11 @@ final class AircraftMesh {
         /// Inside the airframe (cockpit, flight deck): left out of the shadow map and when the
         /// camera is far outside.
         var interior = false
+        /// The windscreen: glass while the flight deck behind it is drawn, dark and opaque when
+        /// it is not (from far outside), so the empty nose does not show through.
+        var isWindshield = false
+        /// A display screen ("pfd1"): drawn with its live image, self-lit.
+        var display = ""
     }
 
     /// Animations for the parts that move (the cockpit's needles, yoke and pedals).
@@ -138,7 +143,10 @@ final class AircraftMesh {
                 // Untextured, lightly tinted: the painted window frames stay on the airframe.
                 draw.baseColor = SIMD4(0.55, 0.6, 0.62, 0.18)
             }
-            var roughness = min(max(sqrt(2 / (material.shininess + 2)), 0.18), 0.9)
+            // Paint, not chrome: FlightGear's high shininess values (its effects add their own
+            // reflection maps) made the airframe mirror the sky in blotches.
+            let interiorPart = animation?.isInterior(part: group.part) ?? false
+            var roughness = min(max(sqrt(2 / (material.shininess + 2)), interiorPart ? 0.18 : 0.38), 0.9)
             draw.material = SIMD4(roughness, 0, tex == nil || group.part == "windshield" ? 0 : 1, SurfaceKind.aircraft.rawValue)
             if isGlass && opaqueGlass {
                 // Dark, glossy, drawn opaque: an aircraft with nothing modelled behind its windows.
@@ -148,13 +156,15 @@ final class AircraftMesh {
                 draw.material = SIMD4(roughness, 0, 0, SurfaceKind.aircraft.rawValue)
             }
             // The cabin sees the sky only through its windows: about a third of it.
-            let inside = animation?.isInterior(part: group.part) ?? false
+            let inside = (animation?.isInterior(part: group.part) ?? false) || group.part.hasPrefix("display:")
             // FlightGear's panels carry emission for their lighting effects; a little of it
             // reads as backlit labels, all of it as a white wash.
             draw.emissive = SIMD4(material.emissive * 0.08, inside ? 0.3 : 0)
             parts.append(Part(vertices: buffer, vertexCount: verts.count, texture: tex, draw: draw, isGlass: isGlass,
                               isGear: group.part == "gear", variant: group.part.hasPrefix("prop-") ? group.part : "",
-                              animated: group.part.hasPrefix("anim:") ? group.part : "", twoSided: group.twoSided || !cullsBackFaces, interior: inside))
+                              animated: group.part.hasPrefix("anim:") ? group.part : "", twoSided: group.twoSided || !cullsBackFaces, interior: inside,
+                              isWindshield: group.part == "windshield",
+                              display: group.part.hasPrefix("display:") ? String(group.part.dropFirst(8)) : ""))
         }
     }
 }
