@@ -21,8 +21,15 @@ struct RendererTests {
 
     // MARK: Layout
 
-    @Test func gpuStructLayoutsMatchShaders() {
-        #expect(MemoryLayout<FrameUniforms>.stride == 6 * 64 + 10 * 16)
+    /// Every struct Swift hands the GPU has the size the compiled shaders expect (asked of the GPU,
+    /// so a field added on one side only fails here).
+    @Test func gpuStructLayoutsMatchShaders() throws {
+        let r = try SceneRenderer(device: try #require(Self.device), aircraftModel: nil, aircraftTextures: nil)
+        let gpu = try r.shaderStructSizes()
+        let swift = [MemoryLayout<FrameUniforms>.stride, MemoryLayout<DrawUniforms>.stride, MemoryLayout<CloudUniforms>.stride,
+                     lightingStateSize, MemoryLayout<PrecipUniforms>.stride, MemoryLayout<GPULight>.stride,
+                     MemoryLayout<LightUniforms>.stride]
+        #expect(gpu == swift, "GPU \(gpu) vs Swift \(swift)")
         #expect(MemoryLayout<DrawUniforms>.stride == 2 * 64 + 3 * 16)
         #expect(MemoryLayout<MeshVertex>.stride == 48)
         #expect(MemoryLayout<TerrainVertex>.stride == 20)

@@ -52,6 +52,14 @@ public struct FreeFlightSetupView: View {
         })
     }
 
+    /// What the report does in the flight, and what of it is not drawn yet.
+    private func weatherNote(_ raw: String) -> String {
+        guard let m = MetarParser.parse(raw) else { return "" }
+        var note = "Wind, temperature, pressure, clouds and visibility fly with you."
+        if m.weather.contains(where: { $0.contains("TS") }) { note += " Lightning is not drawn yet." }
+        return note
+    }
+
     private var profile: AircraftProfile {
         AircraftProfile.all.first { $0.id == settings.aircraftID } ?? .c172
     }
@@ -147,26 +155,27 @@ public struct FreeFlightSetupView: View {
                             }
                         }
                         section("Weather") {
-                            Toggle("Live weather", isOn: $settings.liveWeather)
-                                .tint(HUDStyle.engaged)
-                            if settings.liveWeather {
-                                if let metar {
-                                    Text(metar.raw.components(separatedBy: " RMK").first ?? metar.raw)
-                                        .font(.system(size: 12, weight: .medium, design: .monospaced))
-                                        .foregroundStyle(.white)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                    Text("Wind, gusts, temperature and pressure fly with you. Clouds and visibility are not drawn yet.")
-                                        .font(.system(size: 12))
-                                        .foregroundStyle(HUDStyle.secondaryText)
-                                } else {
-                                    Text(metarFailed ? "No report reachable: the flight will be clear and calm." : "Fetching the latest report...")
-                                        .font(.system(size: 12))
-                                        .foregroundStyle(HUDStyle.secondaryText)
+                            Picker(selection: $settings.weather) {
+                                ForEach(WeatherChoice.allCases, id: \.self) { choice in
+                                    Label(choice.label, systemImage: choice.symbol).tag(choice)
                                 }
-                            } else {
-                                Label("Clear and calm", systemImage: "sun.max.fill")
-                                    .font(.system(size: 15, weight: .medium))
+                            } label: {
+                                Text("Conditions").foregroundStyle(.white)
+                            }
+                            .pickerStyle(.menu)
+                            .tint(.white)
+                            if let raw = settings.weather == .live ? metar?.raw : settings.weather.metar(station: settings.airport) {
+                                Text(raw.components(separatedBy: " RMK").first ?? raw)
+                                    .font(.system(size: 12, weight: .medium, design: .monospaced))
                                     .foregroundStyle(.white)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                Text(weatherNote(raw))
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(HUDStyle.secondaryText)
+                            } else {
+                                Text(metarFailed ? "No report reachable: the flight will be clear and calm." : "Fetching the latest report...")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(HUDStyle.secondaryText)
                             }
                         }
                         .task(id: settings.airport) {

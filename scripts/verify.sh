@@ -119,8 +119,9 @@ run_on_sim() {
   data=$(xcrun simctl get_app_container "$udid" "$BUNDLE_ID" data 2>/dev/null || true)
   ready="$data/Library/Caches/flight-ready.txt"
   [ -n "$data" ] && rm -f "$ready"
+  # The weather is pinned too (a few cumulus) so the live report cannot change the result.
   run_logged "launch-hud-$label" xcrun simctl launch "$udid" "$BUNDLE_ID" -FlightStartScreen hud \
-    -FlightTimeUTC 2026-06-21T19:30:00Z
+    -FlightTimeUTC 2026-06-21T19:30:00Z -FlightMETAR "KPHX 211930Z 26008KT 10SM FEW060 24/04 A2990"
   local waited=0
   until [ -f "$ready" ] || [ "$waited" -ge 90 ]; do settle 3; waited=$((waited + 3)); done
   if [ ! -f "$ready" ]; then

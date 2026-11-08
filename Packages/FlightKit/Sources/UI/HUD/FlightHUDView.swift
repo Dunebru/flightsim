@@ -193,7 +193,11 @@ public struct FlightHUDView: View {
         }
         engine.physicsProbe = { s.physics?.state }
         // Live weather: the departure airport's METAR, when it can be fetched.
-        if settings.liveWeather {
+        if let raw = settings.forcedMetar, let m = MetarParser.parse(raw) {
+            s.weather = WeatherConditions(metar: m)
+        } else if let raw = settings.weather.metar(station: settings.airport), let m = MetarParser.parse(raw) {
+            s.weather = WeatherConditions(metar: m)
+        } else if settings.weather == .live {
             let icao = settings.airport
             Task { @MainActor in
                 if let m = await WeatherService.shared.metar(icao) { s.weather = WeatherConditions(metar: m) }

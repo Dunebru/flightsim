@@ -281,6 +281,7 @@ struct LightingState {
     float4 skyIrradiance;    // rgb, onto an upward-facing surface
     float4 sunAtCamera;      // rgb, sun illuminance after transmittance, onto a surface facing it
     float4 exposure;         // x: current exposure, y: target exposure
+    float4 fogColour;        // rgb: radiance of fog or mist lit by this light
 };
 
 kernel void lightingState(device LightingState &state [[buffer(0)]],
@@ -310,8 +311,13 @@ kernel void lightingState(device LightingState &state [[buffer(0)]],
     float earthShadow = raySphere(float3(0, 0, viewHeight), sunDir, kBottomRadius) >= 0.0 ? 0.0 : 1.0;
     float3 sun = u.sunIlluminance.rgb * sunT * earthShadow;
 
-    // Exposure that maps an 18% grey, horizontal surface under this light to mid grey.
+    // Exposure that maps an 18% grey, horizontal surface under this light to mid grey. Below a
+    // cloud deck that light is the overcast's: mostly diffuse, about a third of a clear day's.
     float3 total = E + sun * saturate(sunDir.z);
+    if (u.cloudLight.z < u.cloudShadowShift.y) {
+        float grey = dot(total, float3(0.2126, 0.7152, 0.0722)) * 0.33;
+        total = mix(E + sun * saturate(sunDir.z) * u.cloudLight.y, float3(grey), u.cloudLight.x);
+    }
     float lum = dot(total, float3(0.2126, 0.7152, 0.0722));
     // Partial adaptation, like an eye or a camera left on auto: full compensation would make
     // dusk look like noon. Calibrated so midday (luminance ~0.94 in these units, measured)
@@ -325,4 +331,6 @@ kernel void lightingState(device LightingState &state [[buffer(0)]],
     state.skyIrradiance = float4(E, 0.0);
     state.sunAtCamera = float4(sun, 0.0);
     state.exposure = float4(current, target, 0.0, 0.0);
+    // Mist scatters the light falling on it about as a white wall would.
+    state.fogColour = float4(total * 0.8 / kPi, 0.0);
 }

@@ -24,7 +24,27 @@ struct FrameUniforms {
     float4 shadowParams;            // x: enabled, y: depth bias, z: 1/shadow map size
     float4 worldShadowParams;       // x: enabled, y: depth bias, z: 1/map size, w: texel size (m)
     float4 debug;                   // x: show ground (1/0)
+    float4 cloudShadow;             // x: enabled, y: 1/map extent (1/m), zw: map centre from the camera (m)
+    float4 cloudShadowShift;        // x: map reference height, y: lowest cloud base (m above sea level),
+                                    // zw: horizontal shift toward the sun per metre of height
+    float4 cloudLight;              // x: sky fraction covered by cloud, y: mean sun transmittance,
+                                    // z: camera height above sea level, w: highest cloud top (m)
+    float4 fog;                     // x: extinction at the field (1/m), y: scale height (m),
+                                    // z: field height, w: camera height (m above sea level)
+    float4 weather;                 // x: how wet the ground is (0-1)
 };
+
+/// Optical depth of low-level fog, mist or haze from the camera along a unit direction to a
+/// distance (m). Its density falls off exponentially with height above the field, so the
+/// integral has a closed form.
+inline float fogDepth(float3 dir, float dist, constant FrameUniforms &u) {
+    if (u.fog.x <= 0.0) return 0.0;
+    float H = u.fog.y;
+    float atCamera = u.fog.x * exp(-clamp(u.fog.w - u.fog.z, -200.0, 20.0 * H) / H);
+    float k = clamp(dir.z * dist / H, -60.0, 60.0);
+    if (abs(k) < 1e-3) return atCamera * dist;
+    return atCamera * H * (1.0 - exp(-k)) / dir.z;
+}
 
 // MARK: - Atmosphere model (Earth, after Hillaire 2020 "A Scalable and Production Ready Sky
 // and Atmosphere Rendering Technique"). Units: kilometres.

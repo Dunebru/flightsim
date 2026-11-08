@@ -65,6 +65,7 @@ vertex LightOut lightVertex(uint vid [[vertex_id]], uint iid [[instance_id]],
     float2 screenUV = float2(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
     float slice = sqrt(saturate(dist * 0.001 / u.atmosphere.z));
     float transmittance = aerial.sample(kLinearClamp, float3(screenUV, slice), level(0.0)).a;
+    transmittance *= exp(-fogDepth(-toCamera, dist, u));
     // Spread over a Gaussian core of radius r pixels: integral of exp(-2 d^2) is pi / 2.
     float r = l.params.z;
     float pixelSolidAngle = l.params.y * l.params.y;

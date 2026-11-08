@@ -45,6 +45,42 @@ public final class SceneRenderer {
     /// City buildings are drawn within this distance (metres).
     public var cityDrawDistance: Double = 6_000
     private let shadowPipeline: any MTLRenderPipelineState
+    // Clouds
+    private let cloudNoisePipeline: any MTLComputePipelineState
+    private let cloudHistogramPipeline: any MTLComputePipelineState
+    private let cloudEqualizePipeline: any MTLComputePipelineState
+    private let cloudMarchPipeline: any MTLComputePipelineState
+    private let cloudCompositePipeline: any MTLRenderPipelineState
+    /// 128^3 shape and detail noise, made on the first cloudy frame.
+    private let cloudNoise: any MTLTexture
+    private var cloudNoiseReady = false
+    /// Accumulated wind drift of the cloud field (m) and the scene time it was last advanced.
+    private var cloudDrift = SIMD2<Double>.zero
+    private var cloudClock: Date?
+    private struct CloudTargets {
+        let size: SIMD2<Int>
+        /// This frame's march.
+        let radiance: any MTLTexture, distance: any MTLTexture
+        /// Accumulated results, ping-ponged.
+        let history: [any MTLTexture], historyDistance: [any MTLTexture]
+    }
+    private var cloudTargets: CloudTargets?
+    private var cloudHistoryIndex = 0
+    private var cloudHistoryLayers: [CloudLayer] = []
+    private let cloudResolvePipeline: any MTLComputePipelineState
+    private let cloudShadowPipeline: any MTLComputePipelineState
+    // Rain and snow
+    private let precipPipeline: any MTLRenderPipelineState
+    /// How far the falling drops have moved through the world (m), and the scene time of that.
+    private var precipFall = SIMD3<Double>.zero
+    private var precipClock: Date?
+    /// Sun transmittance through the clouds over `cloudShadowExtent` around the camera.
+    private let cloudShadowMap: any MTLTexture
+    public var cloudShadowExtent: Double = 24_000
+    /// Clouds are marched at this fraction of the render resolution on each axis.
+    public var cloudResolutionScale = 0.5
+    /// Clouds fade out toward this distance (m).
+    public var cloudRange: Double = 60_000
     private let tonemapPipeline: any MTLRenderPipelineState
     private var finalPipelines: [MTLPixelFormat.RawValue: any MTLRenderPipelineState] = [:]
     private let library: any MTLLibrary
@@ -139,6 +175,12 @@ public final class SceneRenderer {
         skyViewPipeline = try compute("skyViewLUT")
         aerialPipeline = try compute("aerialPerspective")
         lightingPipeline = try compute("lightingState")
+        cloudNoisePipeline = try compute("cloudNoise")
+        cloudHistogramPipeline = try compute("cloudNoiseHistogram")
+        cloudEqualizePipeline = try compute("cloudNoiseEqualize")
+        cloudMarchPipeline = try compute("cloudMarch")
+        cloudResolvePipeline = try compute("cloudResolve")
+        cloudShadowPipeline = try compute("cloudShadowMap")
 
         func render(_ vertex: String, _ fragment: String?, colors: [MTLPixelFormat], depth: MTLPixelFormat?,
                     configure: (MTLRenderPipelineDescriptor) -> Void = { _ in }) throws -> any MTLRenderPipelineState {
@@ -192,9 +234,27 @@ public final class SceneRenderer {
             c.destinationAlphaBlendFactor = .oneMinusSourceAlpha
             d.colorAttachments[1].writeMask = []
         }
+        precipPipeline = try render("precipVertex", "precipFragment", colors: gbuffer, depth: Self.depthFormat) { d in
+            let c = d.colorAttachments[0]!
+            c.isBlendingEnabled = true
+            c.sourceRGBBlendFactor = .one
+            c.destinationRGBBlendFactor = .oneMinusSourceAlpha
+            c.sourceAlphaBlendFactor = .one
+            c.destinationAlphaBlendFactor = .oneMinusSourceAlpha
+            d.colorAttachments[1].writeMask = []
+        }
         shadowPipeline = try render("shadowVertex", nil, colors: [], depth: Self.depthFormat)
         shadowCompactPipeline = try render("shadowCompactVertex", nil, colors: [], depth: Self.depthFormat)
         tonemapPipeline = try render("fullscreenVertex", "tonemapFragment", colors: [Upscaler.colorFormat], depth: nil)
+        // Clouds blend as scene * transmittance + cloud light.
+        cloudCompositePipeline = try render("fullscreenVertex", "cloudCompositeFragment", colors: [Self.colorFormat], depth: nil) { d in
+            let c = d.colorAttachments[0]!
+            c.isBlendingEnabled = true
+            c.sourceRGBBlendFactor = .one
+            c.destinationRGBBlendFactor = .sourceAlpha
+            c.sourceAlphaBlendFactor = .zero
+            c.destinationAlphaBlendFactor = .one
+        }
 
         func depthState(_ compare: MTLCompareFunction, write: Bool) throws -> any MTLDepthStencilState {
             let d = MTLDepthStencilDescriptor()
@@ -228,6 +288,11 @@ public final class SceneRenderer {
         ad.storageMode = .private
         guard let aerial = device.makeTexture(descriptor: ad) else { throw RendererError.resource("aerial volume") }
         aerialVolume = aerial
+        ad.pixelFormat = .rgba8Unorm
+        ad.width = 128; ad.height = 128; ad.depth = 128
+        guard let noise = device.makeTexture(descriptor: ad) else { throw RendererError.resource("cloud noise") }
+        cloudNoise = noise
+        cloudShadowMap = try texture2D(.r16Float, 256, 256, rw)
         guard let lb = device.makeBuffer(length: lightingStateSize, options: .storageModeShared) else {
             throw RendererError.resource("lighting buffer")
         }
@@ -332,6 +397,13 @@ public final class SceneRenderer {
         u.renderSize = SIMD4(Float(renderSize.x), Float(renderSize.y), 1 / Float(renderSize.x), 1 / Float(renderSize.y))
         u.jitter = SIMD4(jitter.x, jitter.y, 0, 0)
         u.debug = SIMD4(scene.showGround ? 1 : 0, 0, 0, 0)
+        // Mist from the reported visibility (Koschmieder: 3.912 / V at the field), fading in
+        // below 15 km; clearer days are the atmosphere model's own haze.
+        let v = max(scene.visibilityMetres, 50)
+        let mist = 3.912 / v * min(max((15_000 - v) / 5_000, 0), 1)
+        u.fog = SIMD4(Float(mist), Float(max(scene.fogScaleHeight, 20)), Float(scene.origin.height),
+                      Float(scene.origin.height + pose.position.z))
+        u.weather = SIMD4(Float(min(max(scene.wetness, 0), 1)), 0, 0, 0)
 
         // Draws. With terrain loaded the procedural ground is only a fallback past the scenery's
         // edge, so it sits just below sea level (under all the terrain, whose heights are clamped
@@ -385,6 +457,13 @@ public final class SceneRenderer {
             }
         }
 
+        var cloud: CloudUniforms?
+        if !scene.clouds.isEmpty {
+            cloud = prepareClouds(scene, pose: pose, uniforms: &u)
+        } else {
+            cloudClock = nil
+        }
+
         // MARK: Encode
         let encodeAtmosphere = signposter.beginInterval("Encode atmosphere")
         let cbAtmosphere = makeCommandBuffer(label: "Atmosphere")
@@ -405,6 +484,7 @@ public final class SceneRenderer {
             c.setTexture(skyViewLUT, index: 0)
             c.setTexture(transmittanceLUT, index: 1)
             c.dispatchThreads(MTLSize(width: 1, height: 1, depth: 1), threadsPerThreadgroup: MTLSize(width: 1, height: 1, depth: 1))
+            if let cloud { encodeCloudShadows(c, cloud: cloud, uniforms: u) }
             c.endEncoding()
         }
         // Terrain: upload finished tiles (mipmaps go into this command buffer) and select the
@@ -557,6 +637,7 @@ public final class SceneRenderer {
             e.setFragmentTexture(transmittanceLUT, index: 4)
             e.setFragmentTexture(blackTexture, index: 5)
             e.setFragmentTexture(worldShadowMap, index: 6)
+            e.setFragmentTexture(cloud != nil ? cloudShadowMap : dummyTexture, index: 7)
             e.setRenderPipelineState(scenePipeline)
             e.setDepthStencilState(depthWrite)
             e.setCullMode(.none)
@@ -745,6 +826,37 @@ public final class SceneRenderer {
         }
         cbScene.commit()
         signposter.endInterval("Encode scene", encodeScene)
+        if let cloud {
+            encodeClouds(scene, cloud: cloud, uniforms: u, targets: t, reset: reset)
+        }
+        // Rain and snow after the clouds (which would otherwise cover drops seen against the sky),
+        // depth-tested against the scene.
+        if var p = precipUniforms(scene, pose: pose, cameraMoved: camera - previousCam, reset: reset,
+                                  pixelAngle: 2 * tan(fov / 2) / Float(renderSize.y)),
+           let precip = scene.precipitation {
+            let cb = makeCommandBuffer(label: "Precipitation")
+            let pp = MTLRenderPassDescriptor()
+            pp.colorAttachments[0].texture = t.hdr
+            pp.colorAttachments[0].loadAction = .load
+            pp.colorAttachments[0].storeAction = .store
+            pp.colorAttachments[1].texture = t.motion
+            pp.colorAttachments[1].loadAction = .load
+            pp.colorAttachments[1].storeAction = .store
+            pp.depthAttachment.texture = t.depth
+            pp.depthAttachment.loadAction = .load
+            pp.depthAttachment.storeAction = .store
+            if let e = cb.makeRenderCommandEncoder(descriptor: pp) {
+                e.setRenderPipelineState(precipPipeline)
+                e.setDepthStencilState(depthTestOnly)
+                e.setVertexBytes(&u, length: MemoryLayout<FrameUniforms>.stride, index: 1)
+                e.setVertexBytes(&p, length: MemoryLayout<PrecipUniforms>.stride, index: 2)
+                e.setFragmentBytes(&p, length: MemoryLayout<PrecipUniforms>.stride, index: 2)
+                e.setFragmentBuffer(lightingBuffer, offset: 0, index: 3)
+                e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: precip.dropCount)
+                e.endEncoding()
+            }
+            cb.commit()
+        }
 
         let encodePost = signposter.beginInterval("Encode post")
         let cbPost = makeCommandBuffer(label: "Post")
@@ -913,6 +1025,225 @@ public final class SceneRenderer {
             box.endStage(frame: frame, start: buffer.gpuStartTime, end: buffer.gpuEndTime)
         }
         return cb
+    }
+
+    /// This frame's cloud uniforms, and the cloud fields of the frame uniforms (shadow map
+    /// placement, overcast light). Advances the wind drift.
+    private func prepareClouds(_ scene: SceneDescription, pose: CameraPose, uniforms u: inout FrameUniforms) -> CloudUniforms {
+        // The field drifts with the wind in scene time (still in a paused or fixed-date scene).
+        if let last = cloudClock {
+            let dt = min(max(scene.date.timeIntervalSince(last), 0), 1)
+            cloudDrift -= scene.cloudWind * dt
+        }
+        cloudClock = scene.date
+        var cu = CloudUniforms()
+        cu.setLayers(scene.clouds)
+        let cameraHeight = scene.origin.height + pose.position.z
+        cu.camera = SIMD4(Float(pose.position.x), Float(pose.position.y), 0, Float(cameraHeight))
+        cu.wind.x = Float(cloudDrift.x)
+        cu.wind.y = Float(cloudDrift.y)
+        cu.wind.w = Float(frameIndex % 1024)
+        // March as far as the layers can be seen over the curve of the Earth (a low overcast
+        // reaches the horizon), within the range limit.
+        let base = Double(cu.bounds.x), top = Double(cu.bounds.y)
+        let r = 6_371_000.0
+        let reach = (2 * r * abs(cameraHeight - base)).squareRoot() + (2 * r * abs(cameraHeight - top)).squareRoot()
+        cu.bounds.z = Float(min(max(reach + 20_000, 40_000), cloudRange))
+
+        // Shadow map: centred on the camera, snapped to whole texels so it does not shimmer.
+        let texel = cloudShadowExtent / Double(cloudShadowMap.width)
+        let camera2 = SIMD2<Double>(pose.position.x, pose.position.y)
+        let centre = (camera2 / texel).rounded(.toNearestOrEven) * texel - camera2
+        let sun = SIMD3<Double>(Double(u.sunDirection.x), Double(u.sunDirection.y), Double(u.sunDirection.z))
+        let sz = max(sun.z, 0.08)
+        u.cloudShadow = SIMD4(sun.z > -0.05 ? 1 : 0, Float(1 / cloudShadowExtent), Float(centre.x), Float(centre.y))
+        u.cloudShadowShift = SIMD4(Float(scene.origin.height), Float(base), Float(sun.x / sz), Float(sun.y / sz))
+        // How much sky the layers hide together (thin cirrus barely dims the day).
+        var clear = 1.0
+        for l in scene.clouds.sorted(by: { $0.baseMetres < $1.baseMetres }).prefix(3) {
+            clear *= 1 - min(max(l.coverage, 0), 1) * (l.kind == .cirrus ? 0.15 : 1)
+        }
+        let cover = 1 - clear
+        u.cloudLight = SIMD4(Float(cover), Float(1 - cover * 0.85), Float(cameraHeight), Float(top))
+        return cu
+    }
+
+    /// Makes the cloud noise on the first cloudy frame and the cloud shadow map every frame.
+    private func encodeCloudShadows(_ c: any MTLComputeCommandEncoder, cloud: CloudUniforms, uniforms: FrameUniforms) {
+        var u = uniforms, cu = cloud
+        if !cloudNoiseReady, let raw = device.makeTexture(descriptor: {
+            let d = MTLTextureDescriptor()
+            d.textureType = .type3D
+            d.pixelFormat = .rgba8Unorm
+            d.width = cloudNoise.width; d.height = cloudNoise.height; d.depth = cloudNoise.depth
+            d.usage = [.shaderRead, .shaderWrite]
+            d.storageMode = .private
+            return d
+        }()), let bins = device.makeBuffer(length: 256 * 4, options: .storageModeShared) {
+            memset(bins.contents(), 0, 256 * 4)
+            let n = cloudNoise.width
+            let grid = MTLSize(width: n, height: n, depth: n), group = MTLSize(width: 4, height: 4, depth: 4)
+            c.setComputePipelineState(cloudNoisePipeline)
+            c.setTexture(raw, index: 0)
+            c.dispatchThreads(grid, threadsPerThreadgroup: group)
+            c.setComputePipelineState(cloudHistogramPipeline)
+            c.setBuffer(bins, offset: 0, index: 0)
+            c.dispatchThreads(grid, threadsPerThreadgroup: group)
+            c.setComputePipelineState(cloudEqualizePipeline)
+            c.setTexture(cloudNoise, index: 1)
+            c.dispatchThreads(grid, threadsPerThreadgroup: group)
+            cloudNoiseReady = true
+        }
+        c.setComputePipelineState(cloudShadowPipeline)
+        c.setTexture(cloudShadowMap, index: 0)
+        c.setTexture(cloudNoise, index: 1)
+        c.setBytes(&u, length: MemoryLayout<FrameUniforms>.stride, index: 0)
+        c.setBytes(&cu, length: MemoryLayout<CloudUniforms>.stride, index: 1)
+        let n = cloudShadowMap.width
+        c.dispatchThreads(MTLSize(width: n, height: n, depth: 1), threadsPerThreadgroup: MTLSize(width: 8, height: 8, depth: 1))
+    }
+
+    /// Marches the cloud layers at reduced resolution, resolves them over time and blends them
+    /// into the HDR image.
+    private func encodeClouds(_ scene: SceneDescription, cloud: CloudUniforms, uniforms: FrameUniforms, targets t: Targets,
+                              reset: Bool) {
+        var u = uniforms, cu = cloud
+        let cb = makeCommandBuffer(label: "Clouds")
+        let scale = min(max(cloudResolutionScale, 0.25), 1)
+        let size = SIMD2(max(1, Int((Double(t.renderSize.x) * scale).rounded())),
+                         max(1, Int((Double(t.renderSize.y) * scale).rounded())))
+        var historyValid = !reset && cloudHistoryLayers == scene.clouds
+        if cloudTargets?.size != size {
+            func make(_ format: MTLPixelFormat) -> any MTLTexture {
+                let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: format, width: size.x, height: size.y, mipmapped: false)
+                d.usage = [.shaderRead, .shaderWrite]
+                d.storageMode = .private
+                return device.makeTexture(descriptor: d)!
+            }
+            cloudTargets = CloudTargets(size: size, radiance: make(.rgba16Float), distance: make(.r32Float),
+                                        history: [make(.rgba16Float), make(.rgba16Float)],
+                                        historyDistance: [make(.r32Float), make(.r32Float)])
+            historyValid = false
+        }
+        cloudHistoryLayers = scene.clouds
+        guard let ct = cloudTargets, let c = cb.makeComputeCommandEncoder() else { return }
+        cu.size = SIMD4(Float(size.x), Float(size.y), 1 / Float(size.x), 1 / Float(size.y))
+        cu.bounds.w = historyValid ? 0.9 : 0
+        c.setComputePipelineState(cloudMarchPipeline)
+        c.setTexture(ct.radiance, index: 0)
+        c.setTexture(ct.distance, index: 1)
+        c.setTexture(cloudNoise, index: 2)
+        c.setTexture(t.depth, index: 3)
+        c.setBytes(&u, length: MemoryLayout<FrameUniforms>.stride, index: 0)
+        c.setBytes(&cu, length: MemoryLayout<CloudUniforms>.stride, index: 1)
+        c.setBuffer(lightingBuffer, offset: 0, index: 2)
+        let grid = MTLSize(width: size.x, height: size.y, depth: 1), group = MTLSize(width: 8, height: 8, depth: 1)
+        c.dispatchThreads(grid, threadsPerThreadgroup: group)
+        let previous = cloudHistoryIndex, next = 1 - cloudHistoryIndex
+        c.setComputePipelineState(cloudResolvePipeline)
+        c.setTexture(ct.radiance, index: 0)
+        c.setTexture(ct.distance, index: 1)
+        c.setTexture(ct.history[previous], index: 2)
+        c.setTexture(ct.historyDistance[previous], index: 3)
+        c.setTexture(ct.history[next], index: 4)
+        c.setTexture(ct.historyDistance[next], index: 5)
+        c.dispatchThreads(grid, threadsPerThreadgroup: group)
+        c.endEncoding()
+        cloudHistoryIndex = next
+
+        let pass = MTLRenderPassDescriptor()
+        pass.colorAttachments[0].texture = t.hdr
+        pass.colorAttachments[0].loadAction = .load
+        pass.colorAttachments[0].storeAction = .store
+        if let e = cb.makeRenderCommandEncoder(descriptor: pass) {
+            e.setRenderPipelineState(cloudCompositePipeline)
+            e.setFragmentBytes(&u, length: MemoryLayout<FrameUniforms>.stride, index: 1)
+            e.setFragmentTexture(ct.history[next], index: 0)
+            e.setFragmentTexture(ct.historyDistance[next], index: 1)
+            e.setFragmentTexture(t.depth, index: 2)
+            e.setFragmentTexture(aerialVolume, index: 3)
+            e.setFragmentBuffer(lightingBuffer, offset: 0, index: 2)
+            e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+            e.endEncoding()
+        }
+        cb.commit()
+    }
+
+    /// Uniforms for this frame's rain or snow, advancing the drops' fall; nil when dry.
+    private func precipUniforms(_ scene: SceneDescription, pose: CameraPose, cameraMoved: SIMD3<Double>, reset: Bool,
+                                pixelAngle: Float) -> PrecipUniforms? {
+        guard let precip = scene.precipitation, precip.intensity > 0 else {
+            precipClock = nil
+            return nil
+        }
+        let dt = precipClock.map { min(max(scene.date.timeIntervalSince($0), 0), 0.1) } ?? 0
+        precipClock = scene.date
+        // Drops drift with the low-level wind (a little over half the wind at cloud height).
+        let velocity = SIMD3(scene.cloudWind.x * 0.6, scene.cloudWind.y * 0.6, -precip.fallSpeed)
+        precipFall += velocity * dt
+        let snow = precip.kind == .snow
+        let box = snow ? SIMD3<Double>(24, 24, 16) : SIMD3<Double>(36, 36, 24)
+        let anchor = pose.position - precipFall
+        let wrapped = anchor - box * (anchor / box).rounded(.down)
+        // Streak: the drop's motion relative to the camera over about 1/30 s, the time an eye or a
+        // camera smears a falling drop into a line.
+        var cameraVelocity = dt > 0 && !reset ? cameraMoved / dt : .zero
+        if simd_length(cameraVelocity) > 400 { cameraVelocity = .zero }
+        let streak = (velocity - cameraVelocity) * (snow ? 0.02 : 0.033)
+        var p = PrecipUniforms()
+        p.box = SIMD4(SIMD3<Float>(box), Float(precip.dropCount))
+        p.offset = SIMD4(SIMD3<Float>(wrapped), snow ? 1 : 0)
+        p.streak = SIMD4(SIMD3<Float>(streak), Float(precip.radius))
+        p.look = SIMD4(Float(snow ? 1.0 : 0.45), pixelAngle,
+                       Float(scene.date.timeIntervalSince1970.truncatingRemainder(dividingBy: 1_000)), 0)
+        return p
+    }
+
+    /// The GPU's sizes of the shared structs (tests): frame, draw, cloud, lighting, precipitation,
+    /// light and light-uniform structs, in that order.
+    func shaderStructSizes() throws -> [Int] {
+        guard let f = library.makeFunction(name: "structSizes"),
+              let buffer = device.makeBuffer(length: 64, options: .storageModeShared),
+              let cb = queue.makeCommandBuffer(), let c = cb.makeComputeCommandEncoder() else { throw RendererError.resource("layout probe") }
+        c.setComputePipelineState(try device.makeComputePipelineState(function: f))
+        c.setBuffer(buffer, offset: 0, index: 0)
+        c.dispatchThreads(MTLSize(width: 1, height: 1, depth: 1), threadsPerThreadgroup: MTLSize(width: 1, height: 1, depth: 1))
+        c.endEncoding()
+        cb.commit()
+        cb.waitUntilCompleted()
+        let p = buffer.contents().bindMemory(to: UInt32.self, capacity: 7)
+        return (0..<7).map { Int(p[$0]) }
+    }
+
+    /// The cloud shadow map's sun transmittance, row by row (tests; waits for the GPU).
+    func cloudShadowForTest() -> [Float] {
+        let n = cloudShadowMap.width
+        guard let buffer = device.makeBuffer(length: n * n * 2, options: .storageModeShared),
+              let cb = queue.makeCommandBuffer(), let b = cb.makeBlitCommandEncoder() else { return [] }
+        b.copy(from: cloudShadowMap, sourceSlice: 0, sourceLevel: 0, sourceOrigin: MTLOrigin(),
+               sourceSize: MTLSize(width: n, height: n, depth: 1), to: buffer, destinationOffset: 0,
+               destinationBytesPerRow: n * 2, destinationBytesPerImage: n * n * 2)
+        b.endEncoding()
+        cb.commit()
+        cb.waitUntilCompleted()
+        let p = buffer.contents().bindMemory(to: Float16.self, capacity: n * n)
+        return (0..<(n * n)).map { Float(p[$0]) }
+    }
+
+    /// Transmittance of each sample of the last cloud pass (tests; waits for the GPU).
+    func cloudTransmittanceForTest() -> [Float] {
+        guard let ct = cloudTargets else { return [] }
+        let w = ct.size.x, h = ct.size.y
+        guard let buffer = device.makeBuffer(length: w * h * 8, options: .storageModeShared),
+              let cb = queue.makeCommandBuffer(), let b = cb.makeBlitCommandEncoder() else { return [] }
+        b.copy(from: ct.radiance, sourceSlice: 0, sourceLevel: 0, sourceOrigin: MTLOrigin(),
+               sourceSize: MTLSize(width: w, height: h, depth: 1), to: buffer, destinationOffset: 0,
+               destinationBytesPerRow: w * 8, destinationBytesPerImage: w * h * 8)
+        b.endEncoding()
+        cb.commit()
+        cb.waitUntilCompleted()
+        let p = buffer.contents().bindMemory(to: Float16.self, capacity: w * h * 4)
+        return (0..<(w * h)).map { Float(p[$0 * 4 + 3]) }
     }
 
     private func dispatch(_ c: any MTLComputeCommandEncoder, _ pipeline: any MTLComputePipelineState,

@@ -1,4 +1,4 @@
-public import Foundation
+import Foundation
 
 /// The weather a flight uses: from a METAR, or clear skies when there is none (offline, or
 /// weather turned off).
@@ -81,5 +81,98 @@ public actor WeatherService {
               let raw = records.first?.rawOb, let m = MetarParser.parse(raw) else { return nil }
         cache[station] = (m, Date())
         return m
+    }
+}
+
+/// A cloud layer as a volume of air: what the renderer draws for a reported layer.
+public struct CloudVolume: Sendable, Equatable {
+    public enum Kind: Sendable { case stratus, cumulus, cumulonimbus, cirrus }
+    /// Base and top, metres above sea level.
+    public var baseMetres: Double
+    public var topMetres: Double
+    /// Fraction of the sky covered (FEW about 0.19, OVC 1).
+    public var coverage: Double
+    public var kind: Kind
+}
+
+extension WeatherConditions {
+    /// The reported layers as volumes over a field (elevation in metres). The METAR gives only
+    /// cover, base and sometimes CB or TCU, so the rest is climatology: few and scattered low
+    /// clouds are cumulus about 1.4 km deep, broken and overcast layers are stratus a few hundred
+    /// metres thick, anything based above 20,000 ft is cirrus, CB towers reach 11 km, TCU about
+    /// 4.5 km above the base, and an obscured sky (VV) is fog from the ground up.
+    public func cloudVolumes(fieldElevationMetres field: Double) -> [CloudVolume] {
+        clouds.map { layer in
+            let base = field + Double(layer.baseFeet) * 0.3048
+            switch (layer.cover, layer.type) {
+            case (_, "CB"?):
+                return CloudVolume(baseMetres: base, topMetres: max(11_000, base + 5_000), coverage: layer.coverage, kind: .cumulonimbus)
+            case (_, "TCU"?):
+                return CloudVolume(baseMetres: base, topMetres: base + 4_500, coverage: layer.coverage, kind: .cumulus)
+            case (.verticalVisibility, _):
+                return CloudVolume(baseMetres: field - 30, topMetres: base + 150, coverage: 1, kind: .stratus)
+            case _ where layer.baseFeet >= 20_000:
+                return CloudVolume(baseMetres: base, topMetres: base + 400, coverage: layer.coverage, kind: .cirrus)
+            case (.few, _), (.scattered, _):
+                // Mid-level (altocumulus) cells are shallower than fair-weather cumulus.
+                let depth = layer.baseFeet >= 10_000 ? 700.0 : 1_400.0
+                return CloudVolume(baseMetres: base, topMetres: base + depth, coverage: layer.coverage, kind: .cumulus)
+            case (.broken, _):
+                return CloudVolume(baseMetres: base, topMetres: base + 500, coverage: layer.coverage, kind: .stratus)
+            case (.overcast, _):
+                return CloudVolume(baseMetres: base, topMetres: base + 700, coverage: layer.coverage, kind: .stratus)
+            }
+        }
+    }
+
+    /// How fast the obscuration thins with height (m): fog is a shallow layer, mist deeper, haze,
+    /// smoke and dust fill the lower atmosphere.
+    public var fogScaleHeightMetres: Double {
+        let codes = weather.map { $0.trimmingCharacters(in: CharacterSet(charactersIn: "+-")) }
+        if codes.contains(where: { $0.hasSuffix("FG") }) || clouds.contains(where: { $0.cover == .verticalVisibility }) { return 120 }
+        if codes.contains(where: { $0.hasSuffix("BR") }) { return 400 }
+        if codes.contains(where: { ["HZ", "FU", "DU", "SA", "VA"].contains($0) }) { return 1_500 }
+        // Reduced by precipitation or unreported: through the depth of the rain.
+        return 800
+    }
+
+    /// MIL-spec turbulence severity (JSBSim's scale, 0 none to 7 extreme) at an altitude (m above
+    /// sea level): gusty or strong surface wind stirs the lowest kilometre, and cloud is rough
+    /// inside: light in stratus and cirrus, moderate in cumulus, severe in a cumulonimbus.
+    public func turbulenceSeverity(altitudeMetres: Double, fieldElevationMetres field: Double) -> Int {
+        let spread = (gustKnots ?? windKnots) - windKnots
+        var severity = spread >= 10 ? 4 : (spread >= 5 || windKnots >= 15 ? 3 : (windKnots >= 8 ? 2 : 0))
+        if altitudeMetres - field > 1_000 { severity = 0 }
+        for v in cloudVolumes(fieldElevationMetres: field) where altitudeMetres >= v.baseMetres && altitudeMetres <= v.topMetres {
+            let inside = switch v.kind {
+            case .cumulonimbus: 5
+            case .cumulus: v.coverage >= 0.4 ? 3 : 2
+            case .stratus, .cirrus: 1
+            }
+            severity = max(severity, inside)
+        }
+        return severity
+    }
+
+    public enum PrecipitationKind: Sendable { case rain, drizzle, snow }
+
+    /// What is falling at the field and how hard (0.35 light, 0.65 moderate, 1 heavy), from the
+    /// present weather; showers in the vicinity (VC) are not overhead.
+    public var precipitation: (kind: PrecipitationKind, intensity: Double)? {
+        for w in weather {
+            let code = w.trimmingCharacters(in: CharacterSet(charactersIn: "+-"))
+            if code.hasPrefix("VC") { continue }
+            let intensity = w.hasPrefix("+") ? 1.0 : (w.hasPrefix("-") ? 0.35 : 0.65)
+            if ["SN", "SG", "PL"].contains(where: { code.contains($0) }) { return (.snow, intensity) }
+            if ["RA", "GR", "GS", "UP"].contains(where: { code.contains($0) }) { return (.rain, intensity) }
+            if code.contains("DZ") { return (.drizzle, intensity) }
+        }
+        return nil
+    }
+
+    /// The wind at a height above the ground, metres per second toward (east, north).
+    public func windVectorMetresPerSecond(atHeightFeet h: Double) -> SIMD2<Double> {
+        let w = wind(atHeightFeet: h)
+        return SIMD2(w.y, w.x) * 0.514_444
     }
 }

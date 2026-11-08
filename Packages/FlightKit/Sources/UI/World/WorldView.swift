@@ -98,6 +98,11 @@ final class WorldEngine: NSObject {
         } else {
             error = "This device has no Metal GPU."
         }
+        #if os(iOS)
+        // Clouds march at 40% of the render resolution on the phone (half on the Mac); the
+        // temporal resolve hides most of the difference. Not yet measured on the device.
+        made?.cloudResolutionScale = 0.4
+        #endif
         renderer = made
         startupError = error
         super.init()

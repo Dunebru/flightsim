@@ -25,8 +25,10 @@ public final class AppSettings {
     public var invertPitch = false { didSet { save() } }
     public var upscaler = "temporal" { didSet { save() } }
     public var showStats = false { didSet { save() } }
-    /// Live weather from the departure airport's METAR; off is clear and calm.
-    public var liveWeather = true { didSet { save() } }
+    /// The departure airport's live METAR, or a chosen kind of day.
+    public var weather: WeatherChoice = .live { didSet { save() } }
+    /// A METAR given at launch (scripts and screenshots), used instead of the live one.
+    public private(set) var forcedMetar: String?
 
     private let defaults: UserDefaults
     private var loading = false
@@ -43,6 +45,7 @@ public final class AppSettings {
         var upscaler: String
         var showStats: Bool
         var liveWeather: Bool?
+        var weather: WeatherChoice?
     }
 
     public init(defaults: UserDefaults = .standard) {
@@ -58,7 +61,7 @@ public final class AppSettings {
             invertPitch = s.invertPitch
             upscaler = s.upscaler
             showStats = s.showStats
-            liveWeather = s.liveWeather ?? true
+            weather = s.weather ?? (s.liveWeather == false ? .clear : .live)
         }
         // `-FlightAircraft A320` (scripts and screenshots): fly that aircraft this launch.
         if let forced = defaults.string(forKey: "FlightAircraft"), !forced.isEmpty { aircraftID = forced }
@@ -67,6 +70,8 @@ public final class AppSettings {
             airport = forced
             spot = .runway(forced == "KLAX" ? "24R" : "08")
         }
+        // `-FlightMETAR "KPHX 081751Z 27008KT 10SM SCT050 30/05 A2992"`: fly in that weather this launch.
+        forcedMetar = defaults.string(forKey: "FlightMETAR").flatMap { $0.isEmpty ? nil : $0 }
         loading = false
     }
 
@@ -74,7 +79,7 @@ public final class AppSettings {
         guard !loading else { return }
         let s = Stored(aircraftID: aircraftID, airport: airport, spot: spot, fixedUTCHour: fixedUTCHour, controlMode: controlMode,
                        sensitivity: sensitivity, invertPitch: invertPitch, upscaler: upscaler, showStats: showStats,
-                       liveWeather: liveWeather)
+                       liveWeather: nil, weather: weather)
         if let data = try? JSONEncoder().encode(s) { defaults.set(data, forKey: Self.key) }
     }
 
@@ -85,5 +90,61 @@ public final class AppSettings {
         cal.timeZone = TimeZone(identifier: "UTC")!
         let midnight = cal.startOfDay(for: now)
         return midnight.addingTimeInterval(hour * 3600)
+    }
+}
+
+/// Weather for a flight: the live report, or a typical day of each kind written as a METAR so it
+/// flies through exactly the same path as a real one.
+public enum WeatherChoice: String, Codable, CaseIterable, Sendable {
+    case live, clear, few, scattered, broken, overcast, mist, fog, rain, storm
+
+    public var label: String {
+        switch self {
+        case .live: "Live"
+        case .clear: "Clear"
+        case .few: "Few clouds"
+        case .scattered: "Scattered clouds"
+        case .broken: "Broken clouds"
+        case .overcast: "Overcast"
+        case .mist: "Mist"
+        case .fog: "Fog"
+        case .rain: "Rain"
+        case .storm: "Thunderstorms"
+        }
+    }
+
+    public var symbol: String {
+        switch self {
+        case .live: "antenna.radiowaves.left.and.right"
+        case .clear: "sun.max.fill"
+        case .few: "cloud.sun.fill"
+        case .scattered, .broken: "cloud.fill"
+        case .overcast: "smoke.fill"
+        case .mist, .fog: "cloud.fog.fill"
+        case .rain: "cloud.rain.fill"
+        case .storm: "cloud.bolt.rain.fill"
+        }
+    }
+
+    /// The report for this kind of day at a station, issued now; nil for live.
+    public func metar(station: String, at date: Date = Date()) -> String? {
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(identifier: "UTC")!
+        let c = utc.dateComponents([.day, .hour, .minute], from: date)
+        let time = String(format: "%02d%02d%02dZ", c.day ?? 1, c.hour ?? 0, c.minute ?? 0)
+        let body: String
+        switch self {
+        case .live: return nil
+        case .clear: body = "27006KT 10SM CLR 24/02 A2992"
+        case .few: body = "26008KT 10SM FEW060 FEW250 24/04 A2990"
+        case .scattered: body = "25010KT 10SM SCT045 SCT250 22/08 A2988"
+        case .broken: body = "24012KT 10SM BKN035 BKN120 19/10 A2984"
+        case .overcast: body = "23010KT 7SM OVC020 15/11 A2982"
+        case .mist: body = "00000KT 3SM BR OVC008 12/11 A3001"
+        case .fog: body = "00000KT 1/4SM FG VV002 10/10 A3003"
+        case .rain: body = "20014G22KT 4SM -RA BKN025 OVC060 13/11 A2976"
+        case .storm: body = "22018G32KT 5SM TSRA FEW035CB BKN080 OVC200 21/17 A2970"
+        }
+        return "\(station) \(time) \(body)"
     }
 }

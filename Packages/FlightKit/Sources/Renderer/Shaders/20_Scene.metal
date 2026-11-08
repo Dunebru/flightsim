@@ -247,6 +247,29 @@ inline float shadowFactor(float3 worldPos, constant FrameUniforms &u, depth2d<fl
     return sum / 9.0;
 }
 
+/// Sun transmittance through the clouds (the cloud shadow map around the view). The map holds
+/// rays from its reference height; a point higher up reads the texel whose ray crosses the clouds
+/// where its own does. Faded to the mean toward the map's edges.
+inline float cloudShadowFactor(float3 worldPos, constant FrameUniforms &u, texture2d<float> map) {
+    if (u.cloudShadow.x < 0.5) return 1.0;
+    float h = worldPos.z + u.cloudLight.z;
+    if (h >= u.cloudLight.w) return 1.0;
+    float2 xy = worldPos.xy + (u.cloudShadowShift.x - h) * u.cloudShadowShift.zw;
+    float2 uv = (xy - u.cloudShadow.zw) * u.cloudShadow.y + 0.5;
+    float edge = smoothstep(0.0, 0.1, min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y)));
+    float T = mix(u.cloudLight.y, map.sample(kLinearClamp, uv).r, edge);
+    // Under a lone cumulus the shade is not dark: light scattered through and off the clouds
+    // around fills about a third of it. Under a full deck that fill is the overcast's ambient,
+    // so it fades out as the cover closes.
+    return T + (1.0 - T) * 0.3 * (1.0 - u.cloudLight.x);
+}
+
+/// How overcast it is at a point: the sky's cloud cover for points under the lowest base.
+inline float overcastAt(float3 worldPos, constant FrameUniforms &u) {
+    float h = worldPos.z + u.cloudLight.z;
+    return u.cloudLight.x * (1.0 - smoothstep(u.cloudShadowShift.y - 150.0, u.cloudShadowShift.y + 50.0, h));
+}
+
 /// Shadows from buildings (the world shadow map around the view): 3x3 PCF, a small normal
 /// offset against acne, faded out toward the map's edges.
 inline float worldShadowFactor(float3 worldPos, float3 N, constant FrameUniforms &u, depth2d<float> map) {
@@ -305,7 +328,14 @@ inline float3 shadeSurface(float3 albedo, float roughness, float metallic, float
     float3 direct = (diffuseColor / kPi * (1.0 - F) + F * ggxSpecular(NdotH, NdotV, NdotL, roughness)) * sun * NdotL * shadow;
 
     float3 skyE = light.skyIrradiance.rgb;
-    float3 groundE = 0.25 * (skyE + sun * saturate(L.z));
+    // Under cloud the sky is a grey dome lit from above: diffuse light about a third of the
+    // clear day's total, without the blue.
+    float overcast = overcastAt(worldPos, u);
+    if (overcast > 0.0) {
+        float total = dot(skyE + sun * saturate(L.z), float3(0.2126, 0.7152, 0.0722));
+        skyE = mix(skyE, float3(0.93, 0.97, 1.0) * total * 0.33, overcast);
+    }
+    float3 groundE = 0.25 * (skyE + sun * saturate(L.z) * shadow);
     float up = N.z * 0.5 + 0.5;
     float3 ambientDiffuse = diffuseColor / kPi * (skyE * up + groundE * (1.0 - up));
 
@@ -313,7 +343,7 @@ inline float3 shadeSurface(float3 albedo, float roughness, float metallic, float
     float viewHeight = kBottomRadius + max(u.atmosphere.x + u.atmosphere.y, 0.001);
     float3 skyRadiance = R.z > -0.02 ? skyView.sample(kLinearClamp, skyViewUV(R, L, viewHeight)).rgb : groundE / kPi;
     // Rough surfaces see a blurred sky: blend the mirror direction toward the mean sky radiance.
-    float3 env = mix(skyRadiance, skyE / kPi, saturate(roughness * roughness * 1.2));
+    float3 env = mix(skyRadiance, skyE / kPi, saturate(max(roughness * roughness * 1.2, overcast)));
     // Split-sum environment BRDF (Karis's analytic fit): unlike bare Fresnel it falls off with
     // roughness at grazing angles, so rough ground does not turn white toward the horizon.
     float3 ambientSpecular = env * envBRDF(f0, roughness, NdotV);
@@ -322,7 +352,8 @@ inline float3 shadeSurface(float3 albedo, float roughness, float metallic, float
 }
 
 inline float3 applyAerialPerspective(float3 color, float3 worldPos, float4 screenPos,
-                                     constant FrameUniforms &u, texture3d<float> aerial)
+                                     constant FrameUniforms &u, texture3d<float> aerial,
+                                     const device LightingState &light)
 {
     float distanceKm = length(worldPos) * 0.001;
     float w = sqrt(saturate(distanceKm / u.atmosphere.z));
@@ -330,7 +361,12 @@ inline float3 applyAerialPerspective(float3 color, float3 worldPos, float4 scree
     float4 ap = aerial.sample(kLinearClamp, float3(uv, w));
     // Fade in across the first slice so the camera's immediate surroundings stay clear.
     float fade = saturate(w * float(kAerialSize.z));
-    return color * mix(1.0, ap.a, fade) + ap.rgb * fade;
+    // Haze under an overcast is lit by the grey sky, not the sun.
+    float dim = 1.0 - 0.6 * u.cloudLight.x * (u.cloudLight.z < u.cloudShadowShift.y ? 1.0 : 0.0);
+    color = color * mix(1.0, ap.a, fade) + ap.rgb * fade * dim;
+    float dist = length(worldPos);
+    float fogT = exp(-fogDepth(worldPos / max(dist, 1e-3), dist, u));
+    return color * fogT + light.fogColour.rgb * (1.0 - fogT);
 }
 
 // MARK: - Surfaces
@@ -530,7 +566,8 @@ fragment GBufferOut sceneFragment(VertexOut in [[stage_in]],
                                   texture3d<float> aerial [[texture(2)]],
                                   depth2d<float> shadowMap [[texture(3)]],
                                   texture2d<float> nightLights [[texture(5)]],
-                                  depth2d<float> worldShadowMap [[texture(6)]])
+                                  depth2d<float> worldShadowMap [[texture(6)]],
+                                  texture2d<float> cloudShadowMap [[texture(7)]])
 {
     float kind = d.material.w;
     float3 N = normalize(in.normal);
@@ -635,7 +672,18 @@ fragment GBufferOut sceneFragment(VertexOut in [[stage_in]],
         albedo *= t.rgb;
     }
 
+    // Rain darkens the ground and glosses pavement, most in the low spots where it pools.
+    float wet = u.weather.x;
+    if (wet > 0.0 && (kind == kKindRunway || kind == kKindPavement || kind == kKindMarking ||
+                      kind == kKindTerrain || kind == kKindGround)) {
+        bool paved = kind != kKindTerrain && kind != kKindGround;
+        float pool = smoothstep(0.52, 0.7, fbm((in.worldPos.xy + u.noiseOrigin.xy) * 0.09, 3));
+        albedo *= mix(1.0, paved ? 0.55 : 0.75, wet);
+        if (paved) roughness = mix(roughness, mix(0.32, 0.05, pool), wet);
+    }
+
     float shadow = min(shadowFactor(in.worldPos, u, shadowMap), worldShadowFactor(in.worldPos, N, u, worldShadowMap));
+    shadow *= cloudShadowFactor(in.worldPos, u, cloudShadowMap);
     float3 color = shadeSurface(albedo, roughness, d.material.y, N, in.worldPos, shadow, u, light, skyView);
     color += d.emissive.rgb * (kind == kKindAircraft ? 1.0 : 0.0);
     float night = smoothstep(0.05, -0.08, u.sunDirection.z);
@@ -657,7 +705,7 @@ fragment GBufferOut sceneFragment(VertexOut in [[stage_in]],
                                 in.worldPos.xy + u.noiseOrigin.xy, length(dfdx(in.worldPos.xy))) * dark;
         }
     }
-    color = applyAerialPerspective(color, in.worldPos, in.position, u, aerial);
+    color = applyAerialPerspective(color, in.worldPos, in.position, u, aerial, light);
 
     GBufferOut o;
     o.color = float4(color, 1.0);
@@ -687,7 +735,7 @@ fragment float4 glassFragment(VertexOut in [[stage_in]],
     }
     float shadow = shadowFactor(in.worldPos, u, shadowMap);
     float3 color = shadeSurface(albedo, 0.05, 0.0, N, in.worldPos, shadow, u, light, skyView);
-    color = applyAerialPerspective(color, in.worldPos, in.position, u, aerial);
+    color = applyAerialPerspective(color, in.worldPos, in.position, u, aerial, light);
     // Glass reflects more at grazing angles.
     float3 V = normalize(-in.worldPos);
     float fresnel = 0.04 + 0.96 * pow(1.0 - saturate(abs(dot(N, V))), 5.0);
@@ -712,6 +760,7 @@ vertex SkyOut skyVertex(uint vid [[vertex_id]]) {
 
 fragment GBufferOut skyFragment(SkyOut in [[stage_in]],
                                 constant FrameUniforms &u [[buffer(1)]],
+                                const device LightingState &light [[buffer(3)]],
                                 texture2d<float> skyView [[texture(1)]],
                                 texture2d<float> transmittanceLUT [[texture(4)]])
 {
@@ -731,6 +780,12 @@ fragment GBufferOut skyFragment(SkyOut in [[stage_in]],
         float limb = 1.0 - 0.6 * (1.0 - sqrt(max(0.0, 1.0 - x)));
         L += u.sunIlluminance.rgb / solidAngle * T * limb;
     }
+
+    // Under an overcast whatever sky shows past the clouds' reach is the deck's grey, and mist
+    // hides the sky toward the horizon.
+    if (u.cloudLight.z < u.cloudShadowShift.y) L = mix(L, light.fogColour.rgb, u.cloudLight.x);
+    float fogT = exp(-fogDepth(dir, 1e7, u));
+    L = L * fogT + light.fogColour.rgb * (1.0 - fogT);
 
     // Motion for a point at infinity: only camera rotation moves it.
     float4 cur = u.viewProjNoJitter * float4(dir, 0.0);

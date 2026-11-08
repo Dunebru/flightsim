@@ -21,6 +21,11 @@ struct FrameUniforms {
     var shadowParams = SIMD4<Float>.zero
     var worldShadowParams = SIMD4<Float>.zero
     var debug = SIMD4<Float>.zero
+    var cloudShadow = SIMD4<Float>.zero
+    var cloudShadowShift = SIMD4<Float>.zero
+    var cloudLight = SIMD4<Float>.zero
+    var fog = SIMD4<Float>.zero
+    var weather = SIMD4<Float>.zero
 }
 
 struct MeshVertex {
@@ -99,7 +104,7 @@ enum SurfaceKind: Float {
 }
 
 /// Size of the GPU-side lighting state (three float4).
-let lightingStateSize = 48
+let lightingStateSize = 64
 
 // MARK: - Scene description
 
@@ -180,6 +185,18 @@ public struct SceneDescription: Sendable {
     public var showAircraft = true
     /// Added to every world position (camera included). Used by the floating-origin test.
     public var worldOffset = SIMD3<Double>.zero
+    /// Cloud layers to draw (at most three are used, lowest first).
+    public var clouds: [CloudLayer] = []
+    /// Wind at cloud height, metres per second toward (east, north): moves the cloud field.
+    public var cloudWind = SIMD2<Double>.zero
+    /// Reported visibility at the field (m); 15 km or more adds no mist.
+    public var visibilityMetres: Double = 40_000
+    /// How quickly mist thins with height (m): shallow for fog, deep for haze.
+    public var fogScaleHeight: Double = 500
+    /// Rain or snow falling around the camera.
+    public var precipitation: Precipitation?
+    /// How wet the ground is, 0 dry to 1 soaked: darker, glossier pavement.
+    public var wetness: Double = 0
 
     public init(origin: Geodetic, date: Date, camera: OrbitCamera,
                 aircraftPosition: SIMD3<Double>, aircraftHeading: Double) {
@@ -203,6 +220,86 @@ public struct SceneDescription: Sendable {
             aircraftHeading: PhoenixSite.runwayHeading * .pi / 180
         )
     }
+}
+
+// MARK: - Clouds
+
+/// One cloud layer for the renderer: heights above sea level, the fraction of sky it covers and
+/// what kind of cloud it is.
+public struct CloudLayer: Sendable, Equatable {
+    public enum Kind: Int, Sendable {
+        case stratus = 0, cumulus = 1, cumulonimbus = 2, cirrus = 3
+    }
+    public var baseMetres: Double
+    public var topMetres: Double
+    public var coverage: Double
+    public var kind: Kind
+
+    public init(baseMetres: Double, topMetres: Double, coverage: Double, kind: Kind) {
+        self.baseMetres = baseMetres
+        self.topMetres = topMetres
+        self.coverage = coverage
+        self.kind = kind
+    }
+
+    /// Extinction at full density (1/m), shape noise scale and detail scale (m).
+    var style: SIMD4<Float> {
+        switch kind {
+        case .stratus: SIMD4(0.035, 7_000, 900, 0)
+        case .cumulus: SIMD4(0.05, 2_600, 480, 0)
+        case .cumulonimbus: SIMD4(0.06, 9_000, 700, 0)
+        case .cirrus: SIMD4(0.003, 9_000, 1_500, 0)
+        }
+    }
+}
+
+/// Matches CloudUniforms in 40_Clouds.metal.
+struct CloudUniforms {
+    var layer0Shape = SIMD4<Float>.zero, layer0Style = SIMD4<Float>.zero
+    var layer1Shape = SIMD4<Float>.zero, layer1Style = SIMD4<Float>.zero
+    var layer2Shape = SIMD4<Float>.zero, layer2Style = SIMD4<Float>.zero
+    var camera = SIMD4<Float>.zero
+    var wind = SIMD4<Float>.zero
+    var size = SIMD4<Float>.zero
+    var bounds = SIMD4<Float>.zero
+
+    mutating func setLayers(_ layers: [CloudLayer]) {
+        let used = Array(layers.sorted { $0.baseMetres < $1.baseMetres }.prefix(3))
+        func pack(_ l: CloudLayer) -> (SIMD4<Float>, SIMD4<Float>) {
+            (SIMD4(Float(l.baseMetres), Float(l.topMetres), Float(min(max(l.coverage, 0), 1)), Float(l.kind.rawValue)), l.style)
+        }
+        if used.count > 0 { (layer0Shape, layer0Style) = pack(used[0]) }
+        if used.count > 1 { (layer1Shape, layer1Style) = pack(used[1]) }
+        if used.count > 2 { (layer2Shape, layer2Style) = pack(used[2]) }
+        wind.z = Float(used.count)
+        bounds.x = Float(used.map(\.baseMetres).min() ?? 0)
+        bounds.y = Float(used.map(\.topMetres).max() ?? 0)
+    }
+}
+
+/// Falling rain, drizzle or snow; intensity 0.35 light, 0.65 moderate, 1 heavy.
+public struct Precipitation: Sendable, Equatable {
+    public enum Kind: Sendable { case rain, drizzle, snow }
+    public var kind: Kind
+    public var intensity: Double
+
+    public init(kind: Kind, intensity: Double) {
+        self.kind = kind
+        self.intensity = intensity
+    }
+
+    /// Fall speed (m/s), drop radius (m) and drops in the box around the camera at this intensity.
+    var fallSpeed: Double { kind == .snow ? 1.1 : (kind == .drizzle ? 3.5 : 6 + 3 * intensity) }
+    var radius: Double { kind == .snow ? 0.004 : (kind == .drizzle ? 0.0004 : 0.0009 + 0.0006 * intensity) }
+    var dropCount: Int { Int((kind == .snow ? 12_000.0 : (kind == .drizzle ? 8_000 : 8_000)) * min(max(intensity, 0.1), 1)) }
+}
+
+/// Matches PrecipUniforms in 45_Precipitation.metal.
+struct PrecipUniforms {
+    var box = SIMD4<Float>.zero
+    var offset = SIMD4<Float>.zero
+    var streak = SIMD4<Float>.zero
+    var look = SIMD4<Float>.zero
 }
 
 // MARK: - Settings and statistics

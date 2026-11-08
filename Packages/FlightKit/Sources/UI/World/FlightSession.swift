@@ -25,7 +25,20 @@ final class FlightSession {
     private var ground: GroundModel
     private var lastHUDUpdate: TimeInterval = 0
     /// The weather the flight uses (clear until a METAR arrives).
-    var weather: WeatherConditions = .clear
+    var weather: WeatherConditions = .clear {
+        didSet {
+            cloudLayers = weather.cloudVolumes(fieldElevationMetres: site.layout.elevation).map { v in
+                let kind: CloudLayer.Kind = switch v.kind {
+                case .stratus: .stratus
+                case .cumulus: .cumulus
+                case .cumulonimbus: .cumulonimbus
+                case .cirrus: .cirrus
+                }
+                return CloudLayer(baseMetres: v.baseMetres, topMetres: v.topMetres, coverage: v.coverage, kind: kind)
+            }
+        }
+    }
+    private var cloudLayers: [CloudLayer] = []
     private var clock = 0.0
     private var lastState: FlightState?
 
@@ -99,7 +112,7 @@ final class FlightSession {
     /// Weather for the flight model at a height above the ground: the profiled wind with gusts
     /// (a smooth random swing between the steady speed and the reported gust), turbulence when
     /// it is gusty or strong, and the temperature and pressure.
-    func atmosphere(heightFeet: Double) -> AtmosphereInputs {
+    func atmosphere(heightFeet: Double, altitudeFeet: Double) -> AtmosphereInputs {
         var a = AtmosphereInputs()
         var wind = weather.wind(atHeightFeet: heightFeet)
         if let gust = weather.gustKnots, weather.windKnots > 0 {
@@ -110,8 +123,8 @@ final class FlightSession {
         a.windNorthKnots = wind.x
         a.windEastKnots = wind.y
         a.surfaceWindKnots = weather.windKnots
-        let spread = (weather.gustKnots ?? weather.windKnots) - weather.windKnots
-        a.turbulenceSeverity = spread >= 10 ? 4 : (spread >= 5 || weather.windKnots >= 15 ? 3 : (weather.windKnots >= 8 ? 2 : 0))
+        a.turbulenceSeverity = weather.turbulenceSeverity(altitudeMetres: altitudeFeet * 0.3048,
+                                                          fieldElevationMetres: site.layout.elevation)
         a.deltaTCelsius = weather.isaDeviation(fieldElevationMetres: site.layout.elevation)
         a.seaLevelPressureHPa = weather.altimeterHPa
         return a
@@ -120,6 +133,14 @@ final class FlightSession {
     /// Called once per display frame, before rendering.
     func tick(dt: Double, hud: HUDModel, scene: inout SceneDescription, holdForScenery: Bool = false) {
         guard let physics else { return }
+        scene.clouds = cloudLayers
+        scene.cloudWind = weather.windVectorMetresPerSecond(atHeightFeet: 5_000)
+        scene.visibilityMetres = weather.visibilityMetres
+        scene.fogScaleHeight = weather.fogScaleHeightMetres
+        scene.precipitation = weather.precipitation.map { p in
+            Precipitation(kind: p.kind == .snow ? .snow : (p.kind == .drizzle ? .drizzle : .rain), intensity: p.intensity)
+        }
+        scene.wetness = scene.precipitation.map { $0.kind == .snow ? 0.3 : min(1, 0.5 + $0.intensity) } ?? 0
 
         var inputs = ControlInputs()
         if let pad = gamepad.read() {
@@ -158,7 +179,7 @@ final class FlightSession {
         physics.setInputs(inputs)
         physics.setPaused(hud.paused || holdForScenery)
         clock += dt
-        if let s = lastState { physics.setAtmosphere(atmosphere(heightFeet: s.heightAboveGroundFeet)) }
+        if let s = lastState { physics.setAtmosphere(atmosphere(heightFeet: s.heightAboveGroundFeet, altitudeFeet: s.altitudeFeet)) }
 
         let s = physics.state
         lastState = s
