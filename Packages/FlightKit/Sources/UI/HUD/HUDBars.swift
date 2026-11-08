@@ -154,3 +154,19 @@ struct AutopilotStatus: View {
         }
     }
 }
+
+/// Stall warning: red, pulsing, with a warning haptic when it appears.
+struct StallWarning: View {
+    var body: some View {
+        Text("STALL")
+            .font(.system(size: 17, weight: .heavy, design: .rounded))
+            .tracking(2)
+            .foregroundStyle(.white)
+            .padding(.horizontal, 22)
+            .frame(height: 36)
+            .background(HUDStyle.warning, in: .capsule)
+            .phaseAnimator([1.0, 0.55]) { view, opacity in view.opacity(opacity) } animation: { _ in .easeInOut(duration: 0.3) }
+            .sensoryFeedback(.warning, trigger: true)
+            .accessibilityLabel("Stall warning")
+    }
+}

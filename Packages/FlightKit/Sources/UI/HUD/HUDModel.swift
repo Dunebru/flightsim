@@ -88,6 +88,7 @@ final class HUDModel {
     var heading = 90
     var angleOfAttack = 0.0
     var n1 = 0.0
+    var stallWarning = false
 
     // MARK: Behavior
 

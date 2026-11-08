@@ -18,6 +18,7 @@ final class FlightSession {
     static let spawn = SIMD3<Double>(-1_700, 0, 0)
     static let spawnHeading = 90.0
     private var lastHUDUpdate: TimeInterval = 0
+    private var lastState: FlightState?
 
     init(profile: AircraftProfile, origin: Geodetic) {
         self.profile = profile
@@ -63,6 +64,11 @@ final class FlightSession {
             inputs.pitch = t.pitch
             inputs.roll = t.roll
         }
+        // On the ground, tilt also steers the nosewheel (and rudder), fading out by 60 kt.
+        if let last = lastState, last.onGround {
+            let blend = max(0, 1 - last.groundSpeedKnots / 60)
+            inputs.yaw = max(-1, min(1, inputs.yaw + inputs.roll * blend))
+        }
         inputs.throttle = hud.throttle
         inputs.reverse = hud.reverse
         inputs.flaps = profile.flapCommands[min(hud.flapIndex, profile.flapCommands.count - 1)]
@@ -79,6 +85,9 @@ final class FlightSession {
         physics.setPaused(hud.paused)
 
         let s = physics.state
+        lastState = s
+        let warn = !s.onGround && s.angleOfAttackDegrees > profile.stallWarningAlpha && s.indicatedAirspeedKnots > 20
+        if warn != hud.stallWarning { hud.stallWarning = warn }
         // Position: ENU from latitude/longitude; height from the ground so the wheels rest on
         // the drawn runway when the aircraft is on its gear.
         let enu = frame.enu(Geodetic(latitude: s.latitude, longitude: s.longitude, height: frame.origin.height))

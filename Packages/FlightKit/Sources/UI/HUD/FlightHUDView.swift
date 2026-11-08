@@ -74,6 +74,7 @@ public struct FlightHUDView: View {
                 .overlay(alignment: .top) {
                     VStack(spacing: 8) {
                         MetricsBar(model: model)
+                        if model.stallWarning { StallWarning() }
                         // The status is redundant while the autopilot panel itself is open.
                         if model.apMaster && model.openPanel != .autopilot {
                             AutopilotStatus(model: model)
