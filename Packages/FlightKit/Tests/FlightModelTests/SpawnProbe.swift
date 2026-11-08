@@ -33,3 +33,30 @@ struct GroundStartTests {
         }
     }
 }
+
+/// The solid ground follows the scenery: as the terrain elevation under the aircraft rises (taxiing
+/// up a 50 ft slope), the aircraft rides up with it and stays on its gear at the same height above
+/// the ground. Fails if the terrain property is not applied (the gear would end up buried).
+struct TerrainFollowingTests {
+    @Test func aircraftRidesUpWithTheGround() throws {
+        let fdm = try FlightDynamics(model: "c172p")
+        try fdm.initialize(GroundStartTests.ic)
+        var c = ControlInputs()
+        c.parkingBrake = true
+        fdm.apply(c)
+        fdm.step(240)
+        let before = fdm.state
+        // Raise the ground 50 ft over 5 s (a gentle slope), then let it settle for 2 s.
+        for i in 1...600 {
+            fdm.setTerrainElevation(feet: 1135 + 50 * Double(i) / 600)
+            fdm.step()
+        }
+        fdm.step(240)
+        let after = fdm.state
+        #expect(abs(fdm.terrainElevationFeet - 1185) < 0.01)
+        #expect(abs((after.altitudeFeet - before.altitudeFeet) - 50) < 1, "climbed \(after.altitudeFeet - before.altitudeFeet) ft")
+        #expect(abs(after.heightAboveGroundFeet - before.heightAboveGroundFeet) < 0.5,
+                "height above ground \(before.heightAboveGroundFeet) -> \(after.heightAboveGroundFeet)")
+        #expect(after.onGround)
+    }
+}

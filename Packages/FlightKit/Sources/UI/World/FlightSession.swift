@@ -3,6 +3,7 @@ import FlightModel
 import Foundation
 import Renderer
 import SimCore
+import Terrain
 
 /// One flight: the physics loop for the chosen aircraft, its control inputs, and the mapping from
 /// its state to the scene and the HUD. Lives on the main actor; physics runs on its own thread.
@@ -16,14 +17,17 @@ final class FlightSession {
 
     let start: StartPosition
     let settings: AppSettings
+    /// Solid ground under the aircraft, from the same scenery the renderer draws.
+    private var ground: GroundModel
     private var lastHUDUpdate: TimeInterval = 0
     private var lastState: FlightState?
 
-    init(profile: AircraftProfile, origin: Geodetic, start: StartPosition, settings: AppSettings) {
+    init(profile: AircraftProfile, origin: Geodetic, start: StartPosition, settings: AppSettings, scenery: SceneryPack?) {
         self.profile = profile
         self.start = start
         self.settings = settings
         frame = LocalFrame(origin: origin)
+        ground = GroundModel(pack: scenery, frame: frame, flatten: PhoenixSite.flatten)
         do {
             physics = try PhysicsLoop(model: profile.id, initial: spawnConditions())
         } catch {
@@ -43,7 +47,7 @@ final class FlightSession {
         let p = start.placement
         let g = frame.geodetic(p.position)
         var ic = InitialConditions(latitude: g.latitude, longitude: g.longitude,
-                                   terrainElevationFeet: frame.origin.height / 0.3048,
+                                   terrainElevationFeet: ground.height(latitude: g.latitude, longitude: g.longitude) / 0.3048,
                                    heightAboveGroundFeet: p.heightFeet, headingDegrees: p.heading,
                                    airspeedKnots: isAirborneStart ? profile.approachKnots : 0)
         if isAirborneStart {
@@ -121,11 +125,13 @@ final class FlightSession {
         lastState = s
         let warn = !s.onGround && s.angleOfAttackDegrees > profile.stallWarningAlpha && s.indicatedAirspeedKnots > 20
         if warn != hud.stallWarning { hud.stallWarning = warn }
-        // Position: ENU from latitude/longitude; height from the ground so the wheels rest on
-        // the drawn runway when the aircraft is on its gear.
-        let enu = frame.enu(Geodetic(latitude: s.latitude, longitude: s.longitude, height: frame.origin.height))
+        // The ground under the aircraft, from the scenery: physics treats it as solid, and the
+        // aircraft is drawn at its height above it, so the wheels rest on the drawn surface.
+        let groundHeight = ground.height(latitude: s.latitude, longitude: s.longitude)
+        physics.setTerrainElevation(feet: groundHeight / 0.3048)
+        let base = frame.enu(Geodetic(latitude: s.latitude, longitude: s.longitude, height: groundHeight))
         let height = max(0, (s.heightAboveGroundFeet - physics.restingHeightFeet) * 0.3048)
-        scene.aircraftPosition = SIMD3(enu.x, enu.y, height)
+        scene.aircraftPosition = SIMD3(base.x, base.y, base.z + height)
         scene.aircraftHeading = s.heading
         scene.aircraftRoll = s.roll
         scene.aircraftPitch = s.pitch

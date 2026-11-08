@@ -1,0 +1,61 @@
+import Foundation
+public import SimCore
+
+/// The solid ground for physics and cameras: heights read straight from the scenery pack (the
+/// finest tile that covers a point, loaded on demand), with runway areas held flat exactly as the
+/// renderer draws them. Outside the pack the ground is the scene origin's height.
+public struct GroundModel: Sendable {
+    public let pack: SceneryPack?
+    public let frame: LocalFrame
+    public let flatten: [FlattenArea]
+    private var field: HeightField
+    private var order: [TileKey] = []
+    private var missing: Set<TileKey> = []
+    /// Tiles kept in memory (each 65 x 65 floats, 17 KB).
+    public var capacity = 96
+
+    public init(pack: SceneryPack?, frame: LocalFrame, flatten: [FlattenArea]) {
+        self.pack = pack
+        self.frame = frame
+        self.flatten = flatten
+        field = HeightField(samples: pack?.index.heightSamples ?? 65, maxZoom: pack?.index.maxZoom ?? 0)
+    }
+
+    /// Ground height above mean sea level, metres.
+    public mutating func height(latitude: Double, longitude: Double) -> Double {
+        var h = rawHeight(latitude: latitude, longitude: longitude) ?? frame.origin.height
+        if !flatten.isEmpty {
+            let p = frame.enu(Geodetic(latitude: latitude, longitude: longitude, height: frame.origin.height))
+            for area in flatten {
+                let w = area.weight(SIMD2(p.x, p.y))
+                if w > 0 { h = h * (1 - w) + (frame.origin.height + area.height(at: SIMD2(p.x, p.y))) * w }
+            }
+        }
+        return h
+    }
+
+    /// Ground under an ENU point, as an ENU height (includes Earth's curvature drop).
+    public mutating func groundZ(atENU p: SIMD3<Double>) -> Double {
+        let g = frame.geodetic(p)
+        return frame.enu(Geodetic(latitude: g.latitude, longitude: g.longitude,
+                                  height: height(latitude: g.latitude, longitude: g.longitude))).z
+    }
+
+    /// Pack height without flattening, or nil outside the pack.
+    public mutating func rawHeight(latitude: Double, longitude: Double) -> Double? {
+        guard let pack else { return nil }
+        for z in stride(from: pack.index.maxZoom, through: pack.index.minZoom, by: -1) {
+            let t = WebMercator.tileCoordinates(latitude: latitude, longitude: longitude, zoom: z)
+            let key = TileKey(z: z, x: Int(t.x), y: Int(t.y))
+            guard pack.available.contains(key), !missing.contains(key) else { continue }
+            if field.tiles[key] == nil {
+                guard let heights = try? pack.heights(key) else { missing.insert(key); continue }
+                field.insert(key, heights: heights)
+                order.append(key)
+                if order.count > capacity { field.remove(order.removeFirst()) }
+            }
+            return field.height(latitude: latitude, longitude: longitude)
+        }
+        return nil
+    }
+}

@@ -111,7 +111,10 @@ run_on_sim() {
 
   # Second screen: the in-flight HUD, opened directly by a launch argument.
   xcrun simctl terminate "$udid" "$BUNDLE_ID" >/dev/null 2>&1 || true
-  run_logged "launch-hud-$label" xcrun simctl launch "$udid" "$BUNDLE_ID" -FlightStartScreen hud
+  # Pinned to midday in Phoenix so the capture shows the lit world whatever the clock says (at
+  # night the frame is legitimately near black, which this check could not tell from a failure).
+  run_logged "launch-hud-$label" xcrun simctl launch "$udid" "$BUNDLE_ID" -FlightStartScreen hud \
+    -FlightTimeUTC 2026-06-21T19:30:00Z
   settle "$LAUNCH_SETTLE_SECONDS"
   if ! xcrun simctl spawn "$udid" launchctl list | grep -F "$BUNDLE_ID" | grep -qE '^[0-9]+'; then
     echo "    FAILED: HUD not running on $name ${LAUNCH_SETTLE_SECONDS}s after launch (crashed?)"; exit 1
@@ -127,6 +130,16 @@ run_on_sim() {
     echo "    FAILED: menu and HUD screenshots on $name are identical (stale simulator display?)"; exit 1
   fi
   echo "    ok: HUD running on $name (screenshots differ)"
+  # The world must actually render: at midday the band of sky between the top bar and the
+  # aircraft is bright. A black or failed renderer leaves it black (the night capture of
+  # 2026-11-07 measures 0 here; midday captures measure about 150).
+  local mean
+  mean=$(magick "$OUT/$label-hud.png" -alpha off -resize '100x50!' -crop 40x6+30+12 +repage -colorspace Gray \
+    -format "%[fx:round(mean*255)]" info: 2>/dev/null | head -1)
+  if [ -z "$mean" ] || [ "$mean" -lt 60 ]; then
+    echo "    FAILED: world not rendered on $name (sky brightness ${mean:-unknown} of 255)"; exit 1
+  fi
+  echo "    ok: world rendered on $name (sky brightness $mean)"
 }
 
 device_udid() {

@@ -3,8 +3,9 @@ public import Foundation
 public import Metal
 import os
 import simd
-import SimCore
+public import SimCore
 import Synchronization
+public import Terrain
 
 /// The M1 renderer: physically based sky and aerial perspective, procedural ground, a marked
 /// runway, the test aircraft with a sun shadow, tone mapping and MetalFX upscaling.
@@ -48,6 +49,8 @@ public final class SceneRenderer {
     private let dummyTexture: any MTLTexture
     private let markingAtlas: any MTLTexture
     private let groundBuffer: any MTLBuffer
+    private let groundVertexCount: Int
+    private var terrain: TerrainRenderer?
     private let runwayBuffer: any MTLBuffer
     private let runwayVertexCount: Int
     private let markingsBuffer: any MTLBuffer
@@ -190,8 +193,10 @@ public final class SceneRenderer {
                                             options: .storageModeShared) else { throw RendererError.resource("vertex buffer") }
             return b
         }
-        // Ground: a 200 km square that follows the camera.
-        groundBuffer = try buffer(RunwayGeometry.quad(minX: -100_000, maxX: 100_000, minY: -100_000, maxY: 100_000, z: 0, uv: .zero))
+        // Ground: a 600 km square grid that follows the camera, bent with Earth's curvature.
+        let grid = RunwayGeometry.grid(halfSize: 300_000, cells: 96, z: 0)
+        groundBuffer = try buffer(grid)
+        groundVertexCount = grid.count
         let surface = RunwayGeometry.surface(runway)
         runwayBuffer = try buffer(surface)
         runwayVertexCount = surface.count
@@ -254,20 +259,26 @@ public final class SceneRenderer {
         let cameraAboveGround = max(camera.z - offset.z, 0.5)
         u.atmosphere = SIMD4(Float(cameraAboveGround / 1000), Float(scene.origin.height / 1000), 32,
                              Float(scene.date.timeIntervalSince1970.truncatingRemainder(dividingBy: 10_000)))
-        u.noiseOrigin = SIMD4(Float(camera.x.truncatingRemainder(dividingBy: 1024)),
-                              Float(camera.y.truncatingRemainder(dividingBy: 1024)), 0, 0)
+        // Procedural detail is anchored to the scene frame (not the floating-origin offset), so
+        // patterns stay put as the camera moves.
+        u.noiseOrigin = SIMD4(Float(pose.position.x), Float(pose.position.y), 0, 0)
         u.renderSize = SIMD4(Float(renderSize.x), Float(renderSize.y), 1 / Float(renderSize.x), 1 / Float(renderSize.y))
         u.jitter = SIMD4(jitter.x, jitter.y, 0, 0)
         u.debug = SIMD4(scene.showGround ? 1 : 0, 0, 0, 0)
 
-        // Draws
-        let groundZ = Float(offset.z - camera.z)
+        // Draws. With terrain loaded the procedural ground is only a fallback past the scenery's
+        // edge, so it sits below the lowest terrain.
+        let groundLevel: Double = terrain == nil ? 0 : -200
+        let groundZ = Float(offset.z + groundLevel - camera.z)
         var groundDraw = DrawUniforms()
         groundDraw.model = MatrixMath.translation(SIMD3(0, 0, groundZ))
         groundDraw.prevModel = MatrixMath.translation(SIMD3<Float>(camera - previousCam)) * groundDraw.model
         groundDraw.material = SIMD4(0.95, 0, 0, SurfaceKind.ground.rawValue)
+        groundDraw.emissive = SIMD4(Float(pose.position.x), Float(pose.position.y), 0, 0)
 
+        // Runway: heading about z, then its slope (rising toward the high end).
         let runwayRotation = MatrixMath.rotationZ(Float((90 - Double(runway.heading)) * .pi / 180))
+            * MatrixMath.rotationY(-atan(runway.gradient))
         let runwayCenter = offset
         var runwayDraw = DrawUniforms()
         runwayDraw.model = MatrixMath.translation(relative(runwayCenter, to: camera)) * runwayRotation
@@ -325,8 +336,12 @@ public final class SceneRenderer {
             c.dispatchThreads(MTLSize(width: 1, height: 1, depth: 1), threadsPerThreadgroup: MTLSize(width: 1, height: 1, depth: 1))
             c.endEncoding()
         }
+        // Terrain: upload finished tiles (mipmaps go into this command buffer) and select the
+        // tiles for this camera.
+        let terrainTiles = scene.showGround ? (terrain?.update(camera: camera - offset, commandBuffer: cbAtmosphere) ?? []) : []
         cbAtmosphere.commit()
         signposter.endInterval("Encode atmosphere", encodeAtmosphere)
+        let frustum = MatrixMath.frustumPlanes(viewProjNoJitter)
 
         if shadowOn, let aircraft {
             let cbShadow = makeCommandBuffer(label: "Shadow")
@@ -389,7 +404,26 @@ public final class SceneRenderer {
                 e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: count)
             }
             if scene.showGround {
-                draw(groundBuffer, count: 6, groundDraw, texture: nil)
+                draw(groundBuffer, count: groundVertexCount, groundDraw, texture: nil)
+                var drawn = 0
+                for tile in terrainTiles {
+                    let world = tile.centre + offset
+                    let rel = relative(world, to: camera)
+                    guard MatrixMath.sphereVisible(centre: rel, radius: Float(tile.radius), planes: frustum) else { continue }
+                    var d = DrawUniforms()
+                    d.model = MatrixMath.translation(rel)
+                    d.prevModel = MatrixMath.translation(relative(world, to: previousCam))
+                    d.baseColor = SIMD4(terrainAlbedoScale, terrainAlbedoScale, terrainAlbedoScale, 1)
+                    d.material = SIMD4(0.92, 0, 1, SurfaceKind.terrain.rawValue)
+                    e.setVertexBuffer(tile.vertices, offset: 0, index: 0)
+                    e.setVertexBytes(&d, length: MemoryLayout<DrawUniforms>.stride, index: 2)
+                    e.setFragmentBytes(&d, length: MemoryLayout<DrawUniforms>.stride, index: 2)
+                    e.setFragmentTexture(tile.texture, index: 0)
+                    e.drawIndexedPrimitives(type: .triangle, indexCount: tile.indexCount, indexType: .uint16,
+                                            indexBuffer: tile.indices, indexBufferOffset: 0)
+                    drawn += 1
+                }
+                terrainDrawn = drawn
             }
             if scene.showRunway {
                 draw(runwayBuffer, count: runwayVertexCount, runwayDraw, texture: nil)
@@ -501,6 +535,23 @@ public final class SceneRenderer {
     public static func supports(_ mode: UpscalerMode, device: any MTLDevice) -> Bool {
         Upscaler.supports(mode, device: device)
     }
+
+    /// Streams terrain from a scenery pack, in the scene frame of `origin`. `flatten` areas
+    /// are held just under the drawn pavement. Pass nil to remove terrain.
+    public func setTerrain(_ pack: SceneryPack?, origin: Geodetic, flatten: [FlattenArea]) {
+        let lowered = flatten.map { a in var a = a; a.height -= 0.25; return a }
+        terrain = pack.map { TerrainRenderer(pack: $0, frame: LocalFrame(origin: origin), flatten: lowered, device: device) }
+        previousCamera = nil
+    }
+
+    /// Multiplies the satellite imagery to give surface albedo.
+    public var terrainAlbedoScale: Float = 0.8
+    /// Terrain tiles drawn in the last frame, resident on the GPU, and requested but not ready.
+    public private(set) var terrainDrawn = 0
+    public var terrainResident: (tiles: Int, megabytes: Double) {
+        (terrain?.loadedCount ?? 0, Double(terrain?.residentBytes ?? 0) / 1_048_576)
+    }
+    public var terrainPending: Int { terrain?.pendingCount ?? 0 }
 
     /// Replaces the aircraft (models load in the background after the first frame).
     public func setAircraft(_ model: AC3DModel, textures: URL?) throws {

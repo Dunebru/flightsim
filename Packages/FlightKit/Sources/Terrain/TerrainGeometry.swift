@@ -1,6 +1,6 @@
-public import Foundation
+import Foundation
 public import SimCore
-public import simd
+import simd
 
 /// A rectangle in the scene's ENU frame where the ground is held flat at a fixed height
 /// (runways and aprons, so generated terrain never covers the drawn pavement).
@@ -11,19 +11,31 @@ public struct FlattenArea: Sendable, Equatable {
     public var halfWidth: Double
     /// Direction of the long axis, radians counter-clockwise from east.
     public var angle: Double
-    /// Height above the scene origin, metres.
+    /// Height above the scene origin at the centre, metres.
     public var height: Double
+    /// Rise per metre along the long axis (positive toward `angle`), so a sloped runway stays
+    /// sloped.
+    public var gradient: Double
 
-    public init(centre: SIMD2<Double>, halfLength: Double, halfWidth: Double, angle: Double, height: Double) {
+    public init(centre: SIMD2<Double>, halfLength: Double, halfWidth: Double, angle: Double, height: Double,
+                gradient: Double = 0) {
         self.centre = centre
         self.halfLength = halfLength
         self.halfWidth = halfWidth
         self.angle = angle
         self.height = height
+        self.gradient = gradient
+    }
+
+    /// The held height at a point (metres above the scene origin), following the gradient.
+    public func height(at p: SIMD2<Double>) -> Double {
+        let d = p - centre
+        let along = d.x * cos(angle) + d.y * sin(angle)
+        return height + gradient * max(-halfLength, min(halfLength, along))
     }
 
     /// 0 outside, 1 inside, blending over `margin` metres so the edge is a gentle slope.
-    func weight(_ p: SIMD2<Double>, margin: Double = 60) -> Double {
+    public func weight(_ p: SIMD2<Double>, margin: Double = 60) -> Double {
         let d = p - centre
         let u = abs(d.x * cos(angle) + d.y * sin(angle)) - halfLength
         let v = abs(-d.x * sin(angle) + d.y * cos(angle)) - halfWidth
@@ -63,7 +75,7 @@ public struct TerrainTileGeometry: Sendable {
                     if w > 0 {
                         // Heights are relative to the origin; ENU z includes curvature drop,
                         // which is negligible across an airport, so blend z directly.
-                        p.z = p.z * (1 - w) + area.height * w
+                        p.z = p.z * (1 - w) + area.height(at: SIMD2(p.x, p.y)) * w
                     }
                 }
                 world.append(p)
@@ -173,6 +185,7 @@ public struct HeightField: Sendable {
     }
 
     public mutating func insert(_ key: TileKey, heights: [Float]) { tiles[key] = heights }
+    public mutating func remove(_ key: TileKey) { tiles[key] = nil }
 
     /// Height above mean sea level (metres) at a point, or nil when no tile covers it.
     public func height(latitude: Double, longitude: Double) -> Double? {

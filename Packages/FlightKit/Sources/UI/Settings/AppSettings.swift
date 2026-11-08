@@ -1,5 +1,6 @@
 public import Foundation
 import Observation
+import Renderer
 
 /// How the pilot flies.
 public enum ControlMode: String, Codable, CaseIterable, Sendable {
@@ -20,11 +21,12 @@ public enum StartPosition: String, Codable, CaseIterable, Sendable, Identifiable
     /// Scene ENU position (metres), true heading (degrees), height above ground (feet),
     /// airspeed (knots).
     public var placement: (position: SIMD3<Double>, heading: Double, heightFeet: Double, knots: Double) {
+        let hdg = PhoenixSite.runwayHeading, half = PhoenixSite.runwayLength / 2
         switch self {
-        case .kphxRunway08: (SIMD3(-1_700, 0, 0), 90, 0, 0)
-        case .kphxRunway26: (SIMD3(1_700, 0, 0), 270, 0, 0)
+        case .kphxRunway08: return (PhoenixSite.centreline(-half + 51), hdg, 0, 0)
+        case .kphxRunway26: return (PhoenixSite.centreline(half - 51), hdg + 180, 0, 0)
         // 3 nm (5,556 m) from the runway 08 threshold on a 3 degree glide path: about 950 ft.
-        case .kphxFinal08: (SIMD3(-1_751 - 5_556, 0, 0), 90, 950, 0)
+        case .kphxFinal08: return (PhoenixSite.centreline(-half - 5_556), hdg, 950, 0)
         }
     }
 }

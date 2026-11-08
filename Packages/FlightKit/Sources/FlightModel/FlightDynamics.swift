@@ -218,6 +218,14 @@ public final class FlightDynamics {
         set("fcs/center-brake-cmd-norm", brake)
     }
 
+    /// Ground height under the aircraft, feet above mean sea level. JSBSim treats the ground
+    /// as level at this height around the aircraft; update it as the aircraft moves.
+    public func setTerrainElevation(feet: Double) {
+        set("position/terrain-elevation-asl-ft", feet)
+    }
+
+    public var terrainElevationFeet: Double { self.get("position/terrain-elevation-asl-ft") }
+
     /// Advances `count` fixed steps.
     public func step(_ count: Int = 1) {
         for _ in 0..<count { _ = jsb_step(handle) }

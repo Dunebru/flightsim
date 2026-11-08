@@ -22,6 +22,12 @@ constant float kKindAircraft = 0.0;
 constant float kKindRunway = 1.0;
 constant float kKindMarking = 2.0;
 constant float kKindGround = 3.0;
+constant float kKindTerrain = 4.0;
+
+constexpr sampler kTerrainSampler(filter::linear, mip_filter::linear, address::clamp_to_edge, max_anisotropy(8));
+
+// Mean Earth radius for the ground plane's curvature, metres.
+constant float kEarthRadiusMetres = 6371000.0;
 
 struct VertexOut {
     float4 position [[position]];
@@ -45,6 +51,14 @@ vertex VertexOut sceneVertex(uint vid [[vertex_id]],
     MeshVertex v = vertices[vid];
     float4 world = d.model * float4(v.position.xyz, 1.0);
     float4 prevWorld = d.prevModel * float4(v.position.xyz, 1.0);
+    if (d.material.w == kKindGround) {
+        // The ground plane follows the camera; drop it with Earth's curvature measured from the
+        // scene origin (camera ENU position in emissive.xy) so it falls away to the horizon.
+        float2 enu = world.xy + d.emissive.xy;
+        float drop = dot(enu, enu) / (2.0 * kEarthRadiusMetres);
+        world.z -= drop;
+        prevWorld.z -= drop;
+    }
     VertexOut o;
     o.position = u.viewProj * world;
     o.worldPos = world.xyz;
@@ -185,7 +199,9 @@ fragment GBufferOut sceneFragment(VertexOut in [[stage_in]],
 {
     float kind = d.material.w;
     float3 N = normalize(in.normal);
-    if (!frontFacing) N = -N;
+    // Two-sided meshes (the aircraft) face the viewer; terrain normals (skirts included) are
+    // authored pointing up and are used as they are.
+    if (!frontFacing && kind != kKindTerrain) N = -N;
     float roughness = d.material.x;
     float3 albedo = d.baseColor.rgb;
     float distance = length(in.worldPos);
@@ -193,6 +209,17 @@ fragment GBufferOut sceneFragment(VertexOut in [[stage_in]],
     if (kind == kKindGround) {
         albedo = groundAlbedo(in.worldPos.xy + u.noiseOrigin.xy, distance);
         N = float3(0, 0, 1);
+    } else if (kind == kKindTerrain) {
+        // Satellite imagery as albedo. The mosaic is colour-balanced for display, so scale it
+        // toward measured surface reflectance; near the camera, break up the 10 m pixels.
+        albedo = albedoTexture.sample(kTerrainSampler, in.uv).rgb * d.baseColor.rgb;
+        float detail = saturate(1.0 - distance / 1200.0);
+        if (detail > 0.0) {
+            float2 p = in.worldPos.xy + u.noiseOrigin.xy;
+            float n = fbm(p * 0.21, 3) - 0.5;
+            float fine = valueNoise(p * 1.7) - 0.5;
+            albedo *= 1.0 + (n * 0.30 + fine * 0.12) * detail;
+        }
     } else if (kind == kKindRunway) {
         albedo = runwayAlbedo(in.uv, d.emissive.xy);
         N = float3(0, 0, 1);

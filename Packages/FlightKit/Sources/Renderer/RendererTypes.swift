@@ -37,7 +37,7 @@ struct DrawUniforms {
 }
 
 enum SurfaceKind: Float {
-    case aircraft = 0, runway = 1, marking = 2, ground = 3
+    case aircraft = 0, runway = 1, marking = 2, ground = 3, terrain = 4
 }
 
 /// Size of the GPU-side lighting state (three float4).
@@ -131,17 +131,17 @@ public struct SceneDescription: Sendable {
         self.aircraftHeading = aircraftHeading
     }
 
-    /// The M1 test scene: KPHX runway 8/26 (true heading 090), aircraft near the runway 8
-    /// threshold, chase camera off its left rear quarter.
+    /// The M1 test scene: KPHX runway 8/26, aircraft near the runway 8 threshold, chase camera
+    /// off its left rear quarter.
     public static func phoenixTest(date: Date) -> SceneDescription {
-        let aircraft = SIMD3<Double>(-1_600, 0, 0)
+        let aircraft = PhoenixSite.centreline(-1_600)
         return SceneDescription(
-            origin: Geodetic(latitude: 33.4342, longitude: -112.0116, height: 345),
+            origin: PhoenixSite.origin,
             date: date,
             camera: OrbitCamera(target: aircraft + SIMD3(0, 0, 1.2), yaw: 70 * .pi / 180,
                                 pitch: 8 * .pi / 180, distance: 15),
             aircraftPosition: aircraft,
-            aircraftHeading: .pi / 2
+            aircraftHeading: PhoenixSite.runwayHeading * .pi / 180
         )
     }
 }

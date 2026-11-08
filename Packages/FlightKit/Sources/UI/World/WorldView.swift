@@ -8,6 +8,7 @@ import FlightModel
 import Renderer
 import SimCore
 import SwiftUI
+import Terrain
 import UIKit
 
 /// Owns the renderer and the scene, and drives frames from a CAMetalDisplayLink.
@@ -33,6 +34,10 @@ final class WorldEngine: NSObject {
     @ObservationIgnored var physicsProbe: (() -> FlightState?)?
     /// Cockpit, chase, tower, wing and free-orbit views; drag and pinch adjust the current one.
     @ObservationIgnored var rig = CameraRig()
+    /// The bundled scenery pack (terrain heights and imagery around KPHX), if present.
+    @ObservationIgnored let scenery: SceneryPack?
+    /// Ground under the camera, so no view goes underground.
+    @ObservationIgnored private var cameraGround: GroundModel
 
     private(set) var framesPerSecond: Double = 0
     private(set) var startupError: String?
@@ -51,6 +56,8 @@ final class WorldEngine: NSObject {
         let defaults = UserDefaults.standard
         timeOverride = defaults.string(forKey: "FlightTimeUTC").flatMap { ISO8601DateFormatter().date(from: $0) }
         scene = .phoenixTest(date: timeOverride ?? Date())
+        scenery = Bundle.main.resourceURL.flatMap { try? SceneryPack(root: $0.appendingPathComponent("Bundle/Scenery/kphx")) }
+        cameraGround = GroundModel(pack: scenery, frame: LocalFrame(origin: scene.origin), flatten: PhoenixSite.flatten)
         var made: SceneRenderer?
         var error: String?
         if let device = MTLCreateSystemDefaultDevice() {
@@ -68,6 +75,7 @@ final class WorldEngine: NSObject {
             upscaler = forced
         }
         applyRenderSettings()
+        made?.setTerrain(scenery, origin: scene.origin, flatten: PhoenixSite.flatten)
         loadAircraft()
     }
 
@@ -128,8 +136,11 @@ final class WorldEngine: NSObject {
         lastPresentation = t
         scene.date = timeOverride ?? dateProvider?() ?? Date()
         frameHook?(dt, &scene)
-        scene.cameraPose = rig.pose(aircraftPosition: scene.aircraftPosition, heading: scene.aircraftHeading,
-                                    pitch: scene.aircraftPitch, roll: scene.aircraftRoll, dt: dt)
+        var pose = rig.pose(aircraftPosition: scene.aircraftPosition, heading: scene.aircraftHeading,
+                            pitch: scene.aircraftPitch, roll: scene.aircraftRoll, dt: dt)
+        let floor = cameraGround.groundZ(atENU: pose.position) + 1.5
+        if pose.position.z < floor { pose.position.z = floor }
+        scene.cameraPose = pose
         scene.showAircraft = rig.drawsAircraft
         renderer.render(scene, to: update.drawable.texture, drawable: update.drawable)
         renderer.exposureAdaptation = 0.05

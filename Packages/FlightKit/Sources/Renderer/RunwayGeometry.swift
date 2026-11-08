@@ -15,8 +15,12 @@ struct RunwaySpec {
     var highDesignator: String
     /// True heading of the low end, degrees.
     var heading: Float
+    /// Rise per metre toward the high end.
+    var gradient: Float = 0
 
-    static let kphx08_26 = RunwaySpec(length: 3_502, width: 45.7, lowDesignator: "8", highDesignator: "26", heading: 90)
+    static let kphx08_26 = RunwaySpec(length: Float(PhoenixSite.runwayLength), width: Float(PhoenixSite.runwayWidth),
+                                      lowDesignator: "8", highDesignator: "26",
+                                      heading: Float(PhoenixSite.runwayHeading), gradient: Float(PhoenixSite.runwayGradient))
 }
 
 /// Marking atlas: 16 cells of 64 x 128 px. Cell 0 is solid paint; then digits 0-9, then L, C, R.
@@ -87,6 +91,21 @@ enum MarkingAtlas {
 /// Builds runway surface and marking quads in runway-local coordinates: x along the runway
 /// (low end at -length/2), y across (left of the low-end landing direction is +y), z up.
 enum RunwayGeometry {
+    /// A square grid of triangles centred on the origin (the ground plane: the vertex shader
+    /// bends it with Earth's curvature, so it needs vertices across its whole extent).
+    static func grid(halfSize: Float, cells: Int, z: Float) -> [MeshVertex] {
+        var v = [MeshVertex]()
+        v.reserveCapacity(cells * cells * 6)
+        let step = 2 * halfSize / Float(cells)
+        for j in 0..<cells {
+            for i in 0..<cells {
+                let x0 = -halfSize + Float(i) * step, y0 = -halfSize + Float(j) * step
+                v += quad(minX: x0, maxX: x0 + step, minY: y0, maxY: y0 + step, z: z, uv: .zero)
+            }
+        }
+        return v
+    }
+
     static func surface(_ spec: RunwaySpec) -> [MeshVertex] {
         quad(minX: -spec.length / 2, maxX: spec.length / 2, minY: -spec.width / 2, maxY: spec.width / 2,
              z: 0.02, uv: SIMD4(-spec.length / 2, -spec.width / 2, spec.length / 2, spec.width / 2))

@@ -20,6 +20,8 @@ public final class PhysicsLoop: Sendable {
         var lastError: String?
         /// Height of the reference point above the ground when resting on the gear, feet.
         var restingHeightFeet: Double = 0
+        /// Ground height under the aircraft (mean sea level, feet), from the scenery.
+        var terrainElevationFeet: Double?
     }
 
     /// Reference wrapper so the physics thread and callers share one (noncopyable) mutex.
@@ -94,6 +96,9 @@ public final class PhysicsLoop: Sendable {
     public func setInputs(_ inputs: ControlInputs) { shared.withLock { $0.inputs = inputs } }
     public func updateInputs(_ body: (inout ControlInputs) -> Void) { shared.withLock { body(&$0.inputs) } }
     public func setPaused(_ paused: Bool) { shared.withLock { $0.paused = paused } }
+    /// Ground height under the aircraft, feet above mean sea level; applied before the next
+    /// steps. Update it every frame as the aircraft moves over terrain.
+    public func setTerrainElevation(feet: Double) { shared.withLock { $0.terrainElevationFeet = feet } }
     public func send(_ command: Command) { shared.withLock { $0.commands.append(command) } }
     public func stop() { shared.withLock { $0.running = false } }
 
@@ -105,20 +110,26 @@ public final class PhysicsLoop: Sendable {
         let start = Date.timeIntervalSinceReferenceDate
         var stepped = 0
         var lastTick = start
+        var appliedTerrain: Double?
         while true {
-            let (running, paused, inputs, commands) = shared.withLock { s -> (Bool, Bool, ControlInputs, [Command]) in
+            let (running, paused, inputs, commands, terrain) = shared.withLock { s -> (Bool, Bool, ControlInputs, [Command], Double?) in
                 let c = s.commands
                 s.commands = []
-                return (s.running, s.paused, s.inputs, c)
+                return (s.running, s.paused, s.inputs, c, s.terrainElevationFeet)
             }
             if !running { return }
             for command in commands {
                 switch command {
                 case .reset(let ic):
                     do { try fdm.initialize(ic) } catch { shared.withLock { $0.lastError = String(describing: error) } }
+                    appliedTerrain = ic.terrainElevationFeet
                 case .trim:
                     do { try fdm.trim(.full) } catch { shared.withLock { $0.lastError = String(describing: error) } }
                 }
+            }
+            if let terrain, terrain != appliedTerrain {
+                fdm.setTerrainElevation(feet: terrain)
+                appliedTerrain = terrain
             }
             let now = Date.timeIntervalSinceReferenceDate
             if paused {

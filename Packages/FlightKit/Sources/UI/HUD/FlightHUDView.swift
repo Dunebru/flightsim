@@ -156,7 +156,8 @@ public struct FlightHUDView: View {
     #if os(iOS)
     private func startSession() {
         model.profile = AircraftProfile.all.first { $0.id == settings.aircraftID } ?? .c172
-        let s = FlightSession(profile: model.profile, origin: engine.scene.origin, start: settings.start, settings: settings)
+        let s = FlightSession(profile: model.profile, origin: engine.scene.origin, start: settings.start, settings: settings,
+                              scenery: engine.scenery)
         s.configureHUD(model)
         session = s
         let hud = model
