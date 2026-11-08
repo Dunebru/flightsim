@@ -29,6 +29,9 @@ final class FlightSession {
     /// ATC at the departure airport, and the voice that speaks it.
     let atc: ATCController
     private let voice = ATCVoice()
+    /// Engine, wind and rolling sound.
+    private let audio = FlightAudio()
+    private var wasOnGround = true
     /// Calls made by a launch argument (scripts), once traffic is ready.
     var scriptedATC: [ATCRequest] = []
     private var lastScripted = 0.0
@@ -103,6 +106,7 @@ final class FlightSession {
             physics = try PhysicsLoop(model: profile.id, initial: spawnConditions())
             physics?.setController(autopilot)
             startTraffic()
+            audio.start()
         } catch {
             self.error = String(describing: error)
         }
@@ -110,6 +114,7 @@ final class FlightSession {
     }
 
     isolated deinit {
+        audio.stop()
         physics?.stop()
         tilt.stop()
     }
@@ -195,6 +200,21 @@ final class FlightSession {
         guard let physics else { return }
         scene.clouds = cloudLayers
         lastPosition = SIMD2(scene.aircraftPosition.x, scene.aircraftPosition.y)
+        if let s = lastState {
+            var sound = SoundParameters()
+            sound.piston = !s.engineIsTurbine
+            sound.rpm = s.engineIsTurbine ? 0 : s.engineIndication
+            sound.n1 = s.engineIsTurbine ? s.engineIndication : 0
+            sound.throttle = s.throttle
+            sound.airspeedKnots = s.trueAirspeedKnots
+            sound.groundSpeedKnots = s.groundSpeedKnots
+            sound.onGround = s.onGround
+            sound.stallWarning = hud.stallWarning
+            sound.exterior = hud.camera != .cockpit
+            audio.update(sound)
+            if s.onGround && !wasOnGround && s.verticalSpeedFPM < -80 { audio.touchdown(-s.verticalSpeedFPM / 600) }
+            wasOnGround = s.onGround
+        }
         if let traffic, let s = lastState {
             traffic.player = (lastPosition, s.onGround)
             if let eye = scene.cameraPose?.position { traffic.viewer = SIMD2(eye.x, eye.y) }
