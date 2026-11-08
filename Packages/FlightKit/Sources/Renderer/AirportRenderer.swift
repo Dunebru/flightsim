@@ -28,12 +28,21 @@ final class AirportRenderer {
     let radius: Double
     let lights: (any MTLBuffer)?
     let lightCount: Int
+    /// City buildings around the airport, in chunks drawn by distance.
+    struct CityDraw {
+        let vertices: any MTLBuffer
+        let indices: any MTLBuffer
+        let indexCount: Int
+        let centre: SIMD3<Double>
+        let radius: Double
+    }
+    private(set) var city: [CityDraw] = []
 
     /// Building facade codes for the shader (DrawUniforms.emissive.x).
     enum Facade: Float { case terminal = 1, hangar = 2, generic = 3, parking = 4, tower = 5, glass = 6, bridge = 7, windsock = 8 }
 
     init?(site: AirportSite, geometry: AirportGeometry, lights points: [LightPoint], signs: [SignPlacement],
-          sceneFrame: LocalFrame, device: any MTLDevice) {
+          city chunks: [CityChunk] = [], sceneFrame: LocalFrame, device: any MTLDevice) {
         name = site.layout.icao
         let a = site.frame
         let o = sceneFrame.enu(a.origin)
@@ -64,6 +73,18 @@ final class AirportRenderer {
                             params: SIMD4(params.x, params.y, params.z, p.nightOnly ? 1 : 0))
         }
         lightCount = gpu.count
+        city = chunks.compactMap { ch in
+            guard !ch.indices.isEmpty else { return nil }
+            var v = [CompactVertex]()
+            v.reserveCapacity(ch.positions.count)
+            for i in 0..<ch.positions.count {
+                let p = ch.positions[i], n = ch.normals[i], t = ch.uvs[i]
+                v.append(CompactVertex(x: p.x, y: p.y, z: p.z, nx: n.x, ny: n.y, nz: n.z, seed: n.w, u: t.x, v: t.y))
+            }
+            guard let vb = device.makeBuffer(bytes: v, length: v.count * MemoryLayout<CompactVertex>.stride, options: .storageModeShared),
+                  let ib = device.makeBuffer(bytes: ch.indices, length: ch.indices.count * 4, options: .storageModeShared) else { return nil }
+            return CityDraw(vertices: vb, indices: ib, indexCount: ch.indices.count, centre: ch.centre, radius: ch.radius)
+        }
         lights = gpu.isEmpty ? nil : device.makeBuffer(bytes: gpu, length: gpu.count * MemoryLayout<GPULight>.stride, options: .storageModeShared)
 
         func buffer(_ m: MeshData) -> (any MTLBuffer)? {

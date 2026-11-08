@@ -26,6 +26,7 @@ struct RendererTests {
         #expect(MemoryLayout<DrawUniforms>.stride == 2 * 64 + 3 * 16)
         #expect(MemoryLayout<MeshVertex>.stride == 48)
         #expect(MemoryLayout<TerrainVertex>.stride == 20)
+        #expect(MemoryLayout<CompactVertex>.stride == 24)
     }
 
     @Test func reverseZProjectionMapsNearToOneAndFarToZero() {

@@ -29,6 +29,9 @@ public final class SceneRenderer {
     private let glassPipeline: any MTLRenderPipelineState
     private let terrainPipeline: any MTLRenderPipelineState
     private let lightPipeline: any MTLRenderPipelineState
+    private let compactPipeline: any MTLRenderPipelineState
+    /// City buildings are drawn within this distance (metres).
+    public var cityDrawDistance: Double = 6_000
     private let shadowPipeline: any MTLRenderPipelineState
     private let tonemapPipeline: any MTLRenderPipelineState
     private var finalPipelines: [MTLPixelFormat.RawValue: any MTLRenderPipelineState] = [:]
@@ -134,6 +137,7 @@ public final class SceneRenderer {
         scenePipeline = try render("sceneVertex", "sceneFragment", colors: gbuffer, depth: Self.depthFormat)
         skyPipeline = try render("skyVertex", "skyFragment", colors: gbuffer, depth: Self.depthFormat)
         terrainPipeline = try render("terrainVertex", "sceneFragment", colors: gbuffer, depth: Self.depthFormat)
+        compactPipeline = try render("compactVertex", "sceneFragment", colors: gbuffer, depth: Self.depthFormat)
         lightPipeline = try render("lightVertex", "lightFragment", colors: gbuffer, depth: Self.depthFormat) { d in
             let c = d.colorAttachments[0]!
             c.isBlendingEnabled = true
@@ -488,6 +492,33 @@ public final class SceneRenderer {
                 }
             }
             e.setDepthBias(0, slopeScale: 0, clamp: 0)
+            // City buildings around the airports, chunk by chunk, near the camera only.
+            var cityDrawn = 0
+            for airport in airports where !airport.city.isEmpty {
+                let model = airport.model(relativeTo: camera, offset: offset)
+                let prev = airport.model(relativeTo: previousCam, offset: offset)
+                var d = DrawUniforms()
+                d.model = model
+                d.prevModel = reset ? model : prev
+                d.material = SIMD4(0.85, 0, 0, SurfaceKind.building.rawValue)
+                d.emissive = SIMD4(9, 0, 0, 0)
+                e.setRenderPipelineState(compactPipeline)
+                e.setVertexBytes(&d, length: MemoryLayout<DrawUniforms>.stride, index: 2)
+                e.setFragmentBytes(&d, length: MemoryLayout<DrawUniforms>.stride, index: 2)
+                e.setFragmentTexture(dummyTexture, index: 0)
+                for chunk in airport.city {
+                    let c4 = model * SIMD4<Float>(SIMD3<Float>(chunk.centre), 1)
+                    let c = SIMD3<Float>(c4.x, c4.y, c4.z)
+                    guard Double(simd_length(c)) - chunk.radius < cityDrawDistance,
+                          MatrixMath.sphereVisible(centre: c, radius: Float(chunk.radius), planes: frustum) else { continue }
+                    e.setVertexBuffer(chunk.vertices, offset: 0, index: 0)
+                    e.drawIndexedPrimitives(type: .triangle, indexCount: chunk.indexCount, indexType: .uint32,
+                                            indexBuffer: chunk.indices, indexBufferOffset: 0)
+                    cityDrawn += 1
+                }
+                e.setRenderPipelineState(scenePipeline)
+            }
+            cityChunksDrawn = cityDrawn
             if scene.showRunway && airports.isEmpty {
                 draw(runwayBuffer, count: runwayVertexCount, runwayDraw, texture: nil)
                 e.setDepthBias(4, slopeScale: 4, clamp: 0)
@@ -626,11 +657,11 @@ public final class SceneRenderer {
 
     /// Airports to draw, each built in its own frame and placed into the scene frame of
     /// `sceneOrigin`. Replaces the stand-in runway.
-    public func setAirports(_ sites: [(site: AirportSite, geometry: AirportGeometry, lights: [LightPoint])], sceneOrigin: Geodetic) {
+    public func setAirports(_ assets: [AirportAssets], sceneOrigin: Geodetic) {
         let frame = LocalFrame(origin: sceneOrigin)
-        airports = sites.compactMap {
+        airports = assets.compactMap {
             AirportRenderer(site: $0.site, geometry: $0.geometry, lights: $0.lights, signs: AirportSigns.build($0.site),
-                            sceneFrame: frame, device: device)
+                            city: $0.city, sceneFrame: frame, device: device)
         }
         previousCamera = nil
     }
@@ -651,6 +682,7 @@ public final class SceneRenderer {
     public var terrainAlbedoScale: Float = 0.8
     /// Terrain tiles drawn in the last frame, resident on the GPU, and requested but not ready.
     public private(set) var terrainDrawn = 0
+    public private(set) var cityChunksDrawn = 0
     public var terrainResident: (tiles: Int, megabytes: Double) {
         (terrain?.loadedCount ?? 0, Double(terrain?.residentBytes ?? 0) / 1_048_576)
     }

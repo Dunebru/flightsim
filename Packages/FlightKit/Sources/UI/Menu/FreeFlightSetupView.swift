@@ -18,7 +18,8 @@ public struct FreeFlightSetupView: View {
     private static let layouts: [AirportLayout] = {
         guard let folder = Bundle.main.resourceURL?.appendingPathComponent("Bundle/Airports"),
               let files = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil) else { return [] }
-        return files.filter { $0.pathExtension == "json" }.compactMap { try? AirportLayout.load($0) }.sorted { $0.icao > $1.icao }
+        return files.filter { $0.pathExtension == "json" && !$0.lastPathComponent.contains("-city") }
+            .compactMap { try? AirportLayout.load($0) }.sorted { $0.icao > $1.icao }
     }()
 
     private var layout: AirportLayout? { Self.layouts.first { $0.icao == settings.airport } ?? Self.layouts.first }

@@ -141,6 +141,25 @@ public struct Taxiway: Codable, Sendable {
     }
 }
 
+/// Buildings around an airport (outside its outline), compact: footprints in metres east and
+/// north of the airport reference point.
+public struct SurroundingBuildings: Codable, Sendable {
+    public var reference: LatLon
+    /// Per building: height in metres, then x0, y0, x1, y1, ... (open ring, counter-clockwise).
+    public var buildings: [[Float]]
+    public var source: String
+
+    public init(reference: LatLon, buildings: [[Float]], source: String) {
+        self.reference = reference
+        self.buildings = buildings
+        self.source = source
+    }
+
+    public static func load(_ url: URL) throws -> SurroundingBuildings {
+        try JSONDecoder().decode(SurroundingBuildings.self, from: Data(contentsOf: url))
+    }
+}
+
 /// A paved area (apron) as a polygon with holes.
 public struct Area: Codable, Sendable {
     public var outer: [LatLon]

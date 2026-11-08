@@ -42,6 +42,13 @@ struct LightUniforms {
     var params = SIMD4<Float>.zero
 }
 
+/// Must match `CompactVertex` in 20_Scene.metal (24 bytes): city buildings.
+struct CompactVertex {
+    var x, y, z: Float
+    var nx, ny, nz, seed: Int8
+    var u, v: Float
+}
+
 /// Must match `TerrainVertex` in 20_Scene.metal (20 bytes).
 struct TerrainVertex {
     var x, y, z: Float

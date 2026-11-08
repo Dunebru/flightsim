@@ -42,9 +42,9 @@ PY
 
 for p in "${PACKS[@]}"; do
   case "$p" in
-    kphx) bake kphx --center 33.44085,-112.011 --usgs-from-zoom 12 \
+    kphx) bake kphx --center 33.44085,-112.011 --usgs-from-zoom 12 --naip-from-zoom 17 \
             --dem Data/raw/dem/phoenix_3857.bin --dem-info Data/raw/dem/phoenix_3857.json ;;
-    klax) bake klax --center 33.942501,-118.407997 --usgs-from-zoom 12 --terrarium-max-zoom 16 ;;
+    klax) bake klax --center 33.942501,-118.407997 --usgs-from-zoom 12 --naip-from-zoom 17 --terrarium-max-zoom 18 ;;
     world) bake world --world 5 ;;
     *) echo "unknown pack $p"; exit 64 ;;
   esac

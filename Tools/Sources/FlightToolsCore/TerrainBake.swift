@@ -82,6 +82,8 @@ public struct BakePlan: Sendable {
         Ring(zooms: 14...14, radiusKilometres: 12),
         Ring(zooms: 15...15, radiusKilometres: 5),      // the airport and its approaches
         Ring(zooms: 16...16, radiusKilometres: 2.6),
+        Ring(zooms: 17...17, radiusKilometres: 2.6),   // NAIP, about 1 m per pixel
+        Ring(zooms: 18...18, radiusKilometres: 1.6),   // NAIP, about 0.5 m per pixel
     ])
 
     public init(rings: [Ring]) { self.rings = rings }
@@ -145,9 +147,14 @@ public struct TerrainBaker: Sendable {
     public let imageryCache: URL?
     /// Levels at or above this use USGS imagery; nil: EOX everywhere.
     public let usgsFromZoom: Int?
+    /// Levels at or above this use NAIP through `naipSearch`.
+    public let naipFromZoom: Int?
+    public let naipSearch: String?
 
     public init(dem: DEMRaster?, terrarium: TerrariumSource?, terrariumMaxZoom: Int, output: URL, name: String,
-                imageryCache: URL?, usgsFromZoom: Int?) {
+                imageryCache: URL?, usgsFromZoom: Int?, naipFromZoom: Int? = nil, naipSearch: String? = nil) {
+        self.naipFromZoom = naipFromZoom
+        self.naipSearch = naipSearch
         self.dem = dem
         self.terrarium = terrarium
         self.terrariumMaxZoom = terrariumMaxZoom
@@ -158,9 +165,14 @@ public struct TerrainBaker: Sendable {
     }
 
     func source(for k: TileKey) -> ImagerySource {
+        if let z = naipFromZoom, naipSearch != nil, k.z >= z { return .naip }
         if let z = usgsFromZoom, k.z >= z { return .usgs }
         return .eox
     }
+
+    /// How strongly a Sentinel-2 tile is pulled to the USGS palette: fully from zoom 10, fading
+    /// out by zoom 7, so the regional levels blend into the untouched world base.
+    static func eoxMatchStrength(_ z: Int) -> Double { min(max(Double(z - 7) / 3, 0), 1) }
 
     /// Writes heights and imagery for every tile with a height source; returns the index.
     public func bake(tiles: [TileKey], log: @Sendable (String) -> Void = { _ in }) async throws -> SceneryPackIndex {
@@ -195,25 +207,38 @@ public struct TerrainBaker: Sendable {
 
         var sources: [String] = []
         if let cache = imageryCache {
-            // Raw downloads for every tile, plus EOX at the first USGS level as the colour reference.
-            let reference = usgsFromZoom.map { z in baked.filter { $0.z == z } } ?? []
-            try await Self.ensureCached(baked.map { ($0, source(for: $0)) } + reference.map { ($0, .eox) }, cache: cache, log: log)
-            var transfer: (ColourStats, ColourStats)?
-            if !reference.isEmpty {
-                func stats(_ s: ImagerySource) throws -> ColourStats {
-                    ColourStats.of(try reference.compactMap { k in ImageCodec.decode(try Data(contentsOf: Self.cached(k, s, cache)))?.pixels })
-                }
-                let usgs = try stats(.usgs), eox = try stats(.eox)
-                transfer = (usgs, eox)
-                log(String(format: "colour match at zoom %d: USGS mean %.0f %.0f %.0f -> EOX %.0f %.0f %.0f",
-                           usgsFromZoom!, usgs.mean.x, usgs.mean.y, usgs.mean.z, eox.mean.x, eox.mean.y, eox.mean.z))
+            // The USGS orthophotos are the colour anchor (aerial photography, close to how the
+            // ground looks). Sentinel-2 is matched to them at the first USGS level, NAIP at the
+            // last; both references are downloaded alongside.
+            let eoxReference = usgsFromZoom.map { z in baked.filter { $0.z == z } } ?? []
+            let naipReference = naipFromZoom.flatMap { z in naipSearch == nil ? nil : baked.filter { $0.z == z - 1 } } ?? []
+            try await Self.ensureCached(baked.map { ($0, source(for: $0)) } + eoxReference.map { ($0, .eox) } + naipReference.map { ($0, .naip) },
+                                        cache: cache, naipSearch: naipSearch, log: log)
+            func stats(_ keys: [TileKey], _ s: ImagerySource) throws -> ColourStats {
+                ColourStats.of(try keys.compactMap { k in ImageCodec.decode(try Data(contentsOf: Self.cached(k, s, cache)))?.pixels })
+            }
+            var eoxToUSGS: (ColourStats, ColourStats)?, naipToUSGS: (ColourStats, ColourStats)?
+            if !eoxReference.isEmpty {
+                let eox = try stats(eoxReference, .eox), usgs = try stats(eoxReference, .usgs)
+                eoxToUSGS = (eox, usgs)
+                log(String(format: "colour: Sentinel-2 mean %.0f %.0f %.0f -> USGS %.0f %.0f %.0f", eox.mean.x, eox.mean.y, eox.mean.z, usgs.mean.x, usgs.mean.y, usgs.mean.z))
+            }
+            if !naipReference.isEmpty {
+                let naip = try stats(naipReference, .naip), usgs = try stats(naipReference, .usgs)
+                naipToUSGS = (naip, usgs)
+                log(String(format: "colour: NAIP mean %.0f %.0f %.0f -> USGS %.0f %.0f %.0f", naip.mean.x, naip.mean.y, naip.mean.z, usgs.mean.x, usgs.mean.y, usgs.mean.z))
             }
             for k in baked {
-                let raw = try Data(contentsOf: Self.cached(k, source(for: k), cache))
+                let source = source(for: k)
+                let raw = try Data(contentsOf: Self.cached(k, source, cache))
                 var out = raw
-                if source(for: k) == .usgs, let (from, to) = transfer, let img = ImageCodec.decode(raw),
-                   let jpeg = ImageCodec.encodeJPEG(from.transfer(img.pixels, to: to), width: img.width, height: img.height) {
-                    out = jpeg
+                var match: (ColourStats, ColourStats, Double)?
+                if source == .eox, let (a, b) = eoxToUSGS { match = (a, b, Self.eoxMatchStrength(k.z)) }
+                if source == .naip, let (a, b) = naipToUSGS { match = (a, b, 1) }
+                if let (from, to, strength) = match, strength > 0, let img = ImageCodec.decode(raw) {
+                    // Partial strength: blend the target statistics toward the source's own.
+                    let target = ColourStats(mean: from.mean + (to.mean - from.mean) * strength, std: from.std + (to.std - from.std) * strength)
+                    if let jpeg = ImageCodec.encodeJPEG(from.transfer(img.pixels, to: target), width: img.width, height: img.height) { out = jpeg }
                 }
                 let dest = output.appendingPathComponent(SceneryPack.imageryPath(k))
                 try fm.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -283,11 +308,13 @@ public struct TerrainBaker: Sendable {
     }
 
     static func cached(_ k: TileKey, _ s: ImagerySource, _ cache: URL) -> URL {
-        cache.appendingPathComponent("\(s.rawValue)/\(k.z)/\(k.x)/\(k.y).jpg")
+        if s == .naip { return cache.appendingPathComponent("naip/\(k.z)/\(k.x)/\(k.y).jpg") }
+        return cache.appendingPathComponent("\(s.rawValue)/\(k.z)/\(k.x)/\(k.y).jpg")
     }
 
     /// Downloads whatever is not cached yet, four at a time.
-    static func ensureCached(_ wanted: [(TileKey, ImagerySource)], cache: URL, log: @Sendable (String) -> Void) async throws {
+    static func ensureCached(_ wanted: [(TileKey, ImagerySource)], cache: URL, naipSearch: String? = nil,
+                             log: @Sendable (String) -> Void) async throws {
         let missing = wanted.filter { !FileManager.default.fileExists(atPath: cached($0.0, $0.1, cache).path) }
         log("imagery: \(missing.count) of \(wanted.count) tiles to download")
         try await withThrowingTaskGroup(of: Void.self) { group in
@@ -295,7 +322,7 @@ public struct TerrainBaker: Sendable {
             func add() {
                 guard let (k, s) = iterator.next() else { return }
                 group.addTask {
-                    let data = try await Downloader.get(s.url(k))
+                    let data = try await Downloader.get(s.url(k, naipSearch: naipSearch))
                     let dest = cached(k, s, cache)
                     try FileManager.default.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
                     try data.write(to: dest)

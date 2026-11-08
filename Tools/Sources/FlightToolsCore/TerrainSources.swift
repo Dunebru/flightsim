@@ -165,18 +165,42 @@ public enum ImagerySource: String, Sendable, CaseIterable {
     /// USGS The National Map orthoimagery (NAIP-based in the US), public domain, cached to
     /// zoom 16 (about 2 m per pixel at Phoenix).
     case usgs
+    /// USDA NAIP aerial photography (0.6 m, public domain) through Microsoft Planetary
+    /// Computer's mosaic tiler, for the levels finer than the USGS cache (zoom 17 and 18).
+    case naip
 
-    public func url(_ k: TileKey) -> String {
+    /// `naipSearch`: a Planetary Computer mosaic search registered for the region.
+    public func url(_ k: TileKey, naipSearch: String? = nil) -> String {
         switch self {
         case .eox: String(format: "https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2025_3857/default/GoogleMapsCompatible/%d/%d/%d.jpg", k.z, k.y, k.x)
         case .usgs: String(format: "https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/%d/%d/%d", k.z, k.y, k.x)
+        case .naip:
+            "https://planetarycomputer.microsoft.com/api/data/v1/mosaic/\(naipSearch ?? "")/tiles/WebMercatorQuad/\(k.z)/\(k.x)/\(k.y)@1x"
+                + "?collection=naip&assets=image&asset_bidx=image%7C1%2C2%2C3&nodata=0&format=jpg"
         }
+    }
+
+    /// Registers a NAIP mosaic over a bounding box (newest imagery first) and returns its id.
+    public static func registerNAIP(south: Double, west: Double, north: Double, east: Double) async throws -> String {
+        var request = URLRequest(url: URL(string: "https://planetarycomputer.microsoft.com/api/data/v1/mosaic/register")!)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let body = """
+        {"collections":["naip"],"filter-lang":"cql2-json","filter":{"op":"and","args":[{"op":"s_intersects","args":[{"property":"geometry"},\
+        {"type":"Polygon","coordinates":[[[\(west),\(south)],[\(east),\(south)],[\(east),\(north)],[\(west),\(north)],[\(west),\(south)]]]}]},\
+        {"op":">=","args":[{"property":"datetime"},"2019-01-01T00:00:00Z"]}]},"sortby":[{"field":"datetime","direction":"desc"}]}
+        """
+        request.httpBody = body.data(using: .utf8)
+        let (data, _) = try await URLSession.shared.data(for: request)
+        struct Reply: Decodable { let searchid: String }
+        return try JSONDecoder().decode(Reply.self, from: data).searchid
     }
 
     public var attribution: String {
         switch self {
         case .eox: "EOX Sentinel-2 cloudless 2025 (CC BY-NC-SA 4.0), https://s2maps.eu"
         case .usgs: "USGS The National Map orthoimagery (public domain)"
+        case .naip: "USDA NAIP aerial imagery via Microsoft Planetary Computer (public domain)"
         }
     }
 }

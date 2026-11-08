@@ -193,3 +193,36 @@ struct AirportSignTests {
         #expect(distance.filter { $0.front.text == "10" }.count >= 2)
     }
 }
+
+struct TaxiwayCentrelineLightTests {
+    /// KLAX (ALSF-2 on 24R and 25L) gets green taxiway centreline lights; KPHX (no CAT II/III
+    /// approach system) does not.
+    @Test func onlyAtLowVisibilityAirports() throws {
+        func greens(_ icao: String) throws -> Int {
+            let s = try AirportGeometryTests.site(icao)
+            return AirportLights.build(s).filter { $0.colour.y > 0.9 && $0.colour.x < 0.5 && $0.candela == 120 }.count
+        }
+        #expect(try greens("KLAX") > 500)
+        #expect(try greens("KPHX") == 0)
+    }
+}
+
+struct CityGeometryTests {
+    @Test func buildsChunkedCityOnTheGround() throws {
+        let s = try AirportGeometryTests.site("KPHX")
+        let city = try SurroundingBuildings.load(AirportGeometryTests.dir.appendingPathComponent("KPHX-city.json"))
+        let chunks = CityGeometry.build(city, site: s) { _ in 10 }      // flat ground at z = 10
+        let triangles = chunks.reduce(0) { $0 + $1.indices.count / 3 }
+        print("KPHX city: \(city.buildings.count) buildings, \(chunks.count) chunks, \(triangles) triangles")
+        #expect(chunks.count > 20)
+        #expect(triangles > city.buildings.count * 6)
+        for ch in chunks {
+            #expect(ch.positions.allSatisfy { $0.x.isFinite && $0.y.isFinite && $0.z >= 9.6 && $0.z < 300 })
+            #expect(ch.indices.allSatisfy { Int($0) < ch.positions.count })
+        }
+        // A building's roof sits its height above the ground (base sunk 0.3 m).
+        let first = city.buildings[0]
+        let roofZ = chunks.flatMap(\.positions).contains { abs(Double($0.z) - (10 + Double(first[0]))) < 0.01 }
+        #expect(roofZ)
+    }
+}

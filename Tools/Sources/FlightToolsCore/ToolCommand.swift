@@ -20,7 +20,7 @@ public enum ToolCommand: String, CaseIterable, Sendable {
     public static var usage: String {
         "usage: flight-tools <command>\n" + allCases.map { c in
             if let m = c.plannedFor { return "  \(c.rawValue)  (not implemented, planned for \(m))" }
-            if c == .airportImport { return "  \(c.rawValue)  --icao <ICAO> --nasr <dir> --osm-cache <dir> --out <file.json>" }
+            if c == .airportImport { return "  \(c.rawValue)  --icao <ICAO> --nasr <dir> --osm-cache <dir> --out <file.json> [--surroundings <km>]" }
             return "  \(c.rawValue)  " + (c == .terrainBake
                 ? "(--center <lat,lon> | --world <max zoom>) --name <name> --out <dir> [--dem <raster.bin> --dem-info <gdalinfo.json>]\n"
                   + "      [--terrarium-cache <dir> [--terrarium-max-zoom 11]] [--imagery-cache <dir> [--usgs-from-zoom 12]]"
@@ -44,7 +44,7 @@ public func runTool(_ arguments: [String], log: @Sendable @escaping (String) -> 
         // An option the tool does not know is a mistake, not something to ignore: a mistyped
         // cache path once produced a pack with no imagery and no regional heights.
         let known: Set<String> = ["--dem", "--dem-info", "--center", "--world", "--name", "--out", "--terrarium-cache",
-                                  "--terrarium-max-zoom", "--imagery-cache", "--usgs-from-zoom"]
+                                  "--terrarium-max-zoom", "--imagery-cache", "--usgs-from-zoom", "--naip-from-zoom"]
         if let unknown = options.names.first(where: { !known.contains($0) }) {
             return (64, "terrain-bake: unknown option \(unknown)\n" + ToolCommand.usage)
         }
@@ -66,31 +66,50 @@ public func runTool(_ arguments: [String], log: @Sendable @escaping (String) -> 
             }
             log("plan: \(tiles.count) tiles")
             let terrarium = options["--terrarium-cache"].map { TerrariumSource(cache: URL(fileURLWithPath: $0)) }
+            // NAIP: register a Planetary Computer mosaic over the finest tiles.
+            var naipSearch: String?
+            let naipFrom = options["--naip-from-zoom"].flatMap(Int.init)
+            if let z = naipFrom {
+                let fine = tiles.filter { $0.z >= z - 1 }.map { WebMercator.bounds($0) }
+                if !fine.isEmpty {
+                    naipSearch = try await ImagerySource.registerNAIP(south: fine.map(\.south).min()!, west: fine.map(\.west).min()!,
+                                                                     north: fine.map(\.north).max()!, east: fine.map(\.east).max()!)
+                    log("NAIP mosaic \(naipSearch!)")
+                }
+            }
             let baker = TerrainBaker(dem: raster, terrarium: terrarium,
                                      terrariumMaxZoom: options["--terrarium-max-zoom"].flatMap(Int.init) ?? 11,
                                      output: URL(fileURLWithPath: out), name: name,
                                      imageryCache: options["--imagery-cache"].map { URL(fileURLWithPath: $0) },
-                                     usgsFromZoom: options["--usgs-from-zoom"].flatMap(Int.init))
+                                     usgsFromZoom: options["--usgs-from-zoom"].flatMap(Int.init),
+                                     naipFromZoom: naipFrom, naipSearch: naipSearch)
             let index = try await baker.bake(tiles: tiles, log: log)
             return (0, "baked \(index.tiles.count) tiles, zoom \(index.minZoom)-\(index.maxZoom), into \(out)")
         } catch {
             return (1, "terrain-bake failed: \(error)")
         }
     case .airportImport:
-        let known: Set<String> = ["--icao", "--nasr", "--osm-cache", "--out"]
+        let known: Set<String> = ["--icao", "--nasr", "--osm-cache", "--out", "--surroundings"]
         if let unknown = options.names.first(where: { !known.contains($0) }) {
             return (64, "airport-import: unknown option \(unknown)\n" + ToolCommand.usage)
         }
         guard let icao = options["--icao"], let nasr = options["--nasr"], let cache = options["--osm-cache"],
               let out = options["--out"] else { return (64, ToolCommand.usage) }
         do {
-            let layout = try await AirportImporter(nasrDirectory: URL(fileURLWithPath: nasr), osmCache: URL(fileURLWithPath: cache))
-                .run(icao: icao, log: log)
+            let importer = AirportImporter(nasrDirectory: URL(fileURLWithPath: nasr), osmCache: URL(fileURLWithPath: cache))
+            let layout = try await importer.run(icao: icao, log: log)
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.sortedKeys]
             let url = URL(fileURLWithPath: out)
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             try encoder.encode(layout).write(to: url)
+            // `--surroundings <km>`: buildings within that distance around the airport, written
+            // next to the layout as <ICAO>-city.json.
+            if let km = options["--surroundings"].flatMap(Double.init) {
+                let city = try await importer.surroundings(of: layout, margin: km / 111, log: log)
+                let cityURL = url.deletingLastPathComponent().appendingPathComponent("\(icao)-city.json")
+                try JSONEncoder().encode(city).write(to: cityURL)
+            }
             return (0, "wrote \(out)")
         } catch {
             return (1, "airport-import failed: \(error)")

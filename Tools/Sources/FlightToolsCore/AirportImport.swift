@@ -254,6 +254,76 @@ public struct AirportImporter: Sendable {
         self.osmCache = osmCache
     }
 
+    /// Buildings outside the airport's outline: within `margin` degrees of it, and along each
+    /// runway's approach corridor (1.2 km either side of the extended centreline, out to 9 km
+    /// from the threshold), so a final approach flies over a continuous city.
+    public func surroundings(of layout: AirportLayout, margin: Double, log: @Sendable (String) -> Void = { _ in }) async throws -> SurroundingBuildings {
+        let plane = LocalPlane(layout.reference)
+        let hull = (layout.boundary.first ?? []).map(plane.xy)
+        // Corridors as rectangles in the local plane.
+        var corridors: [(SIMD2<Double>, SIMD2<Double>)] = []    // (threshold, outward unit)
+        for r in layout.runways {
+            let a = plane.xy(r.ends[0].position), b = plane.xy(r.ends[1].position)
+            let d = (b - a) / max((b - a).x * (b - a).x + (b - a).y * (b - a).y, 1).squareRoot()
+            corridors.append((a, -d))
+            corridors.append((b, d))
+        }
+        func inCorridor(_ p: SIMD2<Double>) -> Bool {
+            corridors.contains { t, out in
+                let v = p - t
+                let along = (v * out).sum(), across = abs(v.x * out.y - v.y * out.x)
+                return along > -500 && along < 9_000 && across < 1_200
+            }
+        }
+        var all = layout.boundary.flatMap { $0 }
+        for (t, out) in corridors {
+            for (s, side) in [(9_000.0, 1_200.0), (9_000.0, -1_200.0)] {
+                let p = t + out * s + SIMD2(-out.y, out.x) * side
+                all.append(plane.latLon(p))
+            }
+        }
+        let bbox = "\(all.map(\.lat).min()! - margin),\(all.map(\.lon).min()! - margin * 1.2),\(all.map(\.lat).max()! + margin),\(all.map(\.lon).max()! + margin * 1.2)"
+        let osm = try await Overpass.query("[out:json][timeout:600][maxsize:1073741824];way[\"building\"](\(bbox));out geom tags;",
+                                           cache: osmCache.appendingPathComponent("\(layout.icao)-surroundings-corridors.json"))
+        let ringLimit = (layout.boundary.first ?? []).map(plane.xy)
+        func nearAirport(_ p: SIMD2<Double>) -> Bool {
+            let m = margin * 111_000
+            for i in 0..<max(ringLimit.count - 1, 0) where PlanarGeometry.distanceToSegment(p, ringLimit[i], ringLimit[i + 1]) < m { return true }
+            return false
+        }
+        var out: [[Float]] = []
+        for e in osm.elements where e.type == "way" {
+            guard let t = e.tags, t["building"] != "no", let g = e.geometry, g.count >= 4 else { continue }
+            var ring = g.map { plane.xy(LatLon($0.lat, $0.lon)) }
+            if let f = ring.first, let l = ring.last, f == l { ring.removeLast() }
+            guard ring.count >= 3 else { continue }
+            let c = ring.reduce(SIMD2<Double>.zero, +) / Double(ring.count)
+            if PlanarGeometry.contains(hull, c) { continue }      // airport buildings come from the layout
+            guard nearAirport(c) || inCorridor(c) else { continue }
+            var area = 0.0
+            for i in 0..<ring.count { let p = ring[i], q = ring[(i + 1) % ring.count]; area += p.x * q.y - q.x * p.y }
+            if area < 0 { ring.reverse(); area = -area }
+            area /= 2
+            guard area >= 25 else { continue }
+            let b = t["building"] ?? "yes"
+            let levels = t["building:levels"].flatMap(Double.init)
+            let tagged = t["height"].flatMap { Double($0.replacingOccurrences(of: " m", with: "")) }
+            // Untagged: houses about 5 m, larger footprints taller, warehouses low and wide.
+            let guess: Double = switch b {
+            case "garage", "garages", "carport", "shed", "roof": 3.5
+            case "house", "detached", "residential", "semidetached_house", "terrace": 5.5
+            case "apartments": 12
+            case "industrial", "warehouse", "retail", "commercial": area > 3_000 ? 9 : 7
+            default: area < 300 ? 5 : (area < 2_000 ? 7 : 10)
+            }
+            let height = tagged ?? levels.map { $0 * 3.3 + 1 } ?? guess
+            out.append([Float(height)] + ring.flatMap { [Float(($0.x * 10).rounded() / 10), Float(($0.y * 10).rounded() / 10)] })
+        }
+        log("surroundings: \(out.count) buildings around \(layout.icao)")
+        return SurroundingBuildings(reference: layout.reference, buildings: out,
+                                    source: "OpenStreetMap contributors, data as of \(osm.osm3s?.timestamp_osm_base ?? "unknown") (ODbL)")
+    }
+
     public func run(icao: String, log: @Sendable (String) -> Void = { _ in }) async throws -> AirportLayout {
         let nasr = try NASRAirport.load(directory: nasrDirectory, icao: icao)
         log("NASR \(nasr.effectiveDate): \(nasr.name), \(nasr.runways.count) runways: \(nasr.runways.map(\.name).joined(separator: ", "))")

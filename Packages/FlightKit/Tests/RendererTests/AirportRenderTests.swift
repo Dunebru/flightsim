@@ -24,7 +24,13 @@ struct AirportRenderTests {
         r.settings = RenderSettings(upscaler: .off, renderScale: 1)
         r.setTerrain(SceneryLibrary(directory: TerrainRenderTests.libraryURL), origin: site.frame.origin, flatten: site.overrides)
         let others = try ["KPHX", "KLAX"].map { try AirportSite.load(airportsURL.appendingPathComponent("\($0).json")) }
-        r.setAirports(others.map { ($0, AirportGeometry.build($0), AirportLights.build($0)) }, sceneOrigin: site.frame.origin)
+        let packs = SceneryLibrary(directory: TerrainRenderTests.libraryURL)
+        r.setAirports(try others.map { s in
+            let surroundings = try SurroundingBuildings.load(airportsURL.appendingPathComponent("\(s.layout.icao)-city.json"))
+            var ground = GroundModel(scenery: packs, frame: s.frame, flatten: s.overrides)
+            let city = CityGeometry.build(surroundings, site: s) { p in ground.groundZ(atENU: SIMD3(p.x, p.y, 0)) }
+            return AirportAssets(site: s, geometry: AirportGeometry.build(s), lights: AirportLights.build(s), city: city)
+        }, sceneOrigin: site.frame.origin)
         var s = SceneDescription.phoenixTest(date: TerrainRenderTests.afternoon)
         s.origin = site.frame.origin
         s.showAircraft = aircraft

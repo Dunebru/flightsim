@@ -76,7 +76,8 @@ final class WorldEngine: NSObject {
         // at once. Surfaces, meshes and lights are built in the background.
         let folder = Bundle.main.resourceURL?.appendingPathComponent("Bundle/Airports")
         let files = (try? FileManager.default.contentsOfDirectory(at: folder ?? URL(fileURLWithPath: "/"), includingPropertiesForKeys: nil)) ?? []
-        let layouts = files.filter { $0.pathExtension == "json" }.sorted { $0.lastPathComponent < $1.lastPathComponent }
+        let layouts = files.filter { $0.pathExtension == "json" && !$0.lastPathComponent.contains("-city") }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
             .compactMap { try? AirportLayout.load($0) }
         let current = layouts.first { $0.icao == icao } ?? layouts.first
         if let current {
@@ -107,7 +108,7 @@ final class WorldEngine: NSObject {
     }
 
     struct BuiltAirports: Sendable {
-        var sites: [(site: AirportSite, geometry: AirportGeometry, lights: [LightPoint])]
+        var assets: [AirportAssets]
         var overrides: [GroundOverride]
     }
 
@@ -116,13 +117,13 @@ final class WorldEngine: NSObject {
     private func loadAirports() {
         let layouts = pendingLayouts, origin = scene.origin, icao = departureICAO
         Task { [weak self] in
-            let built = await Self.buildAirports(layouts, sceneOrigin: origin)
+            let built = await Self.buildAirports(layouts, sceneOrigin: origin, scenery: self?.scenery)
             guard let self else { return }
             self.overrides = built.overrides
             self.cameraGround = GroundModel(scenery: self.scenery, frame: LocalFrame(origin: origin), flatten: built.overrides)
             self.renderer?.setTerrain(self.scenery, origin: origin, flatten: built.overrides)
-            self.renderer?.setAirports(built.sites, sceneOrigin: origin)
-            let departure = built.sites.first { $0.site.layout.icao == icao }?.site
+            self.renderer?.setAirports(built.assets, sceneOrigin: origin)
+            let departure = built.assets.first { $0.site.layout.icao == icao }?.site
             if let cab = departure?.towerCab { self.rig.towerPosition = cab }
             self.quietFrames = 0
             self.airportsReady = true
@@ -131,11 +132,21 @@ final class WorldEngine: NSObject {
     }
 
     @concurrent
-    private nonisolated static func buildAirports(_ layouts: [AirportLayout], sceneOrigin: Geodetic) async -> BuiltAirports {
+    private nonisolated static func buildAirports(_ layouts: [AirportLayout], sceneOrigin: Geodetic,
+                                                  scenery: SceneryLibrary?) async -> BuiltAirports {
         let frame = LocalFrame(origin: sceneOrigin)
         let sites = layouts.map { AirportSite(layout: $0) }
-        return BuiltAirports(sites: sites.map { ($0, AirportGeometry.build($0), AirportLights.build($0)) },
-                             overrides: sites.flatMap { $0.overrides(in: frame) })
+        let folder = Bundle.main.resourceURL?.appendingPathComponent("Bundle/Airports")
+        let assets = sites.map { site -> AirportAssets in
+            var city: [CityChunk] = []
+            if let url = folder?.appendingPathComponent("\(site.layout.icao)-city.json"),
+               let surroundings = try? SurroundingBuildings.load(url) {
+                var ground = GroundModel(scenery: scenery, frame: site.frame, flatten: site.overrides)
+                city = CityGeometry.build(surroundings, site: site) { p in ground.groundZ(atENU: SIMD3(p.x, p.y, 0)) }
+            }
+            return AirportAssets(site: site, geometry: AirportGeometry.build(site), lights: AirportLights.build(site), city: city)
+        }
+        return BuiltAirports(assets: assets, overrides: sites.flatMap { $0.overrides(in: frame) })
     }
 
     private func applyRenderSettings() {

@@ -49,6 +49,11 @@ public enum AirportLights {
         let frames = site.layout.runways.map(site.runwayFrame)
         for (r, f) in zip(site.layout.runways, frames) { runway(r, f, site, into: &out) }
         taxiwayEdges(site, runways: frames, into: &out)
+        // Airports with a CAT II/III approach system (ALSF-2) have taxiway centreline lights for
+        // low-visibility taxiing.
+        if site.layout.runways.flatMap(\.ends).contains(where: { $0.approachLights == "ALSF2" }) {
+            taxiwayCentrelines(site, runways: frames, into: &out)
+        }
         apronMasts(site, into: &out)
         for h in site.layout.holdPositions where h.kind != .intermediate { guardLights(h, site, into: &out) }
         return out
@@ -250,6 +255,29 @@ public enum AirportLights {
                     s += 60
                 }
                 carry = len - (s - 60)
+            }
+        }
+    }
+
+    /// Green in-pavement centreline lights every 30 m, left off where a taxiway crosses a runway.
+    static func taxiwayCentrelines(_ site: AirportSite, runways: [RunwayFrame], into out: inout [LightPoint]) {
+        for t in site.layout.taxiways where t.kind == .taxiway {
+            let pts = t.points.map(site.xy)
+            var carry = 0.0
+            for i in 0..<(pts.count - 1) {
+                let a = pts[i], b = pts[i + 1]
+                let len = simd_distance(a, b)
+                guard len > 0.1 else { continue }
+                let dir = (b - a) / len
+                var s = 30 - carry
+                while s < len {
+                    let c = a + dir * s
+                    if !runways.contains(where: { $0.contains(c, margin: 10) }) {
+                        out.append(LightPoint(position: SIMD3(c.x, c.y, site.z(c) + 0.05), colour: green, candela: 120))
+                    }
+                    s += 30
+                }
+                carry = len - (s - 30)
             }
         }
     }

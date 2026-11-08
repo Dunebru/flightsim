@@ -39,6 +39,7 @@ struct VertexOut {
     float2 uv;
     float4 currentClip;     // unjittered
     float4 previousClip;
+    float seed [[flat]];    // per-building variation (city buildings), 0 otherwise
 };
 
 struct GBufferOut {
@@ -69,6 +70,7 @@ vertex VertexOut sceneVertex(uint vid [[vertex_id]],
     o.uv = v.uv;
     o.currentClip = u.viewProjNoJitter * world;
     o.previousClip = u.prevViewProjNoJitter * prevWorld;
+    o.seed = 0.0;
     return o;
 }
 
@@ -96,6 +98,34 @@ vertex VertexOut terrainVertex(uint vid [[vertex_id]],
     o.uv = float2(ushort2(v.uv)) / 65535.0;
     o.currentClip = u.viewProjNoJitter * world;
     o.previousClip = u.prevViewProjNoJitter * prevWorld;
+    o.seed = 0.0;
+    return o;
+}
+
+/// City buildings, 24 bytes: position, snorm8 normal with the building's seed in w, float uv.
+struct CompactVertex {
+    packed_float3 position;
+    packed_char4 normal;
+    packed_float2 uv;
+};
+
+vertex VertexOut compactVertex(uint vid [[vertex_id]],
+                               const device CompactVertex *vertices [[buffer(0)]],
+                               constant FrameUniforms &u [[buffer(1)]],
+                               constant DrawUniforms &d [[buffer(2)]])
+{
+    CompactVertex v = vertices[vid];
+    float4 local = float4(float3(v.position), 1.0);
+    float4 world = d.model * local;
+    float4 prevWorld = d.prevModel * local;
+    VertexOut o;
+    o.position = u.viewProj * world;
+    o.worldPos = world.xyz;
+    o.normal = normalize((d.model * float4(float3(char3(v.normal.xyz)) / 127.0, 0.0)).xyz);
+    o.uv = float2(v.uv);
+    o.currentClip = u.viewProjNoJitter * world;
+    o.previousClip = u.prevViewProjNoJitter * prevWorld;
+    o.seed = float(v.normal.w) / 127.0 * 0.5 + 0.5;
     return o;
 }
 
@@ -270,8 +300,27 @@ inline float3 pavementAlbedo(float2 uv, bool asphalt, float distance) {
 
 /// Generic facades: uv.x metres along the wall, uv.y metres up. Returns albedo; sets roughness
 /// and the light that windows give off at night (`glow`, scene radiance).
-inline float3 facadeAlbedo(float code, float2 uv, float3 N, thread float &roughness, thread float3 &glow) {
+inline float3 facadeAlbedo(float code, float2 uv, float3 N, thread float &roughness, thread float3 &glow, float seed = 0.0) {
     glow = float3(0.0);
+    if (code == 9.0) {
+        // City buildings: Phoenix and Los Angeles stucco, tile and membrane roofs, small windows.
+        if (N.z > 0.7) {
+            roughness = 0.85;
+            float3 roofs[4] = { float3(0.55, 0.53, 0.50), float3(0.42, 0.22, 0.15), float3(0.30, 0.30, 0.30), float3(0.62, 0.60, 0.56) };
+            return roofs[int(seed * 3.99)] * (0.88 + 0.24 * fbm(uv * 0.3, 2));
+        }
+        float3 walls[4] = { float3(0.62, 0.55, 0.45), float3(0.70, 0.67, 0.60), float3(0.55, 0.47, 0.38), float3(0.66, 0.62, 0.58) };
+        float3 wall = walls[int(fract(seed * 7.13) * 3.99)];
+        float2 w = fract(uv / float2(3.2, 3.0));
+        float2 bay = floor(uv / float2(3.2, 3.0));
+        // About two bays in five have a window; the rest is plain wall.
+        bool window = w.x > 0.32 && w.x < 0.68 && w.y > 0.38 && w.y < 0.72 && uv.y > 0.8
+            && hash21(bay + seed * 37.0) > 0.6;
+        roughness = window ? 0.2 : 0.85;
+        float on = step(0.6, hash21(bay + seed * 91.0));
+        glow = window ? float3(1.0, 0.8, 0.52) * 1.0e-4 * on : float3(0.0);
+        return window ? float3(0.06, 0.07, 0.08) : wall;
+    }
     if (code == 8.0) {
         // Windsock: orange and white bands along the cone; the pole (uv.y < 0) white.
         roughness = 0.8;
@@ -385,13 +434,19 @@ fragment GBufferOut sceneFragment(VertexOut in [[stage_in]],
     } else if (kind == kKindTerrain) {
         // Satellite imagery as albedo. The mosaic is colour-balanced for display, so scale it
         // toward measured surface reflectance; near the camera, break up the 10 m pixels.
-        albedo = albedoTexture.sample(kTerrainSampler, in.uv).rgb * d.baseColor.rgb;
+        // Unsharp mask: the image plus a share of its difference from a blurrier mip, which
+        // restores edges (roads, field boundaries, roofs) that filtering softens.
+        float3 sharp = albedoTexture.sample(kTerrainSampler, in.uv).rgb;
+        float3 soft = albedoTexture.sample(kTerrainSampler, in.uv, bias(1.5)).rgb;
+        albedo = max(sharp + (sharp - soft) * 0.55, float3(0.0)) * d.baseColor.rgb;
         float detail = saturate(1.0 - distance / 1200.0);
         if (detail > 0.0) {
             float2 p = in.worldPos.xy + u.noiseOrigin.xy;
             float n = fbm(p * 0.21, 3) - 0.5;
             float fine = valueNoise(p * 1.7) - 0.5;
-            albedo *= 1.0 + (n * 0.30 + fine * 0.12) * detail;
+            // Grain within about 150 m: soil, gravel and scrub texture under the imagery's pixels.
+            float grain = (valueNoise(p * 4.3) - 0.5) * saturate(1.0 - distance / 150.0);
+            albedo *= 1.0 + (n * 0.26 + fine * 0.12) * detail + grain * 0.14;
         }
     } else if (kind == kKindRunway) {
         albedo = d.emissive.z > 0.5 ? concreteRunwayAlbedo(in.uv, d.emissive.xy) : runwayAlbedo(in.uv, d.emissive.xy);
@@ -411,7 +466,7 @@ fragment GBufferOut sceneFragment(VertexOut in [[stage_in]],
     } else if (kind == kKindSign) {
         albedo = albedoTexture.sample(kLinearClamp, in.uv).rgb;
     } else if (kind == kKindBuilding) {
-        albedo = facadeAlbedo(d.emissive.x, in.uv, N, roughness, windowGlow);
+        albedo = facadeAlbedo(d.emissive.x, in.uv, N, roughness, windowGlow, in.seed);
     } else if (d.material.z > 0.5) {
         float4 t = albedoTexture.sample(kLinearRepeat, in.uv);
         albedo *= t.rgb;
