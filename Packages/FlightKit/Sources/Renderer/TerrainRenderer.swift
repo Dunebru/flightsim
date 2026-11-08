@@ -237,7 +237,7 @@ final class TerrainRenderer {
         func unorm(_ v: Float) -> UInt16 { UInt16(max(0, min(65535, (v * 65535).rounded()))) }
         for i in 0..<g.positions.count {
             let p = g.positions[i], n = g.normals[i], t = g.uvs[i]
-            verts.append(TerrainVertex(x: p.x, y: p.y, z: p.z, nx: snorm(n.x), ny: snorm(n.y), nz: snorm(n.z), nw: 0,
+            verts.append(TerrainVertex(x: p.x, y: p.y, z: p.z, nx: snorm(n.x), ny: snorm(n.y), nz: snorm(n.z), nw: g.water[i] ? 127 : 0,
                                        u: unorm(t.x), v: unorm(t.y)))
         }
         guard let vb = device.makeBuffer(bytes: verts, length: verts.count * MemoryLayout<TerrainVertex>.stride,

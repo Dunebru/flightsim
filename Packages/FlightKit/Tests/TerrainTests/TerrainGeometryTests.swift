@@ -119,6 +119,18 @@ struct TerrainGeometryTests {
         #expect(wanted == [root])
     }
 
+    /// Vertices at sea level (where ocean depths were clamped at bake time) are flagged as
+    /// water, land is not, and skirts copy their edge's flag.
+    @Test func seaLevelIsWater() {
+        let k = WebMercator.tile(latitude: 33.94, longitude: -118.45, zoom: 14)
+        var heights = [Float]()
+        for _ in 0..<Self.n { for i in 0..<Self.n { heights.append(i < Self.n / 2 ? 0 : 12) } }
+        let g = TerrainTileGeometry.build(key: k, heights: heights, samples: Self.n, frame: Self.frame)
+        #expect(g.water.count == g.positions.count)
+        #expect(g.water[0] && !g.water[Self.n - 1])
+        #expect(g.water[Self.n * Self.n] == g.water[0])     // first skirt vertex copies the north-west corner
+    }
+
     @Test func heightFieldInterpolates() {
         let k = WebMercator.tile(latitude: 33.4342, longitude: -112.0116, zoom: 14)
         var heights = [Float]()

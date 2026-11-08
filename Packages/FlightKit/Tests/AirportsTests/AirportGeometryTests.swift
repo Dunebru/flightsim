@@ -188,6 +188,10 @@ struct AirportSignTests {
         let sign = try #require(holds.min { simd_distance(SIMD2($0.position.x, $0.position.y), s.xy(southbound.position)) <
                                             simd_distance(SIMD2($1.position.x, $1.position.y), s.xy(southbound.position)) })
         #expect(sign.front.text == "26-08", "southbound hold reads \(sign.front.text)")
+        // Direction signs at taxiway junctions, each with an arrow.
+        let direction = signs.filter { $0.front.style == .direction }
+        #expect(direction.count > 50, "\(direction.count) direction signs")
+        #expect(direction.allSatisfy { $0.front.text.unicodeScalars.contains { (0x2190...0x2199).contains($0.value) } })
         // Distance remaining: 11,489 ft runway, signs 1 to 10 for each direction.
         let distance = signs.filter { $0.front.style == .distance }
         #expect(distance.filter { $0.front.text == "10" }.count >= 2)

@@ -129,3 +129,33 @@ struct NightLightsTests {
         #expect(out[4] > 200 && out[5] > 200, "town and core \(out[4]) \(out[5])")
     }
 }
+
+struct AncestorFillTests {
+    /// A tile without imagery takes the matching quadrant of its parent: the parent here is red,
+    /// green, blue and white by quadrant, so the south-east child comes back white.
+    @Test func fillsFromTheRightQuadrant() throws {
+        let cache = FileManager.default.temporaryDirectory.appendingPathComponent("fill-test-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: cache) }
+        let parent = TileKey(z: 16, x: 100, y: 200)
+        var px = [UInt8](repeating: 255, count: 256 * 256 * 4)
+        for y in 0..<256 {
+            for x in 0..<256 {
+                let i = (y * 256 + x) * 4
+                let c: [UInt8] = y < 128 ? (x < 128 ? [255, 0, 0] : [0, 255, 0]) : (x < 128 ? [0, 0, 255] : [255, 255, 255])
+                px[i] = c[0]; px[i + 1] = c[1]; px[i + 2] = c[2]
+            }
+        }
+        let url = TerrainBaker.cached(parent, .usgs, cache)
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try ImageCodec.encodeJPEG(px, width: 256, height: 256, quality: 1)!.write(to: url)
+        let child = TileKey(z: 17, x: 201, y: 401)       // south-east
+        let (data, source) = try #require(TerrainBaker.fromAncestor(child, cache: cache) { $0.z >= 17 ? .naip : .usgs })
+        #expect(source == .usgs)
+        let img = try #require(ImageCodec.decode(data))
+        let centre = (128 * 256 + 128) * 4
+        #expect(img.pixels[centre] > 230 && img.pixels[centre + 1] > 230 && img.pixels[centre + 2] > 230)
+        let northWest = try #require(TerrainBaker.fromAncestor(TileKey(z: 17, x: 200, y: 400), cache: cache) { $0.z >= 17 ? .naip : .usgs })
+        let nw = try #require(ImageCodec.decode(northWest.0))
+        #expect(nw.pixels[centre] > 200 && nw.pixels[centre + 1] < 60)
+    }
+}

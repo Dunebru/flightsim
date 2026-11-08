@@ -106,6 +106,18 @@ struct AirportRenderTests {
             views.append(("kphx-gate-night", gateNight))
         }
 
+        // Taxiing up to a junction: the direction sign array on the left.
+        if let sign = AirportSigns.build(site).first(where: { $0.front.style == .direction && simd_length(SIMD2($0.position.x, $0.position.y)) < 1_500 }) {
+            let f = sign.facing * .pi / 180
+            let n = SIMD2(sin(f), cos(f)), right = SIMD2(-n.y, n.x)
+            let eye = SIMD2(sign.position.x, sign.position.y) + n * 32 + right * 10
+            var junction = base
+            junction.showAircraft = false
+            junction.cameraPose = CameraPose(position: site.onSurface(eye) + SIMD3(0, 0, 3.5),
+                                             forward: simd_normalize(SIMD3(-n.x, -n.y, -0.06)), up: SIMD3(0, 0, 1), fovY: 55 * .pi / 180)
+            views.append(("kphx-taxi-junction", junction))
+        }
+
         // The city north of the field from 250 m, looking north: shadows fall to the right.
         var city = base
         city.showAircraft = false
@@ -177,6 +189,13 @@ struct AirportRenderTests {
                                       forward: simd_normalize(SIMD3(sin(h), cos(h), -0.055)), up: SIMD3(0, 0, 1), fovY: 55 * .pi / 180)
         final.date = RendererTests.time(whenSunAt: -4, afternoon: true)
         views.append(("klax-24r-final-dusk", final))
+        // Climbing out west over the Pacific in the afternoon: the sun's glint on the sea.
+        var ocean = base
+        ocean.showAircraft = false
+        ocean.cameraPose = CameraPose(position: SIMD3(-4_500, -300, 450), forward: simd_normalize(SIMD3(-1, -0.15, -0.12)),
+                                      up: SIMD3(0, 0, 1), fovY: 60 * .pi / 180)
+        ocean.date = RendererTests.date("2026-06-21T23:30:00Z")
+        views.append(("klax-pacific", ocean))
         _ = f
         for (name, s) in views {
             r.exposureAdaptation = 1
@@ -185,5 +204,34 @@ struct AirportRenderTests {
             let img = try r.renderImage(s, width: 1600, height: 900)
             try RendererTests.savePNG(img, 1600, 900, name: name)
         }
+    }
+
+    /// GPU time for the heaviest views (Mac GPU; the phone is measured separately). Reported, not
+    /// gated: there is no phone budget to compare against on this machine.
+    @Test func frameCost() throws {
+        let site = try AirportSite.load(Self.airportsURL.appendingPathComponent("KLAX.json"))
+        let (r, base) = try Self.scene(site, aircraft: true)
+        r.settings = RenderSettings(upscaler: .off, renderScale: 1)
+        let device = r.device
+        let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: 1920, height: 884, mipmapped: false)
+        d.usage = [.renderTarget]
+        d.storageMode = .private
+        let target = try #require(device.makeTexture(descriptor: d))
+        let p = try #require(site.placement(.final("24R")))
+        let h = p.heading * .pi / 180
+        var s = base
+        s.cameraPose = CameraPose(position: SIMD3(p.position.x, p.position.y, (p.altitude ?? 0) - site.frame.origin.height),
+                                  forward: simd_normalize(SIMD3(sin(h), cos(h), -0.055)), up: SIMD3(0, 0, 1), fovY: 55 * .pi / 180)
+        try TerrainRenderTests.settle(r, s, limit: .seconds(60))
+        var spans: [Double] = []
+        for _ in 0..<60 {
+            let cb = r.render(s, to: target)
+            cb.waitUntilCompleted()
+            spans.append(r.stats.gpuFrameMilliseconds)
+        }
+        let st = r.stats
+        print(String(format: "FRAMECOST klax-24r-final 1920x884: GPU frame %.2f ms (stages: %@), terrain drawn %d, city chunks %d",
+                     spans.last ?? 0, st.gpuMilliseconds.map { String(format: "%@ %.2f", $0.key, $0.value) }.sorted().joined(separator: ", "),
+                     r.terrainDrawn, r.cityChunksDrawn))
     }
 }

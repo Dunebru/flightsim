@@ -50,6 +50,7 @@ enum SignAtlas {
                 case .mandatory: (CGColor(red: 0.78, green: 0.06, blue: 0.06, alpha: 1), CGColor(red: 1, green: 1, blue: 1, alpha: 1))
                 case .location: (CGColor(red: 0.05, green: 0.05, blue: 0.05, alpha: 1), CGColor(red: 1, green: 0.82, blue: 0.1, alpha: 1))
                 case .distance: (CGColor(red: 0.05, green: 0.05, blue: 0.05, alpha: 1), CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+                case .direction: (CGColor(red: 1, green: 0.82, blue: 0.1, alpha: 1), CGColor(red: 0.04, green: 0.04, blue: 0.04, alpha: 1))
                 }
                 ctx.setFillColor(bg)
                 ctx.fill(r)

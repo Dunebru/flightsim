@@ -1,3 +1,4 @@
+import Airports
 import Foundation
 import Testing
 @testable import FlightToolsCore
@@ -93,4 +94,22 @@ struct DEMRasterTests {
             #expect(BakePlan.distanceKm(33.4342, -112.0116, c.latitude, c.longitude) <= 12 + 2.9)
         }
     }
+}
+
+/// Approach corridors add sharp tiles out along each final, and every tile keeps its full chain
+/// of ancestors (an orphan would be drawn over coarser terrain).
+@Test func corridorsReachOutAndKeepTheirAncestors() throws {
+    let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../../Data/Bundle/Airports/KPHX.json").standardized
+    let layout = try AirportLayout.load(url)
+    var plan = BakePlan.airportRegion
+    let plain = Set(plan.tiles(latitude: 33.44085, longitude: -112.011))
+    plan.corridors = BakePlan.approachCorridors(layout)
+    let tiles = Set(plan.tiles(latitude: 33.44085, longitude: -112.011))
+    // A zoom-17 tile 5 km out on the extended centreline of 08 exists only with corridors.
+    let e08 = layout.runways.first { $0.name == "08/26" }!.ends[0].position
+    let far = WebMercator.tile(latitude: e08.lat, longitude: e08.lon - 5.0 / (111.32 * cos(e08.lat * .pi / 180)), zoom: 17)
+    #expect(tiles.contains(far))
+    #expect(!plain.contains(far))
+    let minZoom = tiles.map(\.z).min()!
+    for k in tiles where k.z > minZoom { #expect(tiles.contains(k.parent!), "\(k) has no parent") }
 }

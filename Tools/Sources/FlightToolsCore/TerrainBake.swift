@@ -1,5 +1,6 @@
 import Foundation
 import Terrain
+import Airports
 
 /// A float32 elevation raster in EPSG:3857 written by `gdalwarp -of ENVI`, with its geotransform
 /// from `gdalinfo -json`. Memory-mapped; samples are bilinear.
@@ -72,6 +73,43 @@ public struct BakePlan: Sendable {
         }
     }
     public let rings: [Ring]
+    /// A strip along a runway's approach: from `start` (the runway end) outward on `bearing`
+    /// (degrees true), `lengthKilometres` long and `halfWidthKilometres` either side.
+    public struct Corridor: Sendable {
+        public let latitude: Double, longitude: Double
+        public let bearing: Double
+        public let zooms: ClosedRange<Int>
+        public let lengthKilometres: Double
+        public let halfWidthKilometres: Double
+        public init(latitude: Double, longitude: Double, bearing: Double, zooms: ClosedRange<Int>,
+                    lengthKilometres: Double, halfWidthKilometres: Double) {
+            self.latitude = latitude
+            self.longitude = longitude
+            self.bearing = bearing
+            self.zooms = zooms
+            self.lengthKilometres = lengthKilometres
+            self.halfWidthKilometres = halfWidthKilometres
+        }
+    }
+    public var corridors: [Corridor] = []
+
+    /// Sharp imagery under every final approach: USGS to 14 km and 10 km, NAIP to 6 km.
+    public static func approachCorridors(_ layout: AirportLayout) -> [Corridor] {
+        var out: [Corridor] = []
+        for r in layout.runways {
+            for (k, end) in r.ends.enumerated() {
+                let other = r.ends[1 - k]
+                let dLat = end.position.lat - other.position.lat
+                let dLon = (end.position.lon - other.position.lon) * cos(end.position.lat * .pi / 180)
+                let bearing = atan2(dLon, dLat) * 180 / .pi
+                for (zooms, length, half) in [(15...15, 14.0, 2.5), (16...16, 10.0, 1.5), (17...17, 6.0, 1.0)] {
+                    out.append(Corridor(latitude: end.position.lat, longitude: end.position.lon, bearing: bearing,
+                                        zooms: zooms, lengthKilometres: length, halfWidthKilometres: half))
+                }
+            }
+        }
+        return out
+    }
 
     /// The default airport region: coarse to the horizon, detailed near the field.
     public static let airportRegion = BakePlan(rings: [
@@ -86,7 +124,10 @@ public struct BakePlan: Sendable {
         Ring(zooms: 18...18, radiusKilometres: 1.6),   // NAIP, about 0.5 m per pixel
     ])
 
-    public init(rings: [Ring]) { self.rings = rings }
+    public init(rings: [Ring], corridors: [Corridor] = []) {
+        self.rings = rings
+        self.corridors = corridors
+    }
 
     /// Every tile from zoom 0 to `maxZoom`: the coarse global base under the regions.
     public static func world(maxZoom: Int) -> [TileKey] {
@@ -113,11 +154,38 @@ public struct BakePlan: Sendable {
                 }
             }
         }
+        for c in corridors {
+            let kmPerLat = 111.32, kmPerLon = 111.32 * cos(c.latitude * .pi / 180)
+            let b = c.bearing * .pi / 180
+            let out = SIMD2(sin(b), cos(b)), side = SIMD2(cos(b), -sin(b))
+            for z in c.zooms {
+                let tileKm = 40_075.0 * cos(c.latitude * .pi / 180) / Double(1 << z)
+                let reach = c.lengthKilometres + c.halfWidthKilometres
+                let centre = WebMercator.tileCoordinates(latitude: c.latitude, longitude: c.longitude, zoom: z)
+                let r = Int((reach / tileKm).rounded(.up)) + 1
+                for x in (Int(centre.x) - r)...(Int(centre.x) + r) {
+                    for y in (Int(centre.y) - r)...(Int(centre.y) + r) {
+                        let mid = WebMercator.coordinate(x: Double(x) + 0.5, y: Double(y) + 0.5, zoom: z)
+                        let v = SIMD2((mid.longitude - c.longitude) * kmPerLon, (mid.latitude - c.latitude) * kmPerLat)
+                        let along = (v * out).sum(), across = abs((v * side).sum())
+                        if along > -0.5 && along < c.lengthKilometres && across < c.halfWidthKilometres {
+                            set.insert(TileKey(z: z, x: x, y: y))
+                        }
+                    }
+                }
+            }
+        }
+        // Every tile needs its whole chain of ancestors (a corridor tile beyond the rings would
+        // otherwise be an orphan drawn over coarser terrain).
+        let minZoom = rings.flatMap(\.zooms).min() ?? 0
+        for k in Array(set) {
+            var p = k.parent
+            while let q = p, q.z >= minZoom, set.insert(q).inserted { p = q.parent }
+        }
         // A tile refines only when all four children exist, so complete every sibling set: the
         // ring edges would otherwise stop refining a level early.
         // At the coarsest level the parents live in another pack (the world base), so complete
         // those sets unconditionally.
-        let minZoom = rings.flatMap(\.zooms).min() ?? 0
         for k in set.sorted() {
             if let p = k.parent, k.z == minZoom || set.contains(p) { set.formUnion(p.children) }
         }
@@ -214,23 +282,39 @@ public struct TerrainBaker: Sendable {
             let naipReference = naipFromZoom.flatMap { z in naipSearch == nil ? nil : baked.filter { $0.z == z - 1 } } ?? []
             try await Self.ensureCached(baked.map { ($0, source(for: $0)) } + eoxReference.map { ($0, .eox) } + naipReference.map { ($0, .naip) },
                                         cache: cache, naipSearch: naipSearch, log: log)
+            // Statistics over the reference tiles both sources have.
+            func both(_ keys: [TileKey], _ a: ImagerySource, _ b: ImagerySource) -> [TileKey] {
+                keys.filter { fm.fileExists(atPath: Self.cached($0, a, cache).path) && fm.fileExists(atPath: Self.cached($0, b, cache).path) }
+            }
             func stats(_ keys: [TileKey], _ s: ImagerySource) throws -> ColourStats {
                 ColourStats.of(try keys.compactMap { k in ImageCodec.decode(try Data(contentsOf: Self.cached(k, s, cache)))?.pixels })
             }
             var eoxToUSGS: (ColourStats, ColourStats)?, naipToUSGS: (ColourStats, ColourStats)?
-            if !eoxReference.isEmpty {
-                let eox = try stats(eoxReference, .eox), usgs = try stats(eoxReference, .usgs)
+            let eoxKeys = both(eoxReference, .eox, .usgs), naipKeys = both(naipReference, .naip, .usgs)
+            if !eoxKeys.isEmpty {
+                let eox = try stats(eoxKeys, .eox), usgs = try stats(eoxKeys, .usgs)
                 eoxToUSGS = (eox, usgs)
                 log(String(format: "colour: Sentinel-2 mean %.0f %.0f %.0f -> USGS %.0f %.0f %.0f", eox.mean.x, eox.mean.y, eox.mean.z, usgs.mean.x, usgs.mean.y, usgs.mean.z))
             }
-            if !naipReference.isEmpty {
-                let naip = try stats(naipReference, .naip), usgs = try stats(naipReference, .usgs)
+            if !naipKeys.isEmpty {
+                let naip = try stats(naipKeys, .naip), usgs = try stats(naipKeys, .usgs)
                 naipToUSGS = (naip, usgs)
                 log(String(format: "colour: NAIP mean %.0f %.0f %.0f -> USGS %.0f %.0f %.0f", naip.mean.x, naip.mean.y, naip.mean.z, usgs.mean.x, usgs.mean.y, usgs.mean.z))
             }
+            var filled = 0
             for k in baked {
-                let source = source(for: k)
-                let raw = try Data(contentsOf: Self.cached(k, source, cache))
+                var source = source(for: k)
+                var raw: Data
+                if let d = try? Data(contentsOf: Self.cached(k, source, cache)) {
+                    raw = d
+                } else if source == .naip, let (d, from) = Self.fromAncestor(k, cache: cache, source: self.source) {
+                    // No NAIP here (open sea): the matching quadrant of the nearest ancestor.
+                    raw = d
+                    source = from
+                    filled += 1
+                } else {
+                    throw CocoaError(.fileNoSuchFile, userInfo: [NSFilePathErrorKey: Self.cached(k, source, cache).path])
+                }
                 var out = raw
                 var match: (ColourStats, ColourStats, Double)?
                 if source == .eox, let (a, b) = eoxToUSGS { match = (a, b, Self.eoxMatchStrength(k.z)) }
@@ -244,6 +328,7 @@ public struct TerrainBaker: Sendable {
                 try fm.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
                 try out.write(to: dest)
             }
+            if filled > 0 { log("imagery: \(filled) tiles without NAIP filled from their parent") }
             let used = Set(baked.map { source(for: $0) })
             sources = ImagerySource.allCases.filter(used.contains).map { s in
                 let zooms = baked.filter { source(for: $0) == s }.map(\.z)
@@ -307,6 +392,30 @@ public struct TerrainBaker: Sendable {
         return index
     }
 
+    /// The part of the nearest cached ancestor's image covering `k`, scaled to 256 px.
+    static func fromAncestor(_ k: TileKey, cache: URL, source: (TileKey) -> ImagerySource) -> (Data, ImagerySource)? {
+        var a = k.parent
+        while let p = a {
+            let s = source(p)
+            if let d = try? Data(contentsOf: cached(p, s, cache)), let img = ImageCodec.decode(d) {
+                let n = 1 << (k.z - p.z)
+                let size = img.width / n
+                let ox = (k.x - p.x * n) * size, oy = (k.y - p.y * n) * size
+                var px = [UInt8](repeating: 0, count: 256 * 256 * 4)
+                for y in 0..<256 {
+                    for x in 0..<256 {
+                        let sx = ox + x * size / 256, sy = oy + y * size / 256
+                        let si = (sy * img.width + sx) * 4, di = (y * 256 + x) * 4
+                        px[di] = img.pixels[si]; px[di + 1] = img.pixels[si + 1]; px[di + 2] = img.pixels[si + 2]; px[di + 3] = 255
+                    }
+                }
+                return ImageCodec.encodeJPEG(px, width: 256, height: 256).map { ($0, s) }
+            }
+            a = p.parent
+        }
+        return nil
+    }
+
     static func cached(_ k: TileKey, _ s: ImagerySource, _ cache: URL) -> URL {
         if s == .naip { return cache.appendingPathComponent("naip/\(k.z)/\(k.x)/\(k.y).jpg") }
         return cache.appendingPathComponent("\(s.rawValue)/\(k.z)/\(k.x)/\(k.y).jpg")
@@ -322,7 +431,14 @@ public struct TerrainBaker: Sendable {
             func add() {
                 guard let (k, s) = iterator.next() else { return }
                 group.addTask {
-                    let data = try await Downloader.get(s.url(k, naipSearch: naipSearch))
+                    let data: Data
+                    do {
+                        data = try await Downloader.get(s.url(k, naipSearch: naipSearch))
+                    } catch where s == .naip {
+                        // NAIP has no imagery over the sea; those tiles are filled from their
+                        // parent when the pack is written.
+                        return
+                    }
                     let dest = cached(k, s, cache)
                     try FileManager.default.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
                     try data.write(to: dest)

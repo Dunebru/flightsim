@@ -27,7 +27,7 @@ constant float kKindPavement = 5.0;
 constant float kKindBuilding = 6.0;
 constant float kKindSign = 7.0;
 
-constexpr sampler kTerrainSampler(filter::linear, mip_filter::linear, address::clamp_to_edge, max_anisotropy(8));
+constexpr sampler kTerrainSampler(filter::linear, mip_filter::linear, address::clamp_to_edge, max_anisotropy(16));
 
 // Mean Earth radius for the ground plane's curvature, metres.
 constant float kEarthRadiusMetres = 6371000.0;
@@ -39,7 +39,7 @@ struct VertexOut {
     float2 uv;
     float4 currentClip;     // unjittered
     float4 previousClip;
-    float seed [[flat]];    // per-building variation (city buildings), 0 otherwise
+    float seed;             // city buildings: per-building variation; terrain: 1 on open water
 };
 
 struct GBufferOut {
@@ -98,7 +98,7 @@ vertex VertexOut terrainVertex(uint vid [[vertex_id]],
     o.uv = float2(ushort2(v.uv)) / 65535.0;
     o.currentClip = u.viewProjNoJitter * world;
     o.previousClip = u.prevViewProjNoJitter * prevWorld;
-    o.seed = 0.0;
+    o.seed = float(v.normal.w) / 127.0;     // terrain: 1 on open water
     return o;
 }
 
@@ -470,6 +470,20 @@ fragment GBufferOut sceneFragment(VertexOut in [[stage_in]],
             // Grain within about 150 m: soil, gravel and scrub texture under the imagery's pixels.
             float grain = (valueNoise(p * 4.3) - 0.5) * saturate(1.0 - distance / 150.0);
             albedo *= 1.0 + (n * 0.26 + fine * 0.12) * detail + grain * 0.14;
+        }
+        // Open water (sea level, where the elevation data's ocean depths were clamped): a dark,
+        // glossy surface whose wave normals reflect the sky and catch the sun. Waves fade with
+        // distance into a slightly rougher surface, as they do to the eye.
+        float water = saturate(in.seed * 1.6 - 0.3);
+        if (water > 0.0) {
+            float2 p = in.worldPos.xy + u.noiseOrigin.xy;
+            float t = u.atmosphere.w;
+            float amp = 0.22 * saturate(1.0 - distance / 7000.0);
+            float2 g = float2(fbm(p * 0.045 + float2(t * 0.04, 0.0), 3) - fbm(p * 0.045 + float2(3.1, 1.7 - t * 0.03), 3),
+                              fbm(p * 0.07 + float2(5.2, 2.3 + t * 0.025), 3) - fbm(p * 0.07 + float2(-t * 0.05, 0.0), 3));
+            N = normalize(mix(N, normalize(float3(g * amp * 2.0, 1.0)), water));
+            albedo = mix(albedo, float3(0.012, 0.028, 0.034) + albedo * 0.12, water);
+            roughness = mix(roughness, 0.07 + 0.15 * saturate(distance / 15000.0), water);
         }
     } else if (kind == kKindRunway) {
         albedo = d.emissive.z > 0.5 ? concreteRunwayAlbedo(in.uv, d.emissive.xy) : runwayAlbedo(in.uv, d.emissive.xy);

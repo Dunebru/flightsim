@@ -55,6 +55,8 @@ public struct TerrainTileGeometry: Sendable {
     public let normals: [SIMD3<Float>]
     public let uvs: [SIMD2<Float>]
     public let indices: [UInt16]
+    /// Per vertex: open water (height at sea level, where ocean depths were clamped).
+    public let water: [Bool]
     /// Bounding radius around `centre`, metres.
     public let radius: Double
 
@@ -99,6 +101,7 @@ public struct TerrainTileGeometry: Sendable {
         uvs.reserveCapacity(n * n)
         for j in 0..<n { for i in 0..<n { uvs.append(SIMD2(Float(Double(i) * step), Float(Double(j) * step))) } }
 
+        var water = heights.map { $0 <= 0.3 }
         // Skirts: a copy of each edge, dropped by a depth proportional to the tile's size.
         var radius = 0.0
         for p in positions { radius = max(radius, Double(simd_length(p))) }
@@ -108,10 +111,11 @@ public struct TerrainTileGeometry: Sendable {
                 positions.append(positions[idx] - SIMD3(0, 0, depth))
                 normals.append(normals[idx])
                 uvs.append(uvs[idx])
+                water.append(water[idx])
             }
         }
         return TerrainTileGeometry(key: key, centre: centre, positions: positions, normals: normals,
-                                   uvs: uvs, indices: indices(samples: n), radius: radius)
+                                   uvs: uvs, indices: indices(samples: n), water: water, radius: radius)
     }
 
     /// Edge vertex indices: north (west to east), south, west (north to south), east.

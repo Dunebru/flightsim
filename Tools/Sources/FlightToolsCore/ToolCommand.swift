@@ -1,5 +1,6 @@
 import Foundation
 import Terrain
+import Airports
 
 /// Subcommands of `flight-tools`. Commands not built yet say so and name their milestone.
 public enum ToolCommand: String, CaseIterable, Sendable {
@@ -44,7 +45,7 @@ public func runTool(_ arguments: [String], log: @Sendable @escaping (String) -> 
         // An option the tool does not know is a mistake, not something to ignore: a mistyped
         // cache path once produced a pack with no imagery and no regional heights.
         let known: Set<String> = ["--dem", "--dem-info", "--center", "--world", "--name", "--out", "--terrarium-cache",
-                                  "--terrarium-max-zoom", "--imagery-cache", "--usgs-from-zoom", "--naip-from-zoom"]
+                                  "--terrarium-max-zoom", "--imagery-cache", "--usgs-from-zoom", "--naip-from-zoom", "--airport"]
         if let unknown = options.names.first(where: { !known.contains($0) }) {
             return (64, "terrain-bake: unknown option \(unknown)\n" + ToolCommand.usage)
         }
@@ -55,7 +56,15 @@ public func runTool(_ arguments: [String], log: @Sendable @escaping (String) -> 
         } else if let center = options["--center"] {
             let parts = center.split(separator: ",").compactMap { Double($0) }
             guard parts.count == 2 else { return (64, "--center must be lat,lon") }
-            tiles = BakePlan.airportRegion.tiles(latitude: parts[0], longitude: parts[1])
+            var plan = BakePlan.airportRegion
+            // `--airport <layout.json>`: add sharp imagery along every approach.
+            if let path = options["--airport"] {
+                guard let layout = try? AirportLayout.load(URL(fileURLWithPath: path)) else {
+                    return (66, "terrain-bake: cannot read the airport layout \(path)")
+                }
+                plan.corridors = BakePlan.approachCorridors(layout)
+            }
+            tiles = plan.tiles(latitude: parts[0], longitude: parts[1])
         } else {
             return (64, ToolCommand.usage)
         }
