@@ -22,6 +22,25 @@ final class AircraftMesh {
     let boundsCenter: SIMD3<Float>
     let boundsRadius: Float
 
+    /// The generic narrowbody (the parked-traffic shape) as a flyable stand-in for the A320
+    /// until real models arrive: one part in the generic livery, moved so the reference point
+    /// sits near the wing rather than at the nose wheel.
+    init(genericNarrowbody device: any MTLDevice) throws {
+        let spec = ParkedAircraftMesh.narrowbody
+        let v = ParkedAircraftMesh.build(spec)
+        guard let buffer = device.makeBuffer(bytes: v, length: v.count * MemoryLayout<MeshVertex>.stride, options: .storageModeShared) else {
+            throw RendererError.resource("generic airliner")
+        }
+        var draw = DrawUniforms()
+        draw.material = SIMD4(0.35, 0, 0, SurfaceKind.parked.rawValue)
+        draw.emissive = SIMD4(Float(spec.length), 0, 0, 0)
+        parts = [Part(vertices: buffer, vertexCount: v.count, texture: nil, draw: draw, isGlass: false)]
+        let wing = Float(spec.noseToGear - spec.wingX - spec.rootChord * 0.1)
+        modelToBody = MatrixMath.translation(SIMD3(-wing, 0, 0))
+        boundsCenter = SIMD3(0, 0, Float(spec.gearHeight + spec.diameter / 2))
+        boundsRadius = Float(spec.span / 2) + 4
+    }
+
     init(model: AC3DModel, textureDirectory: URL?, device: any MTLDevice) throws {
         // FlightGear AC3D: x runs along the fuselage, y is up, z is the span. Find the nose by
         // where the propeller sits; default to FlightGear's convention (nose toward -x).

@@ -56,6 +56,8 @@ public final class AppSettings {
             upscaler = s.upscaler
             showStats = s.showStats
         }
+        // `-FlightAircraft A320` (scripts and screenshots): fly that aircraft this launch.
+        if let forced = defaults.string(forKey: "FlightAircraft"), !forced.isEmpty { aircraftID = forced }
         // `-FlightAirport KLAX` (scripts and screenshots): fly from that airport this launch.
         if let forced = defaults.string(forKey: "FlightAirport"), !forced.isEmpty {
             airport = forced

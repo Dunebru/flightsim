@@ -172,6 +172,10 @@ final class WorldEngine: NSObject {
         renderer.settings.renderScale = upscaler == .off ? 1.0 : 0.67
     }
 
+    /// Which aircraft to draw: "c172p" (the FlightGear model) or "A320" (the generic narrowbody).
+    @ObservationIgnored private var aircraftID = "c172p"
+    @ObservationIgnored private var c172: AC3DModel?
+
     private func loadAircraft() {
         guard let directory = Bundle.main.resourceURL?.appendingPathComponent("Bundle/Aircraft/c172p") else { return }
         Task { [weak self] in
@@ -179,8 +183,27 @@ final class WorldEngine: NSObject {
                 self?.startupError = "Test aircraft not found in the app bundle (run scripts/fetch-assets.sh)."
                 return
             }
-            do { try self?.renderer?.setAircraft(model, textures: directory) }
-            catch { self?.startupError = String(describing: error) }
+            self?.c172 = model
+            if self?.aircraftID == "c172p" { self?.applyAircraft() }
+        }
+    }
+
+    /// Draws the aircraft for a profile (the C172 once its model has loaded).
+    func showAircraft(_ id: String) {
+        aircraftID = id
+        rig.configure(forAircraft: id)
+        applyAircraft()
+    }
+
+    private func applyAircraft() {
+        do {
+            if aircraftID == "A320" {
+                try renderer?.setGenericAirliner()
+            } else if let c172, let directory = Bundle.main.resourceURL?.appendingPathComponent("Bundle/Aircraft/c172p") {
+                try renderer?.setAircraft(c172, textures: directory)
+            }
+        } catch {
+            startupError = String(describing: error)
         }
     }
 

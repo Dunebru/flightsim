@@ -876,6 +876,12 @@ public final class SceneRenderer {
                       t.budgetBytes / 1_048_576, t.pendingCount, t.broken.count, t.pressure)
     }
 
+    /// Draws the generic narrowbody (the A320 stand-in) as the user's aircraft.
+    public func setGenericAirliner() throws {
+        aircraft = try AircraftMesh(genericNarrowbody: device)
+        previousCamera = nil
+    }
+
     /// Replaces the aircraft (models load in the background after the first frame).
     public func setAircraft(_ model: AC3DModel, textures: URL?) throws {
         aircraft = try AircraftMesh(model: model, textureDirectory: textures, device: device)

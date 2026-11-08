@@ -27,6 +27,23 @@ nonisolated struct CameraRig {
     /// origin on the ground under the airframe centre). Set for the C172 test model.
     var eyeOffset = SIMD3<Double>(1.56, 0.27, 1.71)
     var wingOffset = SIMD3<Double>(0.1, 5.4, 2.15)
+    var wingLook = SIMD3<Double>(1.0, -0.22, -0.06)
+
+    /// Viewpoints for an aircraft: the C172 test model, or the generic narrowbody (captain's
+    /// eye behind the windscreen, a right-side cabin window over the wing, a longer chase).
+    mutating func configure(forAircraft id: String) {
+        if id == "A320" {
+            eyeOffset = SIMD3(13.4, 0.55, 4.4)
+            wingOffset = SIMD3(-9.0, -2.3, 4.2)
+            wingLook = SIMD3(0.45, -1.0, -0.14)
+            orbitDistance = 60
+        } else {
+            eyeOffset = SIMD3(1.56, 0.27, 1.71)
+            wingOffset = SIMD3(0.1, 5.4, 2.15)
+            wingLook = SIMD3(1.0, -0.22, -0.06)
+            orbitDistance = 15
+        }
+    }
     /// Tower viewpoint near KPHX runway 8/26, north side, world metres.
     var towerPosition = SIMD3<Double>(-700, 420, 32)
 
@@ -72,7 +89,7 @@ nonisolated struct CameraRig {
             target = CameraPose(position: p + r * eyeOffset, forward: simd_normalize(r * look),
                                 up: simd_normalize(r * SIMD3(0, 0, 1)), fovY: 68 * .pi / 180)
         case .wing:
-            let look = simd_normalize(SIMD3<Double>(1.0, -0.22, -0.06))
+            let look = simd_normalize(wingLook)
             target = CameraPose(position: p + r * wingOffset, forward: simd_normalize(r * look),
                                 up: simd_normalize(r * SIMD3(0, 0, 1)), fovY: 62 * .pi / 180 / zoom)
         case .tower:

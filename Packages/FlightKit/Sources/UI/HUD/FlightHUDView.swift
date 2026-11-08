@@ -176,6 +176,7 @@ public struct FlightHUDView: View {
     private func startSession() {
         model.profile = AircraftProfile.all.first { $0.id == settings.aircraftID } ?? .c172
         guard let site = engine.site else { return }
+        engine.showAircraft(model.profile.id)
         let s = FlightSession(profile: model.profile, site: site, spot: settings.spot, settings: settings,
                               scenery: engine.scenery, overrides: engine.overrides)
         s.configureHUD(model)

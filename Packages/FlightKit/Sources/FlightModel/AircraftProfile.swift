@@ -9,7 +9,7 @@ public struct AircraftProfile: Sendable, Hashable, Identifiable {
     public let hasSpoilers: Bool
     public let retractableGear: Bool
     public let isTurbine: Bool
-    /// True while the drawn aircraft is a stand-in (the A320 is drawn with the test C172 until M6).
+    /// True while the drawn aircraft is a stand-in (the A320 is a generic narrowbody shape until M6).
     public let visualIsStandIn: Bool
     /// Honest note about the flight model's fidelity, shown in settings.
     public let fidelityNote: String
@@ -35,7 +35,7 @@ public struct AircraftProfile: Sendable, Hashable, Identifiable {
         id: "A320", name: "Airbus A320",
         flapLabels: ["0", "1", "2", "3", "FULL"], flapCommands: [0, 10.0 / 40, 15.0 / 40, 20.0 / 40, 1],
         hasSpoilers: true, retractableGear: true, isTurbine: true, visualIsStandIn: true,
-        fidelityNote: "Generic JSBSim A320, tuned (see TUNING.md): no slats, no fly-by-wire. Drawn with the C172 until the fleet arrives in M6.",
+        fidelityNote: "Generic JSBSim A320, tuned (see TUNING.md): no slats, no fly-by-wire. Drawn as a generic narrowbody shape until the fleet arrives in M6.",
         stallWarningAlpha: 14,
         approachKnots: 140, approachFlapIndex: 4
     )
