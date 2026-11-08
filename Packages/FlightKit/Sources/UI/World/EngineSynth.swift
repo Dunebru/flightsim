@@ -83,7 +83,7 @@ nonisolated struct EngineSynth {
                 // Exhaust rasp: noise in bursts at each firing.
                 let burst = pow(max(cos(ph), 0), 6)
                 raspLow += (noise() - raspLow) * aRasp
-                let level = (0.12 + 0.28 * p.throttle) * min(p.rpm / 2_400, 1.1)
+                let level = (0.3 + 0.3 * p.throttle) * (0.45 + 0.55 * min(p.rpm / 2_400, 1.1))
                 s += (tone * 0.16 * cycleGain + raspLow * burst * 0.6) * level * engineGain
             }
             if !p.piston, p.n1 > 1 {
@@ -97,7 +97,7 @@ nonisolated struct EngineSynth {
                 buzz *= 0.05 * max(n - 0.75, 0) * 4
                 roarLow += (noise() - roarLow) * aRoar
                 roarHigh += (roarLow - roarHigh) * aRoarHigh
-                let roar = (roarLow - roarHigh) * (0.08 + 0.9 * n * n)
+                let roar = (roarLow - roarHigh) * (0.06 + 0.42 * n * n)
                 s += (whine + buzz + roar) * engineGain
             }
             // Wind over the airframe.
