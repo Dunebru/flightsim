@@ -59,9 +59,15 @@ public struct AirportGeometry: Sendable {
         public var asphalt: Bool
     }
     public var runways: [RunwayMesh] = []
-    /// Taxiways and aprons, concrete (uv: ENU metres, for slab joints).
+    /// Taxiways, concrete and asphalt (uv: ENU metres, for slab joints).
     public var concrete = MeshData()
     public var asphalt = MeshData()
+    /// Aprons (floodlit at night).
+    public var apronConcrete = MeshData()
+    public var apronAsphalt = MeshData()
+    /// Passenger boarding bridges and windsocks (uv: metres along, metres up).
+    public var bridges = MeshData()
+    public var windsocks = MeshData()
     /// Yellow paint: taxiway centrelines, holding positions, lead-in lines (solid).
     public var yellowPaint = MeshData()
     /// Walls (uv: metres along the wall, metres up) and roofs (uv: ENU metres), per kind.
@@ -87,6 +93,9 @@ public struct AirportGeometry: Sendable {
         for h in site.layout.holdPositions { hold(h, site, into: &g.yellowPaint) }
         for s in site.layout.stands where s.line.count >= 2 { leadIn(s, site, into: &g.yellowPaint) }
         for b in site.layout.buildings { building(b, site, into: &g) }
+        for line in jetBridges(site) { bridge(line, site, into: &g.bridges) }
+        for w in site.layout.windsocks ?? [] { windsock(site.xy(w), site, into: &g.windsocks) }
+        for c in AirportLights.mastPositions(site) { mast(c, site, into: &g.bridges) }
         return g
     }
 
@@ -231,7 +240,7 @@ public struct AirportGeometry: Sendable {
             mesh.ground(site.onSurface(p) + SIMD3(0, 0, Layer.apron), site.onSurface(q) + SIMD3(0, 0, Layer.apron),
                         site.onSurface(r) + SIMD3(0, 0, Layer.apron)) { SIMD2($0.x, $0.y) }
         }
-        if a.surface == .asphalt { g.asphalt.append(mesh) } else { g.concrete.append(mesh) }
+        if a.surface == .asphalt { g.apronAsphalt.append(mesh) } else { g.apronConcrete.append(mesh) }
     }
 
     /// A ribbon of `width` along a polyline with round joins and caps, on the airport surface.
@@ -348,6 +357,113 @@ public struct AirportGeometry: Sendable {
         guard let end = pts.last, let before = pts.dropLast().last else { return }
         let d = simd_normalize(end - before), across = SIMD2(d.y, -d.x)
         ribbon([end + across * 2, end - across * 2], width: 0.3, lift: Layer.paint, site: site, into: &m)
+    }
+
+    // MARK: Boarding bridges and windsocks
+
+    /// Mapped bridges, plus one for every stand that stops within 60 m of a terminal and has no
+    /// mapped bridge: from the nearest terminal wall to the aircraft's forward left door (about
+    /// 4 m behind and 2.5 m left of the stop position).
+    public static func jetBridges(_ site: AirportSite) -> [[SIMD2<Double>]] {
+        var out = (site.layout.jetBridges ?? []).map { $0.map(site.xy) }
+        let terminals = site.layout.buildings.filter { $0.kind == .terminal }.map { Polygon2D.open($0.outer.map(site.xy)) }
+        let mappedEnds = out.compactMap(\.last)
+        for s in site.layout.stands where s.line.count >= 2 {
+            let pts = s.line.map(site.xy)
+            let stop = pts[pts.count - 1], dir = simd_normalize(stop - pts[pts.count - 2])
+            let left = SIMD2(-dir.y, dir.x)
+            let door = stop - dir * 4 + left * 2.5
+            if mappedEnds.contains(where: { simd_distance($0, door) < 25 }) { continue }
+            var best: (SIMD2<Double>, Double) = (.zero, .infinity)
+            for ring in terminals {
+                for i in 0..<ring.count {
+                    let a = ring[i], ab = ring[(i + 1) % ring.count] - a
+                    let t = max(0, min(1, simd_dot(door - a, ab) / max(simd_length_squared(ab), 1e-9)))
+                    let q = a + ab * t
+                    let d = simd_distance(door, q)
+                    if d < best.1 { best = (q, d) }
+                }
+            }
+            guard best.1 < 60, best.1 > 6 else { continue }
+            out.append([best.0, door])
+        }
+        return out
+    }
+
+    /// A boarding bridge: a 3 m by 3 m tunnel at floor height 3.2 m, a support leg near the
+    /// aircraft end.
+    static func bridge(_ line: [SIMD2<Double>], _ site: AirportSite, into m: inout MeshData) {
+        guard line.count >= 2 else { return }
+        let floor = 3.2, height = 3.0, half = 1.5
+        func box(_ a: SIMD2<Double>, _ b: SIMD2<Double>, z0: Double, z1: Double, half: Double) {
+            let d = b - a, len = simd_length(d)
+            guard len > 0.1 else { return }
+            let f = d / len, n = SIMD2(-f.y, f.x)
+            let base = site.z((a + b) / 2)
+            let corners = [a + n * half, b + n * half, b - n * half, a - n * half]
+            func p(_ q: SIMD2<Double>, _ z: Double) -> SIMD3<Double> { SIMD3(q.x, q.y, base + z) }
+            // Four sides, uv in metres.
+            let sides: [(Int, Int, SIMD2<Double>)] = [(0, 1, n), (1, 2, f), (2, 3, -n), (3, 0, -f)]
+            for (i, j, out) in sides {
+                let w = simd_distance(corners[i], corners[j])
+                let normal = SIMD3(out.x, out.y, 0)
+                m.add(p(corners[i], z0), normal, SIMD2(0, 0)); m.add(p(corners[j], z0), normal, SIMD2(w, 0)); m.add(p(corners[j], z1), normal, SIMD2(w, z1 - z0))
+                m.add(p(corners[i], z0), normal, SIMD2(0, 0)); m.add(p(corners[j], z1), normal, SIMD2(w, z1 - z0)); m.add(p(corners[i], z1), normal, SIMD2(0, z1 - z0))
+            }
+            let up = SIMD3<Double>(0, 0, 1)
+            m.add(p(corners[0], z1), up, .zero); m.add(p(corners[1], z1), up, .zero); m.add(p(corners[2], z1), up, .zero)
+            m.add(p(corners[0], z1), up, .zero); m.add(p(corners[2], z1), up, .zero); m.add(p(corners[3], z1), up, .zero)
+        }
+        for i in 0..<(line.count - 1) { box(line[i], line[i + 1], z0: floor, z1: floor + height, half: half) }
+        // Support leg and wheel bogie 4 m from the aircraft end.
+        let end = line[line.count - 1], prev = line[line.count - 2]
+        let leg = end + simd_normalize(prev - end) * 4
+        box(leg - SIMD2(0.3, 0), leg + SIMD2(0.3, 0), z0: 0, z1: floor, half: 0.3)
+    }
+
+    /// A 25 m floodlight mast: a tapered pole and a lamp head.
+    static func mast(_ c: SIMD2<Double>, _ site: AirportSite, into m: inout MeshData) {
+        let z = site.z(c)
+        func prism(_ half0: Double, _ half1: Double, _ z0: Double, _ z1: Double) {
+            let corners = [SIMD2(1.0, 1.0), SIMD2(-1.0, 1.0), SIMD2(-1.0, -1.0), SIMD2(1.0, -1.0)]
+            for i in 0..<4 {
+                let a = corners[i], b = corners[(i + 1) % 4]
+                let n2 = simd_normalize(a + b)
+                let n = SIMD3(n2.x, n2.y, 0)
+                let p0 = SIMD3(c.x + a.x * half0, c.y + a.y * half0, z + z0), p1 = SIMD3(c.x + b.x * half0, c.y + b.y * half0, z + z0)
+                let p2 = SIMD3(c.x + b.x * half1, c.y + b.y * half1, z + z1), p3 = SIMD3(c.x + a.x * half1, c.y + a.y * half1, z + z1)
+                m.add(p0, n, SIMD2(0, 0)); m.add(p1, n, SIMD2(1, 0)); m.add(p2, n, SIMD2(1, z1 - z0))
+                m.add(p0, n, SIMD2(0, 0)); m.add(p2, n, SIMD2(1, z1 - z0)); m.add(p3, n, SIMD2(0, z1 - z0))
+            }
+        }
+        prism(0.25, 0.12, 0, 24.5)
+        prism(0.9, 0.9, 24.5, 25.3)
+    }
+
+    /// A windsock: a 6 m pole and a striped cone hanging limp (there is no wind until M7).
+    static func windsock(_ p: SIMD2<Double>, _ site: AirportSite, into m: inout MeshData) {
+        let base = site.z(p)
+        let top = SIMD3(p.x, p.y, base + 6)
+        // Pole: a thin square post.
+        for (dx, dy) in [(0.08, 0.0), (0.0, 0.08), (-0.08, 0.0), (0.0, -0.08)] {
+            let o = SIMD3(dx, dy, 0.0), side = SIMD3(-dy, dx, 0.0)
+            let n = simd_normalize(o)
+            let a = SIMD3(p.x, p.y, base) + o - side, b = SIMD3(p.x, p.y, base) + o + side
+            m.add(a, n, SIMD2(0, -1)); m.add(b, n, SIMD2(0, -1)); m.add(b + SIMD3(0, 0, 6), n, SIMD2(0, -1))
+            m.add(a, n, SIMD2(0, -1)); m.add(b + SIMD3(0, 0, 6), n, SIMD2(0, -1)); m.add(a + SIMD3(0, 0, 6), n, SIMD2(0, -1))
+        }
+        // Cone: 3.6 m long, 0.45 m to 0.15 m radius, drooping 55 degrees toward the north-east.
+        let droop = 55.0 * .pi / 180, az = 45.0 * .pi / 180
+        let axis = SIMD3(cos(droop) * sin(az), cos(droop) * cos(az), -sin(droop))
+        let u = simd_normalize(simd_cross(axis, SIMD3(0, 0, 1))), v = simd_cross(u, axis)
+        let segments = 10
+        for k in 0..<segments {
+            let a0 = Double(k) / Double(segments) * 2 * .pi, a1 = Double(k + 1) / Double(segments) * 2 * .pi
+            func ring(_ a: Double, _ r: Double, _ along: Double) -> SIMD3<Double> { top + axis * along + (u * cos(a) + v * sin(a)) * r }
+            let n0 = u * cos(a0) + v * sin(a0), n1 = u * cos(a1) + v * sin(a1)
+            m.add(ring(a0, 0.45, 0), n0, SIMD2(0, 0)); m.add(ring(a1, 0.45, 0), n1, SIMD2(0, 0)); m.add(ring(a1, 0.15, 3.6), n1, SIMD2(3.6, 0))
+            m.add(ring(a0, 0.45, 0), n0, SIMD2(0, 0)); m.add(ring(a1, 0.15, 3.6), n1, SIMD2(3.6, 0)); m.add(ring(a0, 0.15, 3.6), n0, SIMD2(3.6, 0))
+        }
     }
 
     // MARK: Buildings

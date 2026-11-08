@@ -8,7 +8,7 @@ struct GPULight {
     float4 position;    // xyz airport frame; w: candela
     float4 colour;      // rgb; w: behaviour (0 steady, 1 flashing, 2 PAPI)
     float4 direction;   // xyz beam axis (zero: omnidirectional); w: cos of the beam half-width
-    float4 params;      // flashing: x per second, y phase, z duty; PAPI: x angle (radians)
+    float4 params;      // flashing: x per second, y phase, z duty; PAPI: x angle (radians); w: night only
 };
 
 struct LightUniforms {
@@ -46,6 +46,7 @@ vertex LightOut lightVertex(uint vid [[vertex_id]], uint iid [[instance_id]],
         factor = smoothstep(cosHalf - 0.12, cosHalf + 0.02, c);
     }
     float3 colour = light.colour.rgb;
+    if (light.params.w > 0.5) factor *= smoothstep(0.03, -0.06, u.sunDirection.z);
     float behaviour = light.colour.w;
     float elevation = asin(clamp(dot(toCamera, l.up.xyz), -1.0, 1.0));
     if (behaviour == 1.0) {
@@ -56,8 +57,6 @@ vertex LightOut lightVertex(uint vid [[vertex_id]], uint iid [[instance_id]],
         float t = smoothstep(light.params.x - 0.0009, light.params.x + 0.0009, elevation);
         colour = mix(float3(1.0, 0.1, 0.06), float3(1.0, 0.95, 0.85), t);
     }
-    // Fixtures are never seen from below their own ground.
-    factor *= smoothstep(-0.01, 0.01, elevation);
 
     // Illuminance at the camera, through the atmosphere.
     float illuminance = light.position.w * factor / max(dist * dist, 1.0) * kLuxToScene;

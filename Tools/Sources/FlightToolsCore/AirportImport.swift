@@ -426,12 +426,33 @@ public struct AirportImporter: Sendable {
                                       width: width, runway: e.tags?["ref"] ?? nearestRunway(here).name))
         }
 
-        log("taxiways \(taxiways.count), aprons \(aprons.count), buildings \(buildings.count), stands \(stands.count), holds \(holds.count)")
-        return AirportLayout(
+        // Boarding bridges, terminal end first; windsocks.
+        let terminalRings = buildings.filter { $0.kind == .terminal }.map { $0.outer.map(plane.xy) }
+        func distanceToTerminals(_ p: LatLon) -> Double {
+            let x = plane.xy(p)
+            var best = Double.infinity
+            for r in terminalRings { for i in 0..<(r.count - 1) { best = min(best, PlanarGeometry.distanceToSegment(x, r[i], r[i + 1])) } }
+            return best
+        }
+        var bridges: [[LatLon]] = []
+        for e in osm.elements where e.type == "way" && e.tags?["aeroway"] == "jet_bridge" {
+            var pts = points(e)
+            guard pts.count >= 2 else { continue }
+            if distanceToTerminals(pts.last!) < distanceToTerminals(pts.first!) { pts.reverse() }
+            bridges.append(pts)
+        }
+        let windsocks = osm.elements.filter { $0.type == "node" && $0.tags?["aeroway"] == "windsock" }
+            .compactMap { e in e.lat.flatMap { lat in e.lon.map { LatLon(lat, $0) } } }
+
+        log("taxiways \(taxiways.count), aprons \(aprons.count), buildings \(buildings.count), stands \(stands.count), holds \(holds.count), bridges \(bridges.count), windsocks \(windsocks.count)")
+        var layout = AirportLayout(
             icao: icao, name: nasr.name, reference: nasr.reference, elevation: nasr.elevationFeet * NASRAirport.feet,
             runways: nasr.runways, taxiways: taxiways, aprons: aprons, boundary: boundary, buildings: buildings,
             stands: stands, holdPositions: holds,
             sources: ["FAA NASR 28-day subscription, effective \(nasr.effectiveDate) (US government work): runways, lighting, markings",
                       "OpenStreetMap contributors, data as of \(osm.osm3s?.timestamp_osm_base ?? "unknown") (ODbL): taxiways, aprons, stands, hold positions, buildings, boundary"])
+        layout.jetBridges = bridges
+        layout.windsocks = windsocks
+        return layout
     }
 }

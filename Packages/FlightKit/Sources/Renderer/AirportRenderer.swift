@@ -30,7 +30,7 @@ final class AirportRenderer {
     let lightCount: Int
 
     /// Building facade codes for the shader (DrawUniforms.emissive.x).
-    enum Facade: Float { case terminal = 1, hangar = 2, generic = 3, parking = 4, tower = 5, glass = 6 }
+    enum Facade: Float { case terminal = 1, hangar = 2, generic = 3, parking = 4, tower = 5, glass = 6, bridge = 7, windsock = 8 }
 
     init?(site: AirportSite, geometry: AirportGeometry, lights points: [LightPoint], signs: [SignPlacement],
           sceneFrame: LocalFrame, device: any MTLDevice) {
@@ -61,7 +61,7 @@ final class AirportRenderer {
                             colour: SIMD4(SIMD3<Float>(p.colour), behaviour),
                             direction: SIMD4(omni ? .zero : SIMD3<Float>(simd_normalize(p.direction)),
                                              Float(cos(p.beamDegrees * .pi / 180))),
-                            params: params)
+                            params: SIMD4(params.x, params.y, params.z, p.nightOnly ? 1 : 0))
         }
         lightCount = gpu.count
         lights = gpu.isEmpty ? nil : device.makeBuffer(bytes: gpu, length: gpu.count * MemoryLayout<GPULight>.stride, options: .storageModeShared)
@@ -84,6 +84,9 @@ final class AirportRenderer {
             u.emissive = emissive
             draws.append(Draw(vertices: b, count: m.positions.count, uniforms: u, atlas: atlas, layer: layer))
         }
+        // Pavement: emissive.x asphalt, .y floodlit at night (aprons).
+        add(geometry.apronConcrete, kind: .pavement, roughness: 0.9, emissive: SIMD4(0, 1, 0, 0))
+        add(geometry.apronAsphalt, kind: .pavement, roughness: 0.9, emissive: SIMD4(1, 1, 0, 0))
         add(geometry.concrete, kind: .pavement, roughness: 0.9, emissive: SIMD4(0, 0, 0, 0))
         add(geometry.asphalt, kind: .pavement, roughness: 0.9, emissive: SIMD4(1, 0, 0, 0))
         for rw in geometry.runways {
@@ -102,6 +105,8 @@ final class AirportRenderer {
             }
         }
         add(geometry.glazing, kind: .building, roughness: 0.08, emissive: SIMD4(Facade.glass.rawValue, 0, 0, 0))
+        add(geometry.bridges, kind: .building, roughness: 0.6, emissive: SIMD4(Facade.bridge.rawValue, 0, 0, 0))
+        add(geometry.windsocks, kind: .building, roughness: 0.8, emissive: SIMD4(Facade.windsock.rawValue, 0, 0, 0))
         if let built = SignAtlas.build(signs, device: device), !built.vertices.isEmpty,
            let b = device.makeBuffer(bytes: built.vertices, length: built.vertices.count * MemoryLayout<MeshVertex>.stride,
                                      options: .storageModeShared) {

@@ -29,6 +29,9 @@ public struct AirportLayout: Codable, Sendable {
     public var holdPositions: [HoldPosition]
     /// Where each part came from, with dates.
     public var sources: [String]
+    /// Mapped passenger boarding bridges (terminal end first when known), and windsocks.
+    public var jetBridges: [[LatLon]]?
+    public var windsocks: [LatLon]?
 
     public init(icao: String, name: String, reference: LatLon, elevation: Double, runways: [Runway],
                 taxiways: [Taxiway], aprons: [Area], boundary: [[LatLon]], buildings: [Building],

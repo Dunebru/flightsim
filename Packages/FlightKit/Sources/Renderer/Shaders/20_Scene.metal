@@ -260,19 +260,34 @@ inline float3 pavementAlbedo(float2 uv, bool asphalt, float distance) {
     }
     // Taxiway and apron concrete: 6 m slabs, each a slightly different tone, oil staining.
     float2 slab = float2(6.0, 6.0);
-    float tone = 0.93 + 0.14 * hash21(floor(uv / slab));
+    float tone = 0.96 + 0.08 * hash21(floor(uv / slab));
     float3 c = float3(0.36, 0.35, 0.33) * tone * (0.9 + 0.2 * fbm(uv * 0.015, 3));
     float stains = smoothstep(0.62, 0.8, fbm(uv * 0.08 + 7.0, 3));
     c = mix(c, c * 0.55, stains * 0.6);
-    float joint = (1.0 - smoothstep(0.03, 0.08, jointDistance(uv, slab))) * saturate(1.0 - distance / 400.0);
-    return c * (1.0 - 0.4 * joint);
+    float joint = (1.0 - smoothstep(0.02, 0.05, jointDistance(uv, slab))) * saturate(1.0 - distance / 250.0);
+    return c * (1.0 - 0.22 * joint);
 }
 
-/// Generic facades: uv.x metres along the wall, uv.y metres up. Returns albedo; sets roughness.
-inline float3 facadeAlbedo(float code, float2 uv, float3 N, thread float &roughness) {
+/// Generic facades: uv.x metres along the wall, uv.y metres up. Returns albedo; sets roughness
+/// and the light that windows give off at night (`glow`, scene radiance).
+inline float3 facadeAlbedo(float code, float2 uv, float3 N, thread float &roughness, thread float3 &glow) {
+    glow = float3(0.0);
+    if (code == 8.0) {
+        // Windsock: orange and white bands along the cone; the pole (uv.y < 0) white.
+        roughness = 0.8;
+        if (uv.y < -0.5) return float3(0.7, 0.7, 0.68);
+        return fract(uv.x / 0.72) < 0.5 ? float3(0.85, 0.28, 0.04) : float3(0.82, 0.82, 0.80);
+    }
     if (N.z > 0.7) {
         roughness = 0.9;
         return float3(0.36, 0.35, 0.33) * (0.85 + 0.3 * fbm(uv * 0.05, 3));
+    }
+    if (code == 7.0) {
+        // Boarding bridge: light grey cladding with a band of windows.
+        bool window = uv.y > 1.1 && uv.y < 2.1 && fract(uv.x / 1.4) > 0.15;
+        roughness = window ? 0.15 : 0.5;
+        glow = window ? float3(1.0, 0.85, 0.6) * 1.5e-4 : float3(0.0);
+        return window ? float3(0.05, 0.06, 0.07) : float3(0.62, 0.63, 0.64);
     }
     if (code == 6.0) { roughness = 0.06; return float3(0.025, 0.035, 0.04); }   // tower cab glass
     if (code == 5.0) { roughness = 0.8; return float3(0.62, 0.60, 0.56); }      // tower shaft
@@ -281,6 +296,9 @@ inline float3 facadeAlbedo(float code, float2 uv, float3 N, thread float &roughn
         float2 cell = fract(uv / float2(1.5, 4.5));
         bool frame = cell.x < 0.06 || cell.y < 0.08;
         roughness = frame ? 0.6 : 0.12;
+        // Lit concourses: most panes glow warm at night, a few bays darker.
+        float lit = 0.6 + 0.4 * hash21(floor(uv / float2(6.0, 4.5)));
+        glow = frame ? float3(0.0) : float3(1.0, 0.86, 0.62) * 2.2e-4 * lit;
         return frame ? float3(0.55, 0.56, 0.57) : float3(0.05, 0.07, 0.09);
     }
     if (code == 2.0) {
@@ -299,6 +317,8 @@ inline float3 facadeAlbedo(float code, float2 uv, float3 N, thread float &roughn
     float2 w = fract(uv / float2(3.0, 3.6));
     bool window = w.x > 0.25 && w.x < 0.75 && w.y > 0.35 && w.y < 0.75 && uv.y > 1.0;
     roughness = window ? 0.15 : 0.85;
+    float on = step(0.6, hash21(floor(uv / float2(3.0, 3.6)) + 5.0));
+    glow = window ? float3(1.0, 0.82, 0.55) * 1.2e-4 * on : float3(0.0);
     return window ? float3(0.05, 0.06, 0.07) : float3(0.56, 0.50, 0.42) * (0.9 + 0.2 * fbm(uv * 0.2, 2));
 }
 
@@ -356,6 +376,7 @@ fragment GBufferOut sceneFragment(VertexOut in [[stage_in]],
     if (!frontFacing && kind != kKindTerrain) N = -N;
     float roughness = d.material.x;
     float3 albedo = d.baseColor.rgb;
+    float3 windowGlow = float3(0.0);
     float distance = length(in.worldPos);
 
     if (kind == kKindGround) {
@@ -390,7 +411,7 @@ fragment GBufferOut sceneFragment(VertexOut in [[stage_in]],
     } else if (kind == kKindSign) {
         albedo = albedoTexture.sample(kLinearClamp, in.uv).rgb;
     } else if (kind == kKindBuilding) {
-        albedo = facadeAlbedo(d.emissive.x, in.uv, N, roughness);
+        albedo = facadeAlbedo(d.emissive.x, in.uv, N, roughness, windowGlow);
     } else if (d.material.z > 0.5) {
         float4 t = albedoTexture.sample(kLinearRepeat, in.uv);
         albedo *= t.rgb;
@@ -399,6 +420,14 @@ fragment GBufferOut sceneFragment(VertexOut in [[stage_in]],
     float shadow = shadowFactor(in.worldPos, u, shadowMap);
     float3 color = shadeSurface(albedo, roughness, d.material.y, N, in.worldPos, shadow, u, light, skyView);
     color += d.emissive.rgb * (kind == kKindAircraft ? 1.0 : 0.0);
+    float night = smoothstep(0.05, -0.08, u.sunDirection.z);
+    color += windowGlow * night;
+    if (kind == kKindPavement && d.emissive.y > 0.5) {
+        // Aprons under high-mast floodlights. Real aprons get about 20 lux; the renderer adapts
+        // only partially to night (exposure is capped), so 20 lux would read as black where a
+        // dark-adapted eye sees a lit apron. 120 is a perceptual value, not a measured one.
+        color += albedo / kPi * (120.0 / 120000.0) * float3(1.0, 0.88, 0.70) * night;
+    }
     if (kind == kKindSign) {
         // Signs are lit from inside at night.
         color += albedo * 4.0e-4 * smoothstep(0.05, -0.08, u.sunDirection.z);

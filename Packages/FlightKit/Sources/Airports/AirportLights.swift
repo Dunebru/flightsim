@@ -19,9 +19,12 @@ public struct LightPoint: Sendable {
     public var direction: SIMD3<Double>
     public var beamDegrees: Double
     public var behaviour: Behaviour
+    /// Switched on only after sunset (apron floodlights).
+    public var nightOnly = false
 
     public init(position: SIMD3<Double>, colour: SIMD3<Double>, candela: Double, direction: SIMD3<Double> = .zero,
-                beamDegrees: Double = 180, behaviour: Behaviour = .steady) {
+                beamDegrees: Double = 180, behaviour: Behaviour = .steady, nightOnly: Bool = false) {
+        self.nightOnly = nightOnly
         self.position = position
         self.colour = colour
         self.candela = candela
@@ -46,6 +49,7 @@ public enum AirportLights {
         let frames = site.layout.runways.map(site.runwayFrame)
         for (r, f) in zip(site.layout.runways, frames) { runway(r, f, site, into: &out) }
         taxiwayEdges(site, runways: frames, into: &out)
+        apronMasts(site, into: &out)
         for h in site.layout.holdPositions where h.kind != .intermediate { guardLights(h, site, into: &out) }
         return out
     }
@@ -248,6 +252,37 @@ public enum AirportLights {
                 carry = len - (s - 60)
             }
         }
+    }
+
+    /// High-mast apron floodlights every 150 m around each apron, 8 m inside its edge, 25 m up,
+    /// on at night only.
+    static func apronMasts(_ site: AirportSite, into out: inout [LightPoint]) {
+        for c in mastPositions(site) {
+            out.append(LightPoint(position: SIMD3(c.x, c.y, site.z(c) + 25), colour: SIMD3(1, 0.86, 0.66), candela: 40_000, nightOnly: true))
+        }
+    }
+
+    public static func mastPositions(_ site: AirportSite) -> [SIMD2<Double>] {
+        var out: [SIMD2<Double>] = []
+        for a in site.layout.aprons {
+            var ring = Polygon2D.open(a.outer.map(site.xy))
+            guard ring.count >= 3 else { continue }
+            if Polygon2D.signedArea(ring) < 0 { ring.reverse() }
+            var carry = 0.0
+            for i in 0..<ring.count {
+                let p = ring[i], q = ring[(i + 1) % ring.count]
+                let len = simd_distance(p, q)
+                guard len > 1 else { continue }
+                let d = (q - p) / len, inward = SIMD2(-d.y, d.x)
+                var s = 150 - carry
+                while s < len {
+                    out.append(p + d * s + inward * 8)
+                    s += 150
+                }
+                carry = len - (s - 150)
+            }
+        }
+        return out
     }
 
     /// Runway guard lights: a pair of yellow lights either side of a runway holding position,

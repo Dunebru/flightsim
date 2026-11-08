@@ -82,6 +82,24 @@ struct AirportRenderTests {
                                         forward: SIMD3(0, 0, -1), up: SIMD3(f.axis.x, f.axis.y, 0), fovY: 50 * .pi / 180)
         views.append(("kphx-08-numbers-top", numbers))
 
+        // A gate at Terminal 4 with its boarding bridge, by day and at night.
+        if let stand = site.layout.stands.first(where: { $0.ref == "F11" }) ?? site.layout.stands.first(where: { $0.line.count >= 2 }),
+           let placement = site.placement(.stand(stand.ref ?? "")) {
+            let h = placement.heading * .pi / 180
+            let fwd = SIMD2(sin(h), cos(h))
+            var gate = base
+            gate.aircraftPosition = placement.position
+            gate.aircraftHeading = h
+            let eye = SIMD2(placement.position.x, placement.position.y) - fwd * 45 + SIMD2(fwd.y, -fwd.x) * 25
+            gate.cameraPose = CameraPose(position: site.onSurface(eye) + SIMD3(0, 0, 12),
+                                         forward: simd_normalize(placement.position + SIMD3(0, 0, 3) - (site.onSurface(eye) + SIMD3(0, 0, 12))),
+                                         up: SIMD3(0, 0, 1), fovY: 60 * .pi / 180)
+            views.append(("kphx-gate", gate))
+            var gateNight = gate
+            gateNight.date = RendererTests.time(whenSunAt: -20, afternoon: true)
+            views.append(("kphx-gate-night", gateNight))
+        }
+
         // At a holding position north of 08/26, looking south at the runway and its signs.
         let hold = site.layout.holdPositions.first { h in
             h.runway == "08/26" && h.kind == .runway && abs(h.towardRunway - 180) < 20 && f.local(site.xy(h.position)).x > 600
