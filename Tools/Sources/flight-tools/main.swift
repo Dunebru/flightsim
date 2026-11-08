@@ -4,6 +4,6 @@ import FlightToolsCore
 import Darwin
 #endif
 
-let result = runTool(Array(CommandLine.arguments.dropFirst()))
+let result = await runTool(Array(CommandLine.arguments.dropFirst()))
 print(result.output)
 exit(result.code)
