@@ -360,4 +360,34 @@ nonisolated enum CockpitDisplays {
     static func batt(_ ctx: CGContext) {
         text(ctx, "28.1", 500, 680, size: 420, colour: CGColor(red: 1, green: 0.62, blue: 0.1, alpha: 1), align: 0.5)
     }
+
+    // MARK: Digital readouts
+
+    /// A lit readout's text (amber segments on black), drawn to fill a `width` by `height` image.
+    static func readout(_ string: String, width: Int, height: Int) -> [UInt8] {
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        pixels.withUnsafeMutableBytes { raw in
+            guard let ctx = CGContext(data: raw.baseAddress, width: width, height: height, bitsPerComponent: 8,
+                                      bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return }
+            ctx.setFillColor(CGColor(red: 0.015, green: 0.012, blue: 0.01, alpha: 1))
+            ctx.fill(CGRect(x: 0, y: 0, width: width, height: height))
+            let size = CGFloat(height) * 0.78
+            let font = CTFontCreateWithName("Menlo-Bold" as CFString, size, nil)
+            let colour = CGColor(red: 1, green: 0.6, blue: 0.12, alpha: 1)
+            let attr = NSAttributedString(string: string, attributes: [
+                NSAttributedString.Key(kCTFontAttributeName as String): font,
+                NSAttributedString.Key(kCTForegroundColorAttributeName as String): colour,
+            ])
+            let line = CTLineCreateWithAttributedString(attr)
+            let w = CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))
+            // Squeezed to fit the window if the string is wider than the readout.
+            let squeeze = min(1, CGFloat(width) * 0.94 / max(w, 1))
+            ctx.translateBy(x: (CGFloat(width) - w * squeeze) / 2, y: CGFloat(height) * 0.2)
+            ctx.scaleBy(x: squeeze, y: 1)
+            ctx.textPosition = .zero
+            CTLineDraw(line, ctx)
+        }
+        return pixels
+    }
 }

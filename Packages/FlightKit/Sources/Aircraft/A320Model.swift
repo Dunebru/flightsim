@@ -84,10 +84,19 @@ public enum A320Model {
                            "batt_voltage.canvas.L": "display:batt1", "batt_voltage.canvas.R": "display:batt2"]
             try m.load(xml: "a320.flightdeck.xml", directory: directory, placement: deck,
                        excluding: ["IESI", "Effects/"], staticPart: "cabin", special: { screens[$0] },
-                       animate: { Self.deckControls.contains($0.property) }, fixedSelects: true)
+                       animate: { Self.deckControls.contains($0.property) }, fixedSelects: true, texts: Self.deckReadouts)
         }
         return m
     }
+
+    /// The flight deck's lit digital readouts drawn as quads: the FCU windows, QNH, both radio
+    /// panels, the transponder, the clock, rudder trim and the DME windows. (Lamp-test,
+    /// alternate-mode and duplicate readouts are left out.)
+    public static let deckReadouts: Set<String> = [
+        "spd-text", "hdg-text", "alt-text", "vs-text", "qnh-hpa-left", "qnh-hpa-right",
+        "rmp-active.cpt", "rmp-standby.cpt", "rmp-active.fo", "rmp-standby.fo", "atc-code",
+        "clock_hh", "clock_mm", "clock_sec", "ET_clock_hh", "ET_clock_sep", "ET_clock_mm", "rudder-trim", "dme_flag", "dme1_flag",
+    ]
 
     /// The flight deck controls that move with the flight.
     static let deckControls: Set<String> = [

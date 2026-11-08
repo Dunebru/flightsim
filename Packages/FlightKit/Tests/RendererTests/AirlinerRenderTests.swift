@@ -3,6 +3,7 @@ import Airports
 import Foundation
 import ImageIO
 import CoreGraphics
+import CoreText
 import Metal
 import Testing
 import simd
@@ -87,6 +88,33 @@ struct AirlinerRenderTests {
             }
             s.displays[screen] = DisplayImage(pixels: px, size: n, version: 1)
         }
+        // The digital readouts, with typical values.
+        let sample: [String: String] = ["spd-text": "140", "hdg-text": "080", "alt-text": "05000", "vs-text": "-----",
+                                        "qnh-hpa-left": "1013", "qnh-hpa-right": "1013", "rmp-active.cpt": "118.700",
+                                        "rmp-standby.cpt": "121.900", "rmp-active.fo": "118.700", "rmp-standby.fo": "119.750",
+                                        "atc-code": "2000", "clock_hh": "19", "clock_mm": "30", "clock_sec": "00", "ET_clock_hh": "00",
+                                        "ET_clock_sep": ":", "ET_clock_mm": "00", "rudder-trim": "0.0", "dme_flag": "----", "dme1_flag": "----"]
+        for (name, label) in m.textLabels {
+            let h = 40, w = min(512, Int(Double(h) * label.aspect))
+            var px = [UInt8](repeating: 0, count: w * h * 4)
+            px.withUnsafeMutableBytes { b in
+                guard let ctx = CGContext(data: b.baseAddress, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                                          space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return }
+                ctx.setFillColor(CGColor(red: 0.02, green: 0.015, blue: 0.01, alpha: 1))
+                ctx.fill(CGRect(x: 0, y: 0, width: w, height: h))
+                let font = CTFontCreateWithName("Menlo-Bold" as CFString, CGFloat(h) * 0.78, nil)
+                let attr = NSAttributedString(string: sample[name] ?? "888", attributes: [
+                    NSAttributedString.Key(kCTFontAttributeName as String): font,
+                    NSAttributedString.Key(kCTForegroundColorAttributeName as String): CGColor(red: 1, green: 0.6, blue: 0.12, alpha: 1)])
+                let line = CTLineCreateWithAttributedString(attr)
+                let tw = CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))
+                let k = min(1, CGFloat(w) * 0.94 / tw)
+                ctx.translateBy(x: (CGFloat(w) - tw * k) / 2, y: CGFloat(h) * 0.2)
+                ctx.scaleBy(x: k, y: 1)
+                CTLineDraw(line, ctx)
+            }
+            s.displays["text:" + name] = DisplayImage(pixels: px, width: w, height: h, version: 1)
+        }
         let p = s.aircraftPosition
         let views: [(String, CameraPose)] = [
             ("a320-gate", CameraPose(position: p + left * 38 - fwd * 22 + SIMD3(0, 0, 14),
@@ -95,6 +123,8 @@ struct AirlinerRenderTests {
                                             forward: simd_normalize(left * 9 - fwd * 1 - SIMD3(0, 0, 0.3)), up: SIMD3(0, 0, 1), fovY: 40 * .pi / 180)),
             ("a320-flightdeck", CameraPose(position: p + fwd * 14.7 + left * 0.53 + SIMD3(0, 0, 5.0),
                                            forward: simd_normalize(fwd - SIMD3(0, 0, 0.2)), up: SIMD3(0, 0, 1), fovY: 68 * .pi / 180)),
+            ("a320-fcu", CameraPose(position: p + fwd * 14.9 + left * 0.3 + SIMD3(0, 0, 4.95),
+                                    forward: simd_normalize(fwd - left * 0.64 - SIMD3(0, 0, 0.4)), up: SIMD3(0, 0, 1), fovY: 32 * .pi / 180)),
             ("a320-pedestal", CameraPose(position: p + fwd * 14.7 + left * 0.53 + SIMD3(0, 0, 4.85),
                                          forward: simd_normalize(fwd * 0.55 - left * 0.45 - SIMD3(0, 0, 0.7)), up: SIMD3(0, 0, 1), fovY: 60 * .pi / 180)),
             ("a320-centre-panel", CameraPose(position: p + fwd * 14.75 + left * 0.25 + SIMD3(0, 0, 4.85),
@@ -217,6 +247,9 @@ struct AirlinerRenderTests {
             // aileron should be down, the right up, the elevator trailing edge up.
             ("c172-tail", CameraPose(position: s.aircraftPosition - fwd * 6 + SIMD3(0, 0, 1.6),
                                      forward: simd_normalize(fwd * 6 - SIMD3(0, 0, 0.4)), up: SIMD3(0, 0, 1), fovY: 75 * .pi / 180)),
+            // The radio stack.
+            ("c172-radios", CameraPose(position: s.aircraftPosition + fwd * (eye.x + 0.35) + left * (eye.y - 0.1) + SIMD3(0, 0, eye.z - 0.1),
+                                       forward: simd_normalize(fwd * 0.4 - left * 0.28 - SIMD3(0, 0, 0.12)), up: SIMD3(0, 0, 1), fovY: 40 * .pi / 180)),
             // The airspeed indicator from 30 cm.
             ("c172-asi", CameraPose(position: s.aircraftPosition + fwd * (eye.x + 0.5) + left * (eye.y + 0.025) + SIMD3(0, 0, eye.z - 0.15),
                                     forward: simd_normalize(fwd * 0.3 + left * 0.015 - SIMD3(0, 0, 0.09)), up: SIMD3(0, 0, 1), fovY: 40 * .pi / 180)),

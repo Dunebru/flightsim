@@ -270,6 +270,7 @@ final class WorldEngine: NSObject {
         do {
             if aircraftID == "A320" {
                 if let a320, let directory = Bundle.main.resourceURL?.appendingPathComponent("Bundle/Aircraft/A320") {
+                    scene.textLabels = a320.textLabels
                     try renderer?.setAircraft(a320.model, textures: directory, textureMap: A320Model.liveries[0].textures,
                                               hiddenParts: ["hidden"], animation: a320, cullsBackFaces: true,
                                               noseWheel: Self.noseWheel(a320, "NLGWheels", AircraftProfile.a320))

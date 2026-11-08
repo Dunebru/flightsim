@@ -15,6 +15,7 @@ struct DrawUniforms {
     float4 baseColor;      // rgb albedo (multiplies the texture), a: opacity
     float4 material;       // x: roughness, y: metallic, z: textured (1/0), w: surface kind
     float4 emissive;       // rgb
+    float4 extra;          // xy: texture offset (an aircraft part's digit drum)
 };
 
 // Surface kinds (material.w).
@@ -69,7 +70,7 @@ vertex VertexOut sceneVertex(uint vid [[vertex_id]],
     o.position = u.viewProj * world;
     o.worldPos = world.xyz;
     o.normal = normalize((d.model * float4(v.normal.xyz, 0.0)).xyz);
-    o.uv = v.uv;
+    o.uv = v.uv + d.extra.xy;
     o.currentClip = u.viewProjNoJitter * world;
     o.previousClip = u.prevViewProjNoJitter * prevWorld;
     o.seed = 0.0;

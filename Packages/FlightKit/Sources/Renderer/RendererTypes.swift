@@ -1,3 +1,4 @@
+public import Aircraft
 public import Foundation
 public import simd
 public import SimCore
@@ -146,6 +147,8 @@ struct DrawUniforms {
     var baseColor = SIMD4<Float>(1, 1, 1, 1)
     var material = SIMD4<Float>(0.8, 0, 0, 0)     // roughness, metallic, textured, kind
     var emissive = SIMD4<Float>.zero
+    /// xy: texture offset (an aircraft part's digit drum).
+    var extra = SIMD4<Float>.zero
 }
 
 enum SurfaceKind: Float {
@@ -241,6 +244,8 @@ public struct SceneDescription: Sendable {
     public var aircraftPivotHeight = 0.0
     /// Live images for the aircraft's display screens (parts named "display:<name>").
     public var displays: [String: DisplayImage] = [:]
+    /// The aircraft's digital readouts (from its model): what each "display:text:<name>" shows.
+    public var textLabels: [String: AnimatedModel.TextLabel] = [:]
     /// Readings for the aircraft's animated parts (instrument needles, yoke, pedals), by
     /// FlightGear property path.
     public var instrumentValues: [String: Double] = [:]
@@ -428,11 +433,15 @@ public struct FrameStats: Sendable, Equatable {
 /// One screen's image: RGBA8 rows top first; `version` changes when the pixels do.
 public struct DisplayImage: Sendable {
     public var pixels: [UInt8]
-    public var size: Int
+    public var width: Int, height: Int
     public var version: Int
-    public init(pixels: [UInt8], size: Int, version: Int) {
+    public init(pixels: [UInt8], width: Int, height: Int, version: Int) {
         self.pixels = pixels
-        self.size = size
+        self.width = width
+        self.height = height
         self.version = version
+    }
+    public init(pixels: [UInt8], size: Int, version: Int) {
+        self.init(pixels: pixels, width: size, height: size, version: version)
     }
 }

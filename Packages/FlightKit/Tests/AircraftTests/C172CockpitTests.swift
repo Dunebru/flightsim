@@ -106,3 +106,20 @@ struct C172CockpitTests {
         #expect(rudder < -0.05)
     }
 }
+
+/// The radio stack's digit drums read the frequencies: COMM 1 at 118.70 turns its hundreds drum to
+/// show 1, its tens to 1 and its units to 8 (each a tenth of the strip per digit).
+struct RadioDrumTests {
+    @Test func commDrumsShowTheFrequency() throws {
+        let m = try C172Model.loadAircraft(directory: C172CockpitTests.directory)
+        func shift(_ object: String) -> Float {
+            let part = m.model.groups.first { $0.part.hasSuffix("|" + object) }?.part ?? ""
+            let o = m.textureOffset(part: part, values: [:])
+            return (o.x * 10).rounded() / 10
+        }
+        let hundreds = shift("CommUse100M"), tens = shift("CommUse10M"), units = shift("CommUse1M"), tenths = shift("CommUse100K")
+        print("drums: \(hundreds) \(tens) \(units) \(tenths)")
+        func digit(_ v: Float) -> Int { Int((v * 10).truncatingRemainder(dividingBy: 10).rounded()) }
+        #expect(digit(hundreds) == 1 && digit(tens) == 1 && digit(units) == 8 && digit(tenths) == 7)
+    }
+}

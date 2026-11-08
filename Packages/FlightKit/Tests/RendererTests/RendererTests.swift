@@ -30,7 +30,7 @@ struct RendererTests {
                      lightingStateSize, MemoryLayout<PrecipUniforms>.stride, MemoryLayout<GPULight>.stride,
                      MemoryLayout<LightUniforms>.stride, MemoryLayout<StarGPU>.stride, MemoryLayout<StarUniforms>.stride]
         #expect(gpu == swift, "GPU \(gpu) vs Swift \(swift)")
-        #expect(MemoryLayout<DrawUniforms>.stride == 2 * 64 + 3 * 16)
+        #expect(MemoryLayout<DrawUniforms>.stride == 2 * 64 + 4 * 16)
         #expect(MemoryLayout<MeshVertex>.stride == 48)
         #expect(MemoryLayout<TerrainVertex>.stride == 20)
         #expect(MemoryLayout<CompactVertex>.stride == 24)

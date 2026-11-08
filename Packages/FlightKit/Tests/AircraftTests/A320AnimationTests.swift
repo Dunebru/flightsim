@@ -113,7 +113,9 @@ struct A320FlightDeckTests {
         #expect(deckParts.contains { $0.contains("thr_l_body") })
         #expect(deckParts.count < 40, "lamps and switches should not each be a separate moving part")
         #expect(parts.contains("windshield"))
-        let screens = parts.filter { $0.hasPrefix("display:") }
+        let screens = parts.filter { $0.hasPrefix("display:") && !$0.hasPrefix("display:text:") }
+        print("readouts: \(parts.filter { $0.hasPrefix("display:text:") }.count)")
+        #expect(parts.filter { $0.hasPrefix("display:text:") }.count == A320Model.deckReadouts.count)
         print("screens: \(screens.sorted())")
         #expect(Set(screens) == ["display:pfd1", "display:pfd2", "display:nd1", "display:nd2", "display:ewd", "display:sd",
                                  "display:mcdu", "display:dcdu", "display:isis", "display:clock", "display:atc", "display:batt1", "display:batt2"])

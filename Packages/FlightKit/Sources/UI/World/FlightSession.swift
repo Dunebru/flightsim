@@ -88,7 +88,7 @@ final class FlightSession {
     /// The A320's screens, drawn off the main thread about 15 times a second while the
     /// flight deck is in view.
     nonisolated final class DisplayBox: Sendable {
-        let pages = Mutex<(images: [String: [UInt8]], version: Int, busy: Bool)>(([:], 0, false))
+        let pages = Mutex<(images: [String: DisplayImage], version: Int, busy: Bool)>(([:], 0, false))
     }
     private let displayBox = DisplayBox()
     private var displayFrame = 0
@@ -97,12 +97,14 @@ final class FlightSession {
         displayFrame += 1
         let latest = displayBox.pages.withLock { $0 }
         if latest.version > 0 {
-            let size = CockpitDisplays.size
-            for (screen, page) in [("pfd1", "pfd"), ("pfd2", "pfd"), ("nd1", "nd"), ("nd2", "nd"), ("ewd", "ewd"), ("sd", "sd"),
-                                   ("mcdu", "mcdu"), ("dcdu", "dcdu"), ("isis", "isis"), ("clock", "clock"), ("atc", "atc"),
-                                   ("batt1", "batt"), ("batt2", "batt")] {
-                if let px = latest.images[page], scene.displays[screen]?.version != latest.version {
-                    scene.displays[screen] = DisplayImage(pixels: px, size: size, version: latest.version)
+            var screens = [("pfd1", "pfd"), ("pfd2", "pfd"), ("nd1", "nd"), ("nd2", "nd"), ("ewd", "ewd"), ("sd", "sd"),
+                           ("mcdu", "mcdu"), ("dcdu", "dcdu"), ("isis", "isis"), ("clock", "clock"), ("atc", "atc"),
+                           ("batt1", "batt"), ("batt2", "batt")]
+            screens += latest.images.keys.filter { $0.hasPrefix("text:") }.map { ($0, $0) }
+            for (screen, page) in screens {
+                if var image = latest.images[page], scene.displays[screen]?.version != latest.version {
+                    image.version = latest.version
+                    scene.displays[screen] = image
                 }
             }
         }
@@ -127,12 +129,44 @@ final class FlightSession {
         d.selectedAltitude = Double(hud.targetAltitude)
         d.fma = [hud.autothrottle ? "SPEED" : "", hud.apVertical, hud.apLateral, hud.apApproach == nil ? "" : "CAT 1",
                  hud.apMaster ? "AP1" : ""]
+        // The digital readouts: their values, formatted as the model's XML says.
+        let utc = Calendar(identifier: .gregorian).dateComponents(in: TimeZone(identifier: "UTC")!, from: Date())
+        let readoutValues: [String: Double] = [
+            "it-autoflight/input/kts-display": Double(hud.targetSpeed), "it-autoflight/input/hdg": Double(hud.targetHeading),
+            "it-autoflight/input/alt": Double(hud.targetAltitude),
+            "instrumentation/altimeter/setting-hpa": weather.altimeterHPa.rounded(),
+        ]
+        let vsText = hud.targetVerticalSpeed == 0 ? "00" : String(format: "%+03d", hud.targetVerticalSpeed / 100)
+        let readoutText: [String: String] = [
+            "it-autoflight/output/vs-fcu-display": vsText,
+            "controls/radio/rmp[0]/active-display": "118.700", "controls/radio/rmp[0]/standby-display": "121.900",
+            "controls/radio/rmp[1]/active-display": "118.700", "controls/radio/rmp[1]/standby-display": "119.750",
+            "/systems/atc/transponder-code": "2000", "systems/atc/transponder-code": "2000",
+            "instrumentation/clock/indicated-hours": String(format: "%02d", utc.hour ?? 0),
+            "instrumentation/clock/indicated-minutes": String(format: "%02d", utc.minute ?? 0),
+            "instrumentation/clock/indicated-seconds": String(format: "%02d", utc.second ?? 0),
+            "instrumentation/clock/et/indicated-hours": "00", "instrumentation/clock/et/indicated-min": "00",
+            "controls/flight/rudder-trim-display": "0.0",
+        ]
+        var readouts: [String: String] = [:]
+        for (name, label) in scene.textLabels {
+            if let literal = label.literal { readouts[name] = literal; continue }
+            if let t = readoutText[label.property] { readouts[name] = t; continue }
+            if let v = readoutValues[label.property] { readouts[name] = String(format: label.format.replacingOccurrences(of: "%s", with: "%.0f"), v) }
+        }
+        let labels = scene.textLabels
         displayBox.pages.withLock { $0.busy = true }
         let box = displayBox
         DispatchQueue.global(qos: .userInitiated).async {
-            var images: [String: [UInt8]] = [:]
+            var images: [String: DisplayImage] = [:]
+            let n = CockpitDisplays.size
             for page in ["pfd", "nd", "ewd", "sd", "mcdu", "dcdu", "isis", "clock", "atc", "batt"] {
-                images[page] = CockpitDisplays.draw(page, d)
+                images[page] = DisplayImage(pixels: CockpitDisplays.draw(page, d), size: n, version: 0)
+            }
+            for (name, text) in readouts {
+                let aspect = labels[name]?.aspect ?? 3
+                let h = 40, w = min(512, Int((Double(h) * aspect).rounded()))
+                images["text:" + name] = DisplayImage(pixels: CockpitDisplays.readout(text, width: w, height: h), width: w, height: h, version: 0)
             }
             box.pages.withLock { $0 = (images, $0.version + 1, false) }
         }

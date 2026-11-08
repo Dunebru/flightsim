@@ -147,6 +147,7 @@ public final class SceneRenderer {
     /// animation hides.
     private var partTransforms: [String: simd_float4x4] = [:]
     private var hiddenParts: Set<String> = []
+    private var partTextureOffsets: [String: SIMD2<Float>] = [:]
     /// Live screen images by display name, and the version each holds.
     private var displayTextures: [String: any MTLTexture] = [:]
     private var displayVersions: [String: Int] = [:]
@@ -540,11 +541,16 @@ public final class SceneRenderer {
                     values["spin:" + p] = spinTurns[p]
                 }
                 var cache: [String: simd_float4x4] = [:]
+                var offsets: [String: SIMD2<Float>] = [:]
                 var hidden = Set<String>()
                 for part in aircraft.parts where !part.animated.isEmpty && cache[part.animated] == nil {
                     if !animation.isVisible(part: part.animated, values: values) { hidden.insert(part.animated) }
                     cache[part.animated] = animation.transform(part: part.animated, values: values) ?? matrix_identity_float4x4
+                    let off = animation.textureOffset(part: part.animated, values: values)
+                    // AC3D's v runs up, the mesh's down.
+                    if off != .zero { offsets[part.animated] = SIMD2(off.x, -off.y) }
                 }
+                partTextureOffsets = offsets
                 previousPartTransforms = reset ? cache : partTransforms
                 partTransforms = cache
                 hiddenParts = hidden
@@ -1002,6 +1008,7 @@ public final class SceneRenderer {
                     let c4 = aircraftModel * pt * SIMD4(part.centre, 1)
                     if !MatrixMath.sphereVisible(centre: SIMD3(c4.x, c4.y, c4.z), radius: part.radius, planes: frustum) { continue }
                     d.model = aircraftModel * pt
+                    if let off = partTextureOffsets[part.animated] { d.extra = SIMD4(off.x, off.y, 0, 0) }
                     // Last frame's pose of the part, so moving parts get true motion vectors.
                     d.prevModel = aircraftPrev * (part.animated.isEmpty ? pt : (previousPartTransforms[part.animated] ?? pt))
                     e.setCullMode(part.twoSided || !part.display.isEmpty ? .none : .front)   // AC3D fronts wind counter-clockwise; Metal's default front is clockwise
@@ -1526,16 +1533,16 @@ public final class SceneRenderer {
     }
 
     private func uploadDisplay(_ name: String, _ image: DisplayImage) {
-        let n = image.size
-        guard image.pixels.count == n * n * 4 else { return }
-        if displayTextures[name]?.width != n {
-            let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba8Unorm_srgb, width: n, height: n, mipmapped: false)
+        let w = image.width, h = image.height
+        guard image.pixels.count == w * h * 4 else { return }
+        if displayTextures[name]?.width != w || displayTextures[name]?.height != h {
+            let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba8Unorm_srgb, width: w, height: h, mipmapped: false)
             d.usage = .shaderRead
             d.storageMode = .shared
             displayTextures[name] = device.makeTexture(descriptor: d)
         }
         image.pixels.withUnsafeBytes { b in
-            displayTextures[name]?.replace(region: MTLRegionMake2D(0, 0, n, n), mipmapLevel: 0, withBytes: b.baseAddress!, bytesPerRow: n * 4)
+            displayTextures[name]?.replace(region: MTLRegionMake2D(0, 0, w, h), mipmapLevel: 0, withBytes: b.baseAddress!, bytesPerRow: w * 4)
         }
         displayVersions[name] = image.version
     }

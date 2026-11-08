@@ -70,6 +70,18 @@ public enum C172Model {
         "controls/switches/master-bat": 1,
         "controls/switches/master-alt": 1,
         "controls/switches/master-avionics": 1,
+        // The radio stack's digit drums: KPHX tower and ground, two VORs, an NDB, and a hobbs
+        // meter that has seen some hours.
+        "instrumentation/comm[0]/frequencies/selected-mhz": 118.70, "instrumentation/comm[0]/frequencies/standby-mhz": 119.75,
+        "instrumentation/comm[1]/frequencies/selected-mhz": 121.90, "instrumentation/comm[1]/frequencies/standby-mhz": 124.30,
+        "instrumentation/nav[0]/frequencies/selected-mhz": 115.60, "instrumentation/nav[0]/frequencies/standby-mhz": 113.30,
+        "instrumentation/nav[1]/frequencies/selected-mhz": 112.90, "instrumentation/nav[1]/frequencies/standby-mhz": 110.20,
+        "instrumentation/adf[0]/frequencies/selected-khz": 410,
+        // Avionics powered: the radios' digit windows are lit only with these set.
+        "sim/model/c172p/lighting/comm0-power": 1, "sim/model/c172p/lighting/comm1-power": 1,
+        "sim/model/c172p/lighting/dme-power": 1, "instrumentation/adf[0]/operable": 1,
+        "instrumentation/hobbs-meter/digits0": 4, "instrumentation/hobbs-meter/digits1": 8, "instrumentation/hobbs-meter/digits2": 2,
+        "instrumentation/hobbs-meter/digits3": 7, "instrumentation/hobbs-meter/digits4": 1,
     ].merging(["autopilot", "bcnlt", "flaps", "instr", "intlt", "landing", "master", "navlt", "pitot-heat", "radio1", "radio2",
                "radio3", "radio4", "radio5", "strobe", "turn-coordinator"].map { ("controls/circuit-breakers/\($0)", 1.0) }) { a, _ in a }
 

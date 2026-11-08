@@ -8,12 +8,14 @@ public import simd
 public struct FGAnimation: Sendable, Equatable {
     /// `spin` turns continuously at the property's value as rpm (times the factor); `select`
     /// shows its objects only while its condition holds.
-    public enum Kind: Sendable, Equatable { case rotate, translate, spin, select }
+    public enum Kind: Sendable, Equatable { case rotate, translate, spin, select, textranslate }
     public var kind: Kind
     public var objects: [String]
     /// Property path without a leading slash ("instrumentation/altimeter/indicated-altitude-ft").
     public var property: String
     public var condition: FGCondition?
+    /// textranslate: the value is first quantized to `step` (a digit drum showing whole digits).
+    public var step = 0.0, bias = 0.0
     public var factor = 1.0
     public var offset = 0.0
     public var minimum: Double?
@@ -49,7 +51,7 @@ public struct FGAnimation: Sendable, Equatable {
         let n = simd_length(axis) > 1e-12 ? simd_normalize(axis) : SIMD3(0, 1, 0)
         let degrees: Double
         switch kind {
-        case .select:
+        case .select, .textranslate:
             return matrix_identity_double4x4
         case .translate:
             return FGAnimation.translation(n * output(input))
@@ -95,6 +97,7 @@ public struct FGAnimation: Sendable, Equatable {
             case "translate": kind = .translate
             case "spin": kind = .spin
             case "select": kind = .select
+            case "textranslate": kind = .textranslate
             default: return nil
             }
             let objects = a.children(named: "object-name").map(\.text)
@@ -108,7 +111,9 @@ public struct FGAnimation: Sendable, Equatable {
             var anim = FGAnimation(kind: kind, objects: objects, property: property)
             func number(_ name: String) -> Double? { a.text(of: name).flatMap { Double($0) } }
             anim.factor = number("factor") ?? 1
-            anim.offset = number(kind == .rotate ? "offset-deg" : "offset-m") ?? 0
+            anim.step = number("step") ?? 0
+            anim.bias = number("bias") ?? 0
+            anim.offset = number(kind == .rotate ? "offset-deg" : kind == .textranslate ? "offset" : "offset-m") ?? 0
             anim.minimum = number(kind == .rotate ? "min-deg" : "min-m")
             anim.maximum = number(kind == .rotate ? "max-deg" : "max-m")
             if let interp = a.child(named: "interpolation") {
@@ -123,6 +128,8 @@ public struct FGAnimation: Sendable, Equatable {
                     let p1 = SIMD3(c("x1-m"), c("y1-m"), c("z1-m")), p2 = SIMD3(c("x2-m"), c("y2-m"), c("z2-m"))
                     anim.center = acFrame(p1)
                     anim.axis = acFrame(p2 - p1)
+                } else if kind == .textranslate {
+                    anim.axis = SIMD3(c("x"), c("y"), 0)      // texture axes, not space
                 } else {
                     anim.axis = acFrame(SIMD3(c("x"), c("y"), c("z")))
                 }
@@ -205,6 +212,19 @@ public struct AnimatedModel: Sendable {
     public var defaults: [String: Double] = [:]
     /// Objects left out (their part becomes "hidden"), by name, in every sub-model.
     public var hiddenObjects: Set<String> = []
+    /// FlightGear `<text>` readouts turned into screen quads (parts "display:text:<name>"):
+    /// what each shows.
+    public struct TextLabel: Sendable {
+        public var property: String
+        /// A fixed string ("----"), or nil to format the property.
+        public var literal: String?
+        public var format: String
+        public var characters: Int
+        /// Width over height of the quad (and of the image to draw into it).
+        public var aspect: Double
+    }
+    public var textLabels: [String: TextLabel] = [:]
+
     /// Models loaded as the inside of the airframe (whose fixed part is "cabin").
     public var interiorModels: Set<String> = []
 
@@ -236,6 +256,23 @@ public struct AnimatedModel: Sendable {
         return (lo + hi) / 2
     }
 
+    /// The texture offset of a part's digit drums (textranslate), in AC3D texture space
+    /// (v up).
+    public func textureOffset(part: String, values: [String: Double]) -> SIMD2<Float> {
+        guard part.hasPrefix("anim:"), let bar = part.firstIndex(of: "|") else { return .zero }
+        let name = String(part[part.index(part.startIndex, offsetBy: 5)..<bar])
+        var off = SIMD2<Double>.zero
+        for object in part[part.index(after: bar)...].split(separator: "/") {
+            for anim in animations["\(name)|\(object)"] ?? [] where anim.kind == .textranslate {
+                var v = values[anim.property] ?? defaults[anim.property] ?? 0
+                if anim.step > 0 { v = ((v + anim.bias) / anim.step).rounded(.down) * anim.step }
+                v = v * anim.factor + anim.offset
+                off += SIMD2(anim.axis.x, anim.axis.y) * v
+            }
+        }
+        return SIMD2<Float>(off)
+    }
+
     /// Whether a part is shown: false while a `select` on it or on an object it hangs from fails.
     public func isVisible(part: String, values: [String: Double]) -> Bool {
         guard part.hasPrefix("anim:"), let bar = part.firstIndex(of: "|") else { return true }
@@ -256,12 +293,20 @@ public struct AnimatedModel: Sendable {
         for object in part[part.index(after: bar)...].split(separator: "/") {
             // FlightGear wraps each animation around the object in turn: the first listed is
             // innermost.
-            for anim in (animations["\(name)|\(object)"] ?? []).reversed() where anim.kind != .select {
+            for anim in (animations["\(name)|\(object)"] ?? []).reversed() where anim.kind != .select && anim.kind != .textranslate {
                 let key = anim.kind == .spin ? "spin:" + anim.property : anim.property
                 m = m * anim.matrix(values[key] ?? defaults[key] ?? 0)
             }
         }
         return simd_float4x4(SIMD4<Float>(m.columns.0), SIMD4<Float>(m.columns.1), SIMD4<Float>(m.columns.2), SIMD4<Float>(m.columns.3))
+    }
+
+    /// Characters a printf format produces for a typical value ("%03.0f" -> 3, "%05.0f" -> 5).
+    static func formatWidth(_ format: String, text: String?) -> Int {
+        if format == "%s" { return max(text?.count ?? 0, 4) }
+        let digits = format.split(whereSeparator: { !$0.isNumber && $0 != "." })
+        if let first = digits.first, let w = Double(first) { return max(Int(w), 3) + (format.contains(".") && !format.hasSuffix(".0f") ? 1 : 0) }
+        return 4
     }
 
     /// Loads a PropertyList model from `directory` (all files flat in one folder) and the
@@ -272,7 +317,8 @@ public struct AnimatedModel: Sendable {
     public mutating func load(xml file: String, directory: URL, placement: simd_double4x4 = matrix_identity_double4x4,
                               excluding: [String] = [], staticPart: String = "cabin",
                               special: (String) -> String? = { _ in nil },
-                              animate: (FGAnimation) -> Bool = { _ in true }, fixedSelects: Bool = false) throws {
+                              animate: (FGAnimation) -> Bool = { _ in true }, fixedSelects: Bool = false,
+                              texts: Set<String> = []) throws {
         let root = try XMLElementNode.parse(contentsOf: directory.appendingPathComponent(file))
         let name = (file as NSString).deletingPathExtension
         if self.root.isEmpty { self.root = name }
@@ -314,6 +360,43 @@ public struct AnimatedModel: Sendable {
             // Fixed geometry is "cabin" (a model inside the airframe); placed sub-models are
             // moved as a whole.
             for i in parsed.groups.indices where parsed.groups[i].part.isEmpty { parsed.groups[i].part = base.isEmpty ? staticPart : base }
+            // `<text>` readouts named in `texts`: a quad each, lying where FlightGear draws the
+            // text (its plane, facing, and size from the character height and digit count).
+            for t in root.children(named: "text") {
+                guard let tname = t.text(of: "name"), texts.contains(tname) else { continue }
+                let isLiteral = t.text(of: "type") == "literal"
+                let format = t.text(of: "format") ?? "%s"
+                let sample = isLiteral ? (t.text(of: "text") ?? "") : (t.child(named: "property").flatMap { _ in nil } ?? format)
+                let chars = max(2, isLiteral ? sample.count : Self.formatWidth(format, text: t.text(of: "text")))
+                let h = Double(t.text(of: "character-size") ?? "0.008") ?? 0.008
+                let w = h * 0.62 * Double(chars) + h * 0.3
+                var prop = ""
+                if let p = t.child(named: "property") { prop = FGAnimation.propertyPath(p, root: root) ?? "" }
+                textLabels[tname] = TextLabel(property: prop, literal: isLiteral ? sample : nil, format: format,
+                                              characters: chars, aspect: w / (h * 1.3))
+                let o = t.child(named: "offsets")
+                func c(_ n: String) -> Double { o?.text(of: n).flatMap(Double.init) ?? 0 }
+                let rad = Double.pi / 180
+                let rz = simd_double3x3(simd_quatd(angle: c("heading-deg") * rad, axis: SIMD3(0, 0, 1)))
+                let ry = simd_double3x3(simd_quatd(angle: c("pitch-deg") * rad, axis: SIMD3(0, 1, 0)))
+                let rx = simd_double3x3(simd_quatd(angle: c("roll-deg") * rad, axis: SIMD3(1, 0, 0)))
+                let r = rz * ry * rx
+                let origin = SIMD3(c("x-m"), c("y-m"), c("z-m"))
+                let hh = h * 0.65, hw = w / 2
+                // Text plane: x along the line, y up, facing +z (FlightGear's xy-plane).
+                func corner(_ x: Double, _ y: Double) -> SIMD3<Float> { SIMD3<Float>(FGAnimation.acFrame(origin + r * SIMD3(x, y, 0.008))) }
+                let n = SIMD3<Float>(FGAnimation.acFrame(r * SIMD3(0, 0, 1)))
+                let a = corner(-hw, -hh), b = corner(hw, -hh), cc = corner(hw, hh), d = corner(-hw, hh)
+                var g = AC3DModel.Group(texture: nil, materialIndex: parsed.materials.count, twoSided: true, part: "display:text:" + tname)
+                g.positions = [a, b, cc, a, cc, d]
+                g.normals = Array(repeating: n, count: 6)
+                g.uvs = [SIMD2(0, 0), SIMD2(1, 0), SIMD2(1, 1), SIMD2(0, 0), SIMD2(1, 1), SIMD2(0, 1)]
+                parsed.groups.append(g)
+            }
+            if parsed.groups.contains(where: { $0.part.hasPrefix("display:text:") }) {
+                parsed.materials.append(AC3DModel.Material(name: "text", diffuse: SIMD3(1, 1, 1), emissive: .zero, specular: .zero,
+                                                           shininess: 16, transparency: 0))
+            }
             // Parts named by `special` are not moved by an animation transform, so a placed
             // sub-model's offset is baked into their vertices.
             if placement != matrix_identity_double4x4 {
