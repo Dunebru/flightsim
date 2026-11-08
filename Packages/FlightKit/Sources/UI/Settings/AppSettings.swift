@@ -56,6 +56,11 @@ public final class AppSettings {
             upscaler = s.upscaler
             showStats = s.showStats
         }
+        // `-FlightAirport KLAX` (scripts and screenshots): fly from that airport this launch.
+        if let forced = defaults.string(forKey: "FlightAirport"), !forced.isEmpty {
+            airport = forced
+            spot = .runway(forced == "KLAX" ? "24R" : "08")
+        }
         loading = false
     }
 

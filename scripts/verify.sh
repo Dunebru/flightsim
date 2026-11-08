@@ -214,10 +214,12 @@ run_on_sim "$IPAD_SIM" ipad-sim
 if [ "$WITH_DEVICE" -eq 1 ]; then
   step "Physical device"
   UDID=$(device_udid) || { echo "    FAILED: no connected iPhone (unlock it, same Wi-Fi or cable)"; exit 1; }
-  run_logged app-build-device xcodebuild -project Flight.xcodeproj -scheme "$SCHEME" \
+  # Release on the phone: optimized Swift builds airports, streams terrain and steps physics
+  # several times faster than Debug, and it is what a pilot would run.
+  run_logged app-build-device xcodebuild -project Flight.xcodeproj -scheme "$SCHEME" -configuration Release \
     -destination "id=$UDID" -derivedDataPath "$DERIVED" \
     -allowProvisioningUpdates -allowProvisioningDeviceRegistration build
-  APP_PATH="$DERIVED/Build/Products/Debug-iphoneos/Flight.app"
+  APP_PATH="$DERIVED/Build/Products/Release-iphoneos/Flight.app"
   # The bundle must be a fresh device build, not a stale one or a simulator slice.
   if ! vtool -show-build "$APP_PATH/Flight" 2>/dev/null | grep -q "platform IOS$"; then
     echo "    FAILED: $APP_PATH/Flight is not an iOS device binary"; exit 1
