@@ -34,10 +34,22 @@ public actor TerrariumSource {
     /// (bilinear samples on the edge reach into neighbours).
     public nonisolated static func sources(for k: TileKey) -> Set<TileKey> {
         let zs = sourceZoom(for: k)
-        let scale = 1 << (zs - k.z), n = 1 << zs
+        let n = 1 << zs
+        // The target's footprint in source tiles: several when the source is finer, the one
+        // ancestor when it is coarser (zoom 16 and up read zoom 15).
+        let lo: SIMD2<Int>, hi: SIMD2<Int>
+        if zs >= k.z {
+            let scale = 1 << (zs - k.z)
+            lo = SIMD2(k.x * scale, k.y * scale)
+            hi = SIMD2(k.x * scale + scale - 1, k.y * scale + scale - 1)
+        } else {
+            let shift = k.z - zs
+            lo = SIMD2(k.x >> shift, k.y >> shift)
+            hi = lo
+        }
         var out = Set<TileKey>()
-        for x in (k.x * scale - 1)...(k.x * scale + scale) {
-            for y in (k.y * scale - 1)...(k.y * scale + scale) {
+        for x in (lo.x - 1)...(hi.x + 1) {
+            for y in (lo.y - 1)...(hi.y + 1) {
                 out.insert(TileKey(z: zs, x: (x + n) % n, y: min(max(y, 0), n - 1)))
             }
         }
@@ -139,7 +151,8 @@ public actor TerrariumSource {
     /// The global base (zoom 5 and coarser) samples its own level, which is plenty there.
     public func heights(for k: TileKey, samples: Int = 65) async throws -> [Float] {
         let zs = Self.sourceZoom(for: k)
-        let scale = Double(1 << (zs - k.z))
+        // Fractional when the source is coarser than the target (1 << negative is 0).
+        let scale = pow(2, Double(zs - k.z))
         let step = 1.0 / Double(samples - 1)
         var out = [Float]()
         out.reserveCapacity(samples * samples)
@@ -271,6 +284,19 @@ enum ImageCodec {
             return true
         }
         return ok ? (px, w, h) : nil
+    }
+
+    /// RGBA8 to PNG (lossless; tests encode terrarium heights with it).
+    static func encodePNG(_ px: [UInt8]) -> Data {
+        let data = NSMutableData()
+        let img = CGImage(width: 256, height: 256, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: 1024,
+                          space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                          bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue),
+                          provider: CGDataProvider(data: Data(px) as CFData)!, decode: nil, shouldInterpolate: false, intent: .defaultIntent)!
+        let dest = CGImageDestinationCreateWithData(data, UTType.png.identifier as CFString, 1, nil)!
+        CGImageDestinationAddImage(dest, img, nil)
+        CGImageDestinationFinalize(dest)
+        return data as Data
     }
 
     /// 8-bit grey PNG.

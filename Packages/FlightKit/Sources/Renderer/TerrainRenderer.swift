@@ -17,6 +17,9 @@ final class TerrainRenderer {
         let texture: any MTLTexture
         /// Night lights (zoom 8 and coarser tiles only).
         let night: (any MTLTexture)?
+        /// Trees found in the tile's imagery (zoom 17 and finer), instanced.
+        let trees: (any MTLBuffer)?
+        let treeCount: Int
         let centre: SIMD3<Double>
         let radius: Double
         let bytes: Int
@@ -27,6 +30,7 @@ final class TerrainRenderer {
         let geometry: TerrainTileGeometry
         let pixels: [UInt8]      // RGBA8, sRGB
         let night: [UInt8]?      // R8, 256 x 256
+        let trees: [TreeInstance]
         let width: Int
         let height: Int
     }
@@ -155,7 +159,8 @@ final class TerrainRenderer {
                 let image = try Data(contentsOf: url)
                 guard let (pixels, w, h) = Self.decode(image) else { throw CocoaError(.fileReadCorruptFile) }
                 let night = pack.nightURL(k).flatMap { try? Data(contentsOf: $0) }.flatMap(Self.decodeGrey)
-                inbox.mutex.withLock { $0[k] = Loaded(geometry: geometry, pixels: pixels, night: night, width: w, height: h) }
+                let trees = k.z >= 17 && w == h ? Self.trees(in: pixels, size: w, key: k, geometry: geometry, frame: frame, flatten: flatten) : []
+                inbox.mutex.withLock { $0[k] = Loaded(geometry: geometry, pixels: pixels, night: night, trees: trees, width: w, height: h) }
             } catch {
                 inbox.failed.withLock { _ = $0.insert(k) }
             }
@@ -176,6 +181,28 @@ final class TerrainRenderer {
             return true
         }
         return ok ? (pixels, w, h) : nil
+    }
+
+    /// Trees from the tile's imagery, standing on its mesh, none on airport grounds.
+    nonisolated static func trees(in pixels: [UInt8], size: Int, key k: TileKey, geometry g: TerrainTileGeometry,
+                                  frame: LocalFrame, flatten: [GroundOverride]) -> [TreeInstance] {
+        let samples = 65
+        let c = WebMercator.coordinate(x: Double(k.x) + 0.5, y: Double(k.y) + 0.5, zoom: k.z)
+        let metresPerPixel = 40_075_016 * cos(c.latitude * .pi / 180) / Double(1 << k.z) / Double(size)
+        let found = TreeDetector.detect(pixels: pixels, size: size, metresPerPixel: metresPerPixel) { u, v in
+            // Bilinear over the tile's grid (row 0 north, column 0 west).
+            let fx = u * Double(samples - 1), fy = v * Double(samples - 1)
+            let i = min(Int(fx), samples - 2), j = min(Int(fy), samples - 2)
+            let tx = Float(fx - Double(i)), ty = Float(fy - Double(j))
+            let a = g.positions[j * samples + i], b = g.positions[j * samples + i + 1]
+            let cc = g.positions[(j + 1) * samples + i], d = g.positions[(j + 1) * samples + i + 1]
+            return (a * (1 - tx) + b * tx) * (1 - ty) + (cc * (1 - tx) + d * tx) * ty
+        }
+        guard !flatten.isEmpty else { return found }
+        return found.filter { t in
+            let p = g.centre + SIMD3<Double>(t.position)
+            return !flatten.contains { $0.weight(SIMD2(p.x, p.y)) > 0.05 }
+        }
     }
 
     /// A 256 x 256 grey PNG to R8 pixels.
@@ -260,8 +287,14 @@ final class TerrainRenderer {
             }
         }
         let bytes = vb.length + l.width * l.height * 4 * 4 / 3
-        return GPUTile(key: k, vertices: vb, texture: tex, night: nightTexture, centre: g.centre, radius: g.radius,
-                       bytes: bytes + (nightTexture == nil ? 0 : 87_381))
+        var treeBuffer: (any MTLBuffer)?
+        if !l.trees.isEmpty {
+            let gpu = l.trees.map { t in SIMD8<Float>(t.position.x, t.position.y, t.position.z, t.radius, t.height, t.seed, 0, 0) }
+            treeBuffer = device.makeBuffer(bytes: gpu, length: gpu.count * MemoryLayout<SIMD8<Float>>.stride, options: .storageModeShared)
+        }
+        return GPUTile(key: k, vertices: vb, texture: tex, night: nightTexture, trees: treeBuffer, treeCount: l.trees.count,
+                       centre: g.centre, radius: g.radius,
+                       bytes: bytes + (nightTexture == nil ? 0 : 87_381) + (treeBuffer?.length ?? 0))
     }
 
     // MARK: Budget

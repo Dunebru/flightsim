@@ -26,6 +26,7 @@ constant float kKindTerrain = 4.0;
 constant float kKindPavement = 5.0;
 constant float kKindBuilding = 6.0;
 constant float kKindSign = 7.0;
+constant float kKindTree = 8.0;
 
 constexpr sampler kTerrainSampler(filter::linear, mip_filter::linear, address::clamp_to_edge, max_anisotropy(16));
 
@@ -126,6 +127,58 @@ vertex VertexOut compactVertex(uint vid [[vertex_id]],
     o.currentClip = u.viewProjNoJitter * world;
     o.previousClip = u.prevViewProjNoJitter * prevWorld;
     o.seed = float(v.normal.w) / 127.0 * 0.5 + 0.5;
+    return o;
+}
+
+/// Trees: a shared mesh (pairs of float4: position with the part in w, normal) placed by
+/// instances (float4 position and canopy radius, float4 height, seed). A quarter are palms: a tall
+/// slim trunk under a flat crown.
+struct TreeInstanceGPU {
+    float4 positionRadius;
+    float4 params;
+};
+
+inline float3 treePoint(float4 v, TreeInstanceGPU t, thread float3 &n) {
+    float r = t.positionRadius.w, h = t.params.x, seed = t.params.y;
+    bool palm = seed > 0.75;
+    float trunkTop = palm ? h * 0.85 : h * 0.32;
+    float3 p;
+    if (v.w > 0.5) {
+        float tr = palm ? 0.16 : max(0.12, r * 0.07);
+        p = float3(v.xy * tr, v.z * (trunkTop + 0.4));
+    } else {
+        float rr = palm ? r * 1.05 : r;
+        float halfHeight = palm ? rr * 0.32 : (h - trunkTop) * 0.5;
+        p = float3(v.xy * rr, v.z * halfHeight);
+        p.z += palm ? h - halfHeight : trunkTop + halfHeight;
+        n = normalize(float3(n.xy / rr, n.z / halfHeight) + float3(0, 0, 0.6));
+    }
+    float a = seed * 6.2831;
+    float2x2 rot = float2x2(float2(cos(a), sin(a)), float2(-sin(a), cos(a)));
+    p.xy = rot * p.xy;
+    n.xy = rot * n.xy;
+    return t.positionRadius.xyz + p;
+}
+
+vertex VertexOut treeVertex(uint vid [[vertex_id]], uint iid [[instance_id]],
+                            const device float4 *mesh [[buffer(0)]],
+                            constant FrameUniforms &u [[buffer(1)]],
+                            constant DrawUniforms &d [[buffer(2)]],
+                            const device TreeInstanceGPU *trees [[buffer(3)]])
+{
+    float4 v = mesh[vid * 2];
+    float3 n = mesh[vid * 2 + 1].xyz;
+    TreeInstanceGPU t = trees[iid];
+    float4 local = float4(treePoint(v, t, n), 1.0);
+    float4 world = d.model * local;
+    VertexOut o;
+    o.position = u.viewProj * world;
+    o.worldPos = world.xyz;
+    o.normal = normalize((d.model * float4(n, 0.0)).xyz);
+    o.uv = float2(v.w, 0.0);
+    o.currentClip = u.viewProjNoJitter * world;
+    o.previousClip = u.prevViewProjNoJitter * (d.prevModel * local);
+    o.seed = t.params.y;
     return o;
 }
 
@@ -500,6 +553,15 @@ fragment GBufferOut sceneFragment(VertexOut in [[stage_in]],
     } else if (kind == kKindPavement) {
         albedo = pavementAlbedo(in.uv, d.emissive.x > 0.5, distance);
         N = float3(0, 0, 1);
+    } else if (kind == kKindTree) {
+        // Canopy greens from olive to deep green, mottled; brown trunks.
+        if (in.uv.x > 0.5) {
+            albedo = float3(0.16, 0.12, 0.08);
+        } else {
+            float3 a = mix(float3(0.07, 0.09, 0.04), float3(0.10, 0.13, 0.06), fract(in.seed * 13.7));
+            albedo = a * (0.75 + 0.5 * fbm(in.worldPos.xy * 0.8 + in.seed * 50.0, 2));
+        }
+        roughness = 0.9;
     } else if (kind == kKindSign) {
         albedo = albedoTexture.sample(kLinearClamp, in.uv).rgb;
     } else if (kind == kKindBuilding) {
@@ -616,6 +678,16 @@ fragment GBufferOut skyFragment(SkyOut in [[stage_in]],
 }
 
 // MARK: - Shadow map
+
+vertex float4 shadowTreeVertex(uint vid [[vertex_id]], uint iid [[instance_id]],
+                               const device float4 *mesh [[buffer(0)]],
+                               constant FrameUniforms &u [[buffer(1)]],
+                               constant DrawUniforms &d [[buffer(2)]],
+                               const device TreeInstanceGPU *trees [[buffer(3)]])
+{
+    float3 n = mesh[vid * 2 + 1].xyz;
+    return u.shadowViewProj * (d.model * float4(treePoint(mesh[vid * 2], trees[iid], n), 1.0));
+}
 
 vertex float4 shadowCompactVertex(uint vid [[vertex_id]],
                                   const device CompactVertex *vertices [[buffer(0)]],

@@ -44,6 +44,34 @@ struct LightUniforms {
     var params = SIMD4<Float>.zero
 }
 
+/// The shared tree mesh: a unit icosphere canopy (w = 0) and a unit four-sided trunk (w = 1).
+enum TreeMesh {
+    static func vertices() -> [SIMD4<Float>] {
+        // Pairs of (position with part in w, normal).
+        let t: Float = (1 + Float(5).squareRoot()) / 2
+        let raw: [SIMD3<Float>] = [SIMD3(-1, t, 0), SIMD3(1, t, 0), SIMD3(-1, -t, 0), SIMD3(1, -t, 0),
+                                   SIMD3(0, -1, t), SIMD3(0, 1, t), SIMD3(0, -1, -t), SIMD3(0, 1, -t),
+                                   SIMD3(t, 0, -1), SIMD3(t, 0, 1), SIMD3(-t, 0, -1), SIMD3(-t, 0, 1)].map(simd_normalize)
+        let faces: [(Int, Int, Int)] = [(0, 11, 5), (0, 5, 1), (0, 1, 7), (0, 7, 10), (0, 10, 11), (1, 5, 9), (5, 11, 4),
+                                        (11, 10, 2), (10, 7, 6), (7, 1, 8), (3, 9, 4), (3, 4, 2), (3, 2, 6), (3, 6, 8),
+                                        (3, 8, 9), (4, 9, 5), (2, 4, 11), (6, 2, 10), (8, 6, 7), (9, 8, 1)]
+        var out: [SIMD4<Float>] = []
+        for (a, b, c) in faces {
+            for i in [a, b, c] { out.append(SIMD4(raw[i], 0)); out.append(SIMD4(raw[i], 0)) }
+        }
+        // Trunk: four sides from z 0 to 1, half-width 1.
+        let corners: [SIMD2<Float>] = [SIMD2(1, 1), SIMD2(-1, 1), SIMD2(-1, -1), SIMD2(1, -1)]
+        for i in 0..<4 {
+            let p = corners[i], q = corners[(i + 1) % 4]
+            let n = simd_normalize(SIMD3(p.x + q.x, p.y + q.y, 0))
+            for v in [SIMD3(p.x, p.y, 0), SIMD3(q.x, q.y, 0), SIMD3(q.x, q.y, 1), SIMD3(p.x, p.y, 0), SIMD3(q.x, q.y, 1), SIMD3(p.x, p.y, 1)] {
+                out.append(SIMD4(v, 1)); out.append(SIMD4(n, 0))
+            }
+        }
+        return out
+    }
+}
+
 /// Must match `CompactVertex` in 20_Scene.metal (24 bytes): city buildings.
 struct CompactVertex {
     var x, y, z: Float
@@ -67,7 +95,7 @@ struct DrawUniforms {
 }
 
 enum SurfaceKind: Float {
-    case aircraft = 0, runway = 1, marking = 2, ground = 3, terrain = 4, pavement = 5, building = 6, sign = 7
+    case aircraft = 0, runway = 1, marking = 2, ground = 3, terrain = 4, pavement = 5, building = 6, sign = 7, tree = 8
 }
 
 /// Size of the GPU-side lighting state (three float4).

@@ -159,3 +159,30 @@ struct AncestorFillTests {
         #expect(nw.pixels[centre] > 200 && nw.pixels[centre + 1] < 60)
     }
 }
+
+/// Regression: targets finer than the source's zoom 15 cap (16 to 18) computed their scale as
+/// `1 << (15 - z)`, which is 0, and sampled the world's corner (KLAX zoom 16-18 heights were 0 m).
+@Test func targetsFinerThanTheSourceReadTheRightPlace() async throws {
+    let cache = FileManager.default.temporaryDirectory.appendingPathComponent("terrarium-fine-\(UUID())")
+    defer { try? FileManager.default.removeItem(at: cache) }
+    // A ramp offset to this area so it fits the PNG encoding: h = 0.25 (gx - x0) + 0.125 (gy - y0) + 1000.
+    let x0 = 5_606 * 256 - 512, y0 = 13_096 * 256 - 512
+    let source = TerrariumSource(cache: cache) { k in
+        var px = [UInt8](repeating: 255, count: 256 * 256 * 4)
+        for y in 0..<256 {
+            for x in 0..<256 {
+                let v = 0.25 * Double(k.x * 256 + x - x0) + 0.125 * Double(k.y * 256 + y - y0) + 1_000 + 32_768
+                let i = (y * 256 + x) * 4
+                px[i] = UInt8(Int(v / 256)); px[i + 1] = UInt8(Int(v) % 256); px[i + 2] = UInt8(Int(((v - floor(v)) * 256).rounded()))
+            }
+        }
+        return ImageCodec.encodePNG(px)
+    }
+    let k = TileKey(z: 17, x: 22_424, y: 52_384)
+    let h = try await source.heights(for: k)
+    // Source zoom 15: the tile's north-west corner is at global pixel (x * 256 / 4) - 0.5.
+    let gx = Double(k.x) * 256 / 4 - 0.5, gy = Double(k.y) * 256 / 4 - 0.5
+    let expected = 0.25 * (gx - Double(x0)) + 0.125 * (gy - Double(y0)) + 1_000
+    #expect(abs(Double(h[0]) - expected) < 0.05, "corner \(h[0]) vs \(expected)")
+    #expect(TerrariumSource.sources(for: k).contains(TileKey(z: 15, x: k.x / 4, y: k.y / 4)))
+}

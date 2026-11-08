@@ -143,3 +143,29 @@ struct TerrainGeometryTests {
         #expect(field.height(latitude: b.north + 1, longitude: b.west) == nil)
     }
 }
+
+struct TreeDetectorTests {
+    /// A dark green blob on brown ground becomes trees at the blob, a light green lawn does not.
+    @Test func findsCanopyNotLawn() {
+        let size = 256
+        var px = [UInt8](repeating: 255, count: size * size * 4)
+        for y in 0..<size {
+            for x in 0..<size {
+                let i = (y * size + x) * 4
+                var c: (UInt8, UInt8, UInt8) = (150, 130, 105)                      // desert
+                if (x - 64) * (x - 64) + (y - 64) * (y - 64) < 100 { c = (45, 70, 40) }   // canopy, 10 px radius
+                if x > 160 && y > 160 { c = (110, 160, 90) }                          // lawn
+                px[i] = c.0; px[i + 1] = c.1; px[i + 2] = c.2
+            }
+        }
+        let trees = TreeDetector.detect(pixels: px, size: size, metresPerPixel: 0.5) { u, v in
+            SIMD3(Float(u * 128), Float(v * 128), 0)
+        }
+        #expect(!trees.isEmpty)
+        // All trees sit on the blob (centre 32 m, 32 m; radius 5 m), none on the lawn.
+        for t in trees {
+            let d = ((t.position.x - 32) * (t.position.x - 32) + (t.position.y - 32) * (t.position.y - 32)).squareRoot()
+            #expect(d < 6, "tree at \(t.position)")
+        }
+    }
+}

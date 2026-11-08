@@ -30,6 +30,13 @@ public final class SceneRenderer {
     private let terrainPipeline: any MTLRenderPipelineState
     private let lightPipeline: any MTLRenderPipelineState
     private let compactPipeline: any MTLRenderPipelineState
+    private let treePipeline: any MTLRenderPipelineState
+    private let shadowTreePipeline: any MTLRenderPipelineState
+    private let treeMesh: any MTLBuffer
+    private let treeMeshVertexCount: Int
+    /// Trees are drawn within this distance (metres).
+    public var treeDrawDistance: Double = 2_500
+    public private(set) var treesDrawn = 0
     /// City buildings are drawn within this distance (metres).
     public var cityDrawDistance: Double = 6_000
     private let shadowPipeline: any MTLRenderPipelineState
@@ -143,6 +150,14 @@ public final class SceneRenderer {
         skyPipeline = try render("skyVertex", "skyFragment", colors: gbuffer, depth: Self.depthFormat)
         terrainPipeline = try render("terrainVertex", "sceneFragment", colors: gbuffer, depth: Self.depthFormat)
         compactPipeline = try render("compactVertex", "sceneFragment", colors: gbuffer, depth: Self.depthFormat)
+        treePipeline = try render("treeVertex", "sceneFragment", colors: gbuffer, depth: Self.depthFormat)
+        shadowTreePipeline = try render("shadowTreeVertex", nil, colors: [], depth: Self.depthFormat)
+        let tm = TreeMesh.vertices()
+        guard let tmb = device.makeBuffer(bytes: tm, length: tm.count * 16, options: .storageModeShared) else {
+            throw RendererError.resource("tree mesh")
+        }
+        treeMesh = tmb
+        treeMeshVertexCount = tm.count / 2
         lightPipeline = try render("lightVertex", "lightFragment", colors: gbuffer, depth: Self.depthFormat) { d in
             let c = d.colorAttachments[0]!
             c.isBlendingEnabled = true
@@ -445,6 +460,18 @@ public final class SceneRenderer {
                                                 indexBuffer: chunk.indices, indexBufferOffset: 0)
                     }
                 }
+                // Trees cast too.
+                e.setRenderPipelineState(shadowTreePipeline)
+                for tile in terrainTiles where tile.treeCount > 0 {
+                    let rel = relative(tile.centre + offset, to: camera)
+                    guard Double(simd_length(SIMD2(rel.x, rel.y))) - tile.radius < reach * 1.2, let buffer = tile.trees else { continue }
+                    var d = DrawUniforms()
+                    d.model = MatrixMath.translation(rel)
+                    e.setVertexBuffer(treeMesh, offset: 0, index: 0)
+                    e.setVertexBuffer(buffer, offset: 0, index: 3)
+                    e.setVertexBytes(&d, length: MemoryLayout<DrawUniforms>.stride, index: 2)
+                    e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: treeMeshVertexCount, instanceCount: tile.treeCount)
+                }
                 e.endEncoding()
             }
             cbWorld.commit()
@@ -544,6 +571,27 @@ public final class SceneRenderer {
                     drawn += 1
                 }
                 terrainDrawn = drawn
+                // Trees on the nearby fine tiles.
+                var trees = 0
+                e.setRenderPipelineState(treePipeline)
+                e.setFragmentTexture(dummyTexture, index: 0)
+                for tile in terrainTiles where tile.treeCount > 0 {
+                    let rel = relative(tile.centre + offset, to: camera)
+                    guard Double(simd_length(rel)) - tile.radius < treeDrawDistance,
+                          MatrixMath.sphereVisible(centre: rel, radius: Float(tile.radius) + 30, planes: frustum),
+                          let buffer = tile.trees else { continue }
+                    var d = DrawUniforms()
+                    d.model = MatrixMath.translation(rel)
+                    d.prevModel = MatrixMath.translation(relative(tile.centre + offset, to: previousCam))
+                    d.material = SIMD4(0.9, 0, 0, SurfaceKind.tree.rawValue)
+                    e.setVertexBuffer(treeMesh, offset: 0, index: 0)
+                    e.setVertexBuffer(buffer, offset: 0, index: 3)
+                    e.setVertexBytes(&d, length: MemoryLayout<DrawUniforms>.stride, index: 2)
+                    e.setFragmentBytes(&d, length: MemoryLayout<DrawUniforms>.stride, index: 2)
+                    e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: treeMeshVertexCount, instanceCount: tile.treeCount)
+                    trees += tile.treeCount
+                }
+                treesDrawn = trees
                 e.setRenderPipelineState(scenePipeline)
                 e.setFragmentTexture(blackTexture, index: 5)
             }

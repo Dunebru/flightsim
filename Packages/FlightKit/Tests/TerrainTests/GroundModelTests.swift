@@ -36,3 +36,21 @@ struct GroundModelTests {
         #expect(g.height(latitude: 40, longitude: -100) == Self.origin.height)   // outside the pack
     }
 }
+
+/// Every level of each region's heights agrees with the field elevation at the airport. Caught
+/// a bake bug that left KLAX's zoom 16-18 heights at 0 m (sampling the wrong place).
+struct PackHeightsTests {
+    @Test(arguments: [("kphx", 33.4343, -112.0116, 340.0), ("klax", 33.9425, -118.4081, 38.0)])
+    func everyLevelMatchesTheField(pack: String, lat: Double, lon: Double, field: Double) throws {
+        let root = GroundModelTests.packURL.deletingLastPathComponent().appendingPathComponent(pack)
+        let p = try SceneryPack(root: root)
+        // Tiles of 4 km and less (zoom 13 up), where the mean should sit near the field.
+        for z in max(p.index.minZoom, 13)...p.index.maxZoom {
+            let t = WebMercator.tile(latitude: lat, longitude: lon, zoom: z)
+            guard p.available.contains(t) else { continue }
+            let h = try p.heights(t)
+            let mean = Double(h.reduce(0, +)) / Double(h.count)
+            #expect(abs(mean - field) < 20, "\(pack) zoom \(z): mean height \(mean) m, field \(field) m")
+        }
+    }
+}
