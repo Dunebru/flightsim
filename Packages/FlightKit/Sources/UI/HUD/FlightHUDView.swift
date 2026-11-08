@@ -98,10 +98,7 @@ public struct FlightHUDView: View {
                                 .transition(.move(edge: .top).combined(with: .opacity))
                         }
                         if model.openPanel == nil {
-                            HStack(spacing: 8) {
-                                demoTag
-                                windTag
-                            }
+                            windTag
                             #if os(iOS)
                             if engine.showStats { FrameStatsOverlay(engine: engine) }
                             #endif
@@ -480,15 +477,6 @@ public struct FlightHUDView: View {
         .frame(height: 22)
         .hudSurface(in: .capsule)
         .accessibilityLabel(model.windKnots > 0 ? "Wind \(model.windFrom) degrees at \(model.windKnots) knots" : "Wind calm")
-    }
-
-    private var demoTag: some View {
-        Text("Prototype · JSBSim \(model.profile.name) · tilt to fly")
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(.white)
-            .padding(.horizontal, 10)
-            .frame(height: 22)
-            .hudSurface(in: .capsule)
     }
 
     /// Maps a detent index to a 0...1 slider value and back.

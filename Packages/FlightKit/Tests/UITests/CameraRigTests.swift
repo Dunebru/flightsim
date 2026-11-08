@@ -54,7 +54,7 @@ struct CameraRigTests {
         var rig = CameraRig()
         let p = SIMD3<Double>(-1_800, 400, -7.4)
         let pose = rig.pose(aircraftPosition: p, heading: .pi / 2, pitch: 0, roll: 0, dt: 1)
-        let expected = p.z + 1.2 + rig.orbitDistance * sin(rig.orbitPitch)
+        let expected = p.z + rig.orbitTargetHeight + rig.orbitDistance * sin(rig.orbitPitch)
         #expect(abs(pose.position.z - expected) < 0.01, "camera at \(pose.position.z), expected \(expected)")
     }
 }

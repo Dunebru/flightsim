@@ -14,6 +14,9 @@ nonisolated struct CameraRig {
     var orbitYaw: Double = -25 * .pi / 180      // chase: relative to heading; orbit: absolute
     var orbitPitch: Double = 8 * .pi / 180
     var orbitDistance: Double = 15
+    /// Height above the position the chase and orbit cameras look at: the middle of the
+    /// fuselage, so the aircraft sits in the centre of the screen.
+    var orbitTargetHeight: Double = 1.3
     var lookYaw: Double = 0                     // cockpit head turn
     var lookPitch: Double = -6 * .pi / 180
     var zoom: Double = 1                        // tower and wing field-of-view factor
@@ -37,7 +40,8 @@ nonisolated struct CameraRig {
             eyeOffset = SIMD3(14.7, 0.53, 4.85)
             wingOffset = SIMD3(-3.07, -2.3, 4.6)
             wingLook = SIMD3(0.45, -1.0, -0.14)
-            orbitDistance = 60
+            orbitDistance = 46
+            orbitTargetHeight = 4.2
             hasCockpit = true
         } else {
             hasCockpit = true
@@ -45,6 +49,7 @@ nonisolated struct CameraRig {
             wingOffset = SIMD3(-1.78, 5.4, 2.15)
             wingLook = SIMD3(1.0, -0.22, -0.06)
             orbitDistance = 15
+            orbitTargetHeight = 1.3
         }
     }
     /// Tower viewpoint near KPHX runway 8/26, north side, world metres.
@@ -88,7 +93,7 @@ nonisolated struct CameraRig {
         switch mode {
         case .chase, .orbit:
             let yaw = mode == .chase ? heading + orbitYaw : orbitYaw
-            let cam = OrbitCamera(target: p + SIMD3(0, 0, 1.2), yaw: yaw, pitch: orbitPitch, distance: orbitDistance)
+            let cam = OrbitCamera(target: p + SIMD3(0, 0, orbitTargetHeight), yaw: yaw, pitch: orbitPitch, distance: orbitDistance)
             target = cam.pose
         case .cockpit:
             // Head turn in the body frame, then into the world with the aircraft's attitude.
