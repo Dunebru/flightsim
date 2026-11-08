@@ -27,8 +27,38 @@ let swiftSettings: [SwiftSetting] = [
 ]
 
 var targets: [Target] = [
-    // C++ flight dynamics engine. M0: stub with the final C API shape; M2 adds the JSBSim sources.
-    .target(name: "CJSBSim", path: "Sources/CJSBSim"),
+    // JSBSim v1.3.3 (LGPL-2.1, vendored unmodified in Sources/CJSBSim/jsbsim) plus a C wrapper.
+    // Compiled exactly as JSBSim's CMake does: everything in src/ except the command-line
+    // program, with the bundled expat.
+    .target(
+        name: "CJSBSim",
+        path: "Sources/CJSBSim",
+        exclude: [
+            "jsbsim/COPYING.LGPL", "jsbsim/JSBSIM_RELEASE.txt",
+            "jsbsim/simgear/xml/xmltok_impl.c", "jsbsim/simgear/xml/xmltok_ns.c",
+            // Not built by JSBSim's CMake either (optional simplex trim).
+            "jsbsim/initialization/FGSimplexTrim.cpp", "jsbsim/initialization/FGTrimAnalysis.cpp",
+            "jsbsim/initialization/FGTrimAnalysisControl.cpp", "jsbsim/initialization/FGTrimmer.cpp",
+            "jsbsim/math/FGNelderMead.cpp",
+            // Standalone test program for the MSIS atmosphere (defines main).
+            "jsbsim/models/atmosphere/MSIS/nrlmsise-00_test.c",
+        ],
+        sources: ["jsbsim", "wrapper"],
+        publicHeadersPath: "include",
+        cSettings: [
+            .headerSearchPath("jsbsim"),
+            .headerSearchPath("jsbsim/simgear/xml"),
+            .define("HAVE_EXPAT_CONFIG_H"),
+            .unsafeFlags(["-w"]),
+        ],
+        cxxSettings: [
+            .headerSearchPath("jsbsim"),
+            .define("JSBSIM_VERSION", to: "\"1.3.3\""),
+            .define("JSBSIM_STATIC_LINK"),
+            // SwiftPM defines DEBUG=1 in debug builds; JSBSim has an enum case named DEBUG.
+            .unsafeFlags(["-w", "-UDEBUG"]),
+        ]
+    ),
 ]
 for module in modules {
     // UI is the only UI-facing module: it gets main-actor-by-default isolation.
@@ -36,7 +66,11 @@ for module in modules {
     let isUI = module.name == "UI"
     // Metal shader sources ship as resources and are compiled at load (ShaderLibrary), so the
     // same code path works under `swift test` on the Mac and in the iOS app.
-    let resources: [Resource]? = module.name == "Renderer" ? [.copy("Shaders")] : nil
+    let resources: [Resource]? = switch module.name {
+    case "Renderer": [.copy("Shaders")]
+    case "FlightModel": [.copy("Resources/JSBSim")]
+    default: nil
+    }
     targets.append(.target(
         name: module.name,
         dependencies: module.deps.map { .target(name: $0) },
