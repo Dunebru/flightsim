@@ -1,5 +1,5 @@
 public import Airports
-public import simd
+import simd
 import Foundation
 
 /// AI airliners at one airport: arrivals down the ILS to a free gate, departures from a gate to
@@ -17,6 +17,8 @@ public final class AirportTraffic: @unchecked Sendable {
         public var widebody: Bool
         public var seed: Double
         public var onGround: Bool
+        /// Lights on: 1 landing, 2 taxi, 4 strobes, 8 beacon and navigation (engines running).
+        public var lights: Int
     }
 
     /// A runway end in use: where its threshold is, which way it points, how long it is.
@@ -120,6 +122,11 @@ public final class AirportTraffic: @unchecked Sendable {
     }
 
     public var activeRunways: [String] { active.map { runways[$0].ident } }
+
+    /// The runway ends in use: threshold and direction (unit, toward the far end), airport frame.
+    public var activeRunwayGeometry: [(ident: String, threshold: SIMD2<Double>, direction: SIMD2<Double>)] {
+        active.map { (runways[$0].ident, runways[$0].threshold, runways[$0].direction) }
+    }
 
     // MARK: Runways and the graph
 
@@ -580,8 +587,16 @@ public final class AirportTraffic: @unchecked Sendable {
                 default: true
                 }
             }()
+            let lights: Int = switch a.phase {
+            case .approach, .climb: 1 | 4 | 8
+            case .rollout, .takeoff: 1 | 2 | 4 | 8
+            case .lineup: 2 | 4 | 8
+            case .taxiIn, .taxiOut, .holding: 2 | 8
+            case .pushback: 8
+            case .parked: 0
+            }
             return Snapshot(position: a.position, heading: a.heading, pitch: a.pitch, roll: 0, widebody: a.widebody,
-                            seed: a.seed, onGround: ground)
+                            seed: a.seed, onGround: ground, lights: lights)
         }
     }
 }

@@ -188,7 +188,7 @@ final class FlightSession {
             var moving = TrafficInstances(narrow: [], wide: [])
             for a in traffic.snapshot {
                 let v = SIMD8<Float>(Float(a.position.x), Float(a.position.y), Float(a.position.z), Float(a.heading),
-                                     Float(a.seed), Float(a.pitch), Float(a.roll), 0)
+                                     Float(a.seed), Float(a.pitch), Float(a.roll), Float(a.lights))
                 if a.widebody { moving.wide.append(v) } else { moving.narrow.append(v) }
             }
             scene.traffic = [site.layout.icao: moving]

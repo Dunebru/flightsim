@@ -74,6 +74,9 @@ public final class SceneRenderer {
     /// How far the falling drops have moved through the world (m), and the scene time of that.
     private var precipFall = SIMD3<Double>.zero
     private var precipClock: Date?
+    /// Per-frame buffers for the moving airliners' lights (three, so the GPU can still read the
+    /// previous frames').
+    private var trafficLightRing: [any MTLBuffer] = []
     /// Sun transmittance through the clouds over `cloudShadowExtent` around the camera.
     private let cloudShadowMap: any MTLTexture
     public var cloudShadowExtent: Double = 24_000
@@ -839,6 +842,36 @@ public final class SceneRenderer {
                 e.setVertexBuffer(buffer, offset: 0, index: 0)
                 e.setVertexBytes(&l, length: MemoryLayout<LightUniforms>.stride, index: 2)
                 e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: airport.lightCount)
+            }
+            // The moving airliners' own lights, rebuilt every frame into a ring of buffers.
+            var trafficLights: [(AirportRenderer, [GPULight])] = []
+            for airport in airports {
+                guard let moving = scene.traffic[airport.name] else { continue }
+                let lights = moving.narrow.flatMap { AircraftLights.lights($0, spec: ParkedAircraftMesh.narrowbody) }
+                    + moving.wide.flatMap { AircraftLights.lights($0, spec: ParkedAircraftMesh.widebody) }
+                if !lights.isEmpty { trafficLights.append((airport, lights)) }
+            }
+            if !trafficLights.isEmpty {
+                if trafficLightRing.isEmpty {
+                    trafficLightRing = (0..<3).compactMap { _ in
+                        device.makeBuffer(length: 1_024 * MemoryLayout<GPULight>.stride, options: .storageModeShared)
+                    }
+                }
+                let ring = trafficLightRing[frameIndex % trafficLightRing.count]
+                var offsetBytes = 0
+                for (airport, lights) in trafficLights {
+                    let count = min(lights.count, 1_024 - offsetBytes / MemoryLayout<GPULight>.stride)
+                    guard count > 0 else { break }
+                    lights.withUnsafeBytes { _ = memcpy(ring.contents() + offsetBytes, $0.baseAddress!, count * MemoryLayout<GPULight>.stride) }
+                    var l = LightUniforms()
+                    l.model = airport.model(relativeTo: camera, offset: offset)
+                    l.up = SIMD4(SIMD3<Float>(airport.rotation.columns.2), 0)
+                    l.params = SIMD4(Float(scene.date.timeIntervalSince1970.truncatingRemainder(dividingBy: 3_600)), pixelAngle, 1.3, 0)
+                    e.setVertexBuffer(ring, offset: offsetBytes, index: 0)
+                    e.setVertexBytes(&l, length: MemoryLayout<LightUniforms>.stride, index: 2)
+                    e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: count)
+                    offsetBytes += count * MemoryLayout<GPULight>.stride
+                }
             }
             if let aircraft, scene.showAircraft {
                 e.setRenderPipelineState(glassPipeline)

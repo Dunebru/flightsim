@@ -194,7 +194,7 @@ public struct SceneDescription: Sendable {
     /// How quickly mist thins with height (m): shallow for fog, deep for haze.
     public var fogScaleHeight: Double = 500
     /// Moving AI aircraft per airport (ICAO): instances in that airport's frame, (x, y, z,
-    /// heading) and (seed, pitch, roll, 0).
+    /// heading) and (seed, pitch, roll, lights: 1 landing, 2 taxi, 4 strobes, 8 beacon and nav).
     public var traffic: [String: TrafficInstances] = [:]
     /// Rain or snow falling around the camera.
     public var precipitation: Precipitation?

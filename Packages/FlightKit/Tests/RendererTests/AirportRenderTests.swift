@@ -217,7 +217,7 @@ struct AirportRenderTests {
         var instances = TrafficInstances(narrow: [], wide: [])
         for a in traffic.snapshot {
             let v = SIMD8<Float>(Float(a.position.x), Float(a.position.y), Float(a.position.z), Float(a.heading),
-                                 Float(a.seed), Float(a.pitch), Float(a.roll), 0)
+                                 Float(a.seed), Float(a.pitch), Float(a.roll), Float(a.lights))
             if a.widebody { instances.wide.append(v) } else { instances.narrow.append(v) }
         }
         print("TRAFFIC render: \(traffic.snapshot.count) aircraft, \(traffic.snapshot.filter(\.onGround).count) on the ground")
@@ -233,7 +233,15 @@ struct AirportRenderTests {
             let side = SIMD3(cos(f.heading), -sin(f.heading), 0)
             views.append(("kphx-traffic-air", f.position + side * 160 + SIMD3(0, 0, 20), f.position))
         }
+        // And the same at night, from the threshold of the runway in use: the arrivals' landing
+        // lights strung out on final, taxiing aircraft with their beacons.
+        if let rw = traffic.activeRunwayGeometry.first {
+            let eye = rw.threshold - rw.direction * 300
+            views.append(("kphx-traffic-night", SIMD3(eye.x, eye.y, site.z(eye) + 30), SIMD3(eye.x, eye.y, site.z(eye) + 30)
+                          - SIMD3(rw.direction.x, rw.direction.y, 0) * 1_000 + SIMD3(0, 0, 40)))
+        }
         for (name, eye, look) in views {
+            if name.hasSuffix("night") { s.date = RendererTests.time(whenSunAt: -12, afternoon: true) }
             s.cameraPose = CameraPose(position: eye, forward: simd_normalize(look - eye), up: SIMD3(0, 0, 1), fovY: 50 * .pi / 180)
             r.exposureAdaptation = 1
             try TerrainRenderTests.settle(r, s, limit: .seconds(60))

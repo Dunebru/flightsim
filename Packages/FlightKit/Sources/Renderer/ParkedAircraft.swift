@@ -135,3 +135,68 @@ enum ParkedTraffic {
         return (narrow, wide)
     }
 }
+
+/// The exterior lights of a moving airliner, in the airport frame.
+enum AircraftLights {
+    /// Body point (x forward, y left, z up) to the airport frame, as the instance shader does it.
+    static func place(_ p: SIMD3<Double>, at position: SIMD3<Double>, heading: Double, pitch: Double, roll: Double) -> SIMD3<Double> {
+        let cr = cos(roll), sr = sin(roll)
+        var q = SIMD3(p.x, p.y * cr - p.z * sr, p.z * cr + p.y * sr)
+        let cp = cos(pitch), sp = sin(pitch)
+        q = SIMD3(q.x * cp - q.z * sp, q.y, q.z * cp + q.x * sp)
+        let fwd = SIMD2(sin(heading), cos(heading)), left = SIMD2(-cos(heading), sin(heading))
+        let h = fwd * q.x + left * q.y
+        return position + SIMD3(h.x, h.y, q.z)
+    }
+
+    /// Lights for one instance: navigation (red left, green right, white tail) and the red
+    /// beacons when the engines run, white wingtip strobes, landing lights in the wing roots and
+    /// the nose gear's taxi light, by the instance's flags.
+    static func lights(_ i: SIMD8<Float>, spec s: ParkedAircraftMesh.Spec) -> [GPULight] {
+        let flags = Int(i[7])
+        guard flags != 0 else { return [] }
+        let pos = SIMD3(Double(i[0]), Double(i[1]), Double(i[2]))
+        let heading = Double(i[3]), pitch = Double(i[5]), roll = Double(i[6]), seed = Float(i[4])
+        func at(_ p: SIMD3<Double>) -> SIMD4<Float> { SIMD4(SIMD3<Float>(place(p, at: pos, heading: heading, pitch: pitch, roll: roll)), 0) }
+        func dir(_ d: SIMD3<Double>) -> SIMD3<Float> {
+            SIMD3<Float>(simd_normalize(place(d, at: .zero, heading: heading, pitch: pitch, roll: roll)))
+        }
+        let bodyZ = s.gearHeight + s.diameter / 2
+        let tipX = s.noseToGear - s.wingX - (s.span / 2 - s.diameter / 2) * tan(s.sweep * .pi / 180) - s.tipChord * 0.5
+        let wingZ = bodyZ + s.wingZ + s.span * 0.03
+        let tailX = s.noseToGear - s.length + 0.3
+        var out: [GPULight] = []
+        func light(_ p: SIMD3<Double>, cd: Float, colour: SIMD3<Float>, flash: (Float, Float)? = nil,
+                   beam: (SIMD3<Double>, Double)? = nil) {
+            var position = at(p)
+            position.w = cd
+            let d = beam.map { SIMD4(dir($0.0), Float(cos($0.1 * .pi / 180))) } ?? .zero
+            let params = flash.map { SIMD4<Float>($0.0, seed + $0.1, $0.0 >= 1.5 ? $0.0 / 25 : 0.12, 0) } ?? .zero
+            out.append(GPULight(position: position, colour: SIMD4(colour, flash == nil ? 0 : 1), direction: d, params: params))
+        }
+        if flags & 8 != 0 {
+            light(SIMD3(tipX, s.span / 2, wingZ), cd: 60, colour: SIMD3(1, 0.06, 0.03))
+            light(SIMD3(tipX, -s.span / 2, wingZ), cd: 60, colour: SIMD3(0.1, 1, 0.35))
+            light(SIMD3(tailX, 0, bodyZ + s.diameter * 0.35), cd: 30, colour: SIMD3(1, 1, 0.95))
+            let mid = s.noseToGear - s.length * 0.45
+            light(SIMD3(mid, 0, bodyZ + s.diameter / 2 + 0.15), cd: 300, colour: SIMD3(1, 0.08, 0.03), flash: (1.0, 0))
+            light(SIMD3(mid + 3, 0, bodyZ - s.diameter / 2 - 0.15), cd: 300, colour: SIMD3(1, 0.08, 0.03), flash: (1.0, 0.5))
+        }
+        if flags & 4 != 0 {
+            light(SIMD3(tipX - 0.3, s.span / 2, wingZ), cd: 4_000, colour: SIMD3(1, 1, 1), flash: (1.6, 0))
+            light(SIMD3(tipX - 0.3, -s.span / 2, wingZ), cd: 4_000, colour: SIMD3(1, 1, 1), flash: (1.6, 0))
+        }
+        if flags & 1 != 0 {
+            let rootX = s.noseToGear - s.wingX + 0.2
+            for side in [-1.0, 1.0] {
+                light(SIMD3(rootX, side * (s.diameter / 2 + 1.0), bodyZ + s.wingZ), cd: 150_000, colour: SIMD3(1, 0.97, 0.9),
+                      beam: (SIMD3(1, 0, -0.05), 9))
+            }
+        }
+        if flags & 2 != 0 {
+            light(SIMD3(s.noseToGear - 0.3, 0, s.gearHeight + 0.6), cd: 30_000, colour: SIMD3(1, 0.95, 0.85),
+                  beam: (SIMD3(1, 0, -0.15), 14))
+        }
+        return out
+    }
+}
