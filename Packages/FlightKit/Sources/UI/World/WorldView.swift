@@ -52,6 +52,10 @@ final class WorldEngine: NSObject {
         startupError = error
         super.init()
         if let device = made?.device, !MTLFXSupport.temporal(device) { upscaler = .off }
+        // `-FlightUpscaler temporal|spatial|off` (measurements and comparisons).
+        if let forced = defaults.string(forKey: "FlightUpscaler").flatMap(UpscalerMode.init(rawValue:)) {
+            upscaler = forced
+        }
         applyRenderSettings()
         loadAircraft()
     }
@@ -119,8 +123,8 @@ final class WorldEngine: NSObject {
                 let st = renderer.stats
                 let passes = ["Atmosphere", "Shadow", "Scene", "Post"]
                     .map { String(format: "%@=%.2f", $0, st.gpuMilliseconds[$0] ?? 0) }.joined(separator: " ")
-                print(String(format: "FLIGHTSTATS fps=%.1f gpu=%.2fms cpu=%.2fms %@ render=%dx%d output=%dx%d upscaler=%@ thermal=%d",
-                             framesPerSecond, st.gpuTotalMilliseconds, st.cpuMilliseconds, passes,
+                print(String(format: "FLIGHTSTATS fps=%.1f gpuFrame=%.2fms gpuStageSum=%.2fms cpu=%.2fms %@ render=%dx%d output=%dx%d upscaler=%@ thermal=%d",
+                             framesPerSecond, st.gpuFrameMilliseconds, st.gpuTotalMilliseconds, st.cpuMilliseconds, passes,
                              st.renderSize.x, st.renderSize.y, st.outputSize.x, st.outputSize.y,
                              st.upscaler.rawValue, ProcessInfo.processInfo.thermalState.rawValue))
                 fflush(stdout)
@@ -234,7 +238,7 @@ struct FrameStatsOverlay: View {
         TimelineView(.periodic(from: .now, by: 0.5)) { _ in
             let s = engine.renderer?.stats ?? FrameStats()
             VStack(alignment: .leading, spacing: 2) {
-                Text(String(format: "%.0f fps   GPU %.1f ms   CPU %.1f ms", engine.framesPerSecond, s.gpuTotalMilliseconds, s.cpuMilliseconds))
+                Text(String(format: "%.0f fps   GPU %.1f ms/frame   CPU %.1f ms", engine.framesPerSecond, s.gpuFrameMilliseconds, s.cpuMilliseconds))
                 Text(["Atmosphere", "Shadow", "Scene", "Post"]
                     .map { String(format: "%@ %.1f", String($0.prefix(5)), s.gpuMilliseconds[$0] ?? 0) }
                     .joined(separator: "  "))

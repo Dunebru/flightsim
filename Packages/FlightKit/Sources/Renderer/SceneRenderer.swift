@@ -515,6 +515,8 @@ public final class SceneRenderer {
         let cb = queue.makeCommandBuffer()!
         cb.label = label
         let box = statsBox
+        let frame = frameIndex
+        box.beginStage(frame: frame)
         cb.addCompletedHandler { buffer in
             let ms = (buffer.gpuEndTime - buffer.gpuStartTime) * 1000
             box.update { s in
@@ -522,6 +524,7 @@ public final class SceneRenderer {
                 s.gpuMilliseconds[label] = old * 0.9 + ms * 0.1
                 s.gpuTotalMilliseconds = s.gpuMilliseconds.values.reduce(0, +)
             }
+            box.endStage(frame: frame, start: buffer.gpuStartTime, end: buffer.gpuEndTime)
         }
         return cb
     }
@@ -586,8 +589,31 @@ public enum RendererError: Error, CustomStringConvertible {
 /// Frame statistics shared between the render thread, GPU completion handlers and the UI.
 final class StatsBox: Sendable {
     private let state = Mutex(FrameStats())
+    /// Per-frame GPU span bookkeeping: frame -> (earliest start, latest end, stages pending).
+    private let spans = Mutex([Int: (start: Double, end: Double, pending: Int)]())
     var value: FrameStats { state.withLock { $0 } }
     func update(_ body: (inout FrameStats) -> Void) { state.withLock { body(&$0) } }
+
+    func beginStage(frame: Int) {
+        spans.withLock { $0[frame, default: (.greatestFiniteMagnitude, 0, 0)].pending += 1 }
+    }
+
+    func endStage(frame: Int, start: Double, end: Double) {
+        let finished: Double? = spans.withLock { table in
+            guard var e = table[frame] else { return nil }
+            if start > 0 { e.start = min(e.start, start) }
+            e.end = max(e.end, end)
+            e.pending -= 1
+            if e.pending > 0 { table[frame] = e; return nil }
+            table[frame] = nil
+            // Drop stale entries if a frame never completed (device sleep, errors).
+            if table.count > 16 { table.removeAll() }
+            return e.end > e.start ? (e.end - e.start) * 1000 : nil
+        }
+        if let ms = finished {
+            update { s in s.gpuFrameMilliseconds = s.gpuFrameMilliseconds == 0 ? ms : s.gpuFrameMilliseconds * 0.9 + ms * 0.1 }
+        }
+    }
 }
 
 extension Duration {

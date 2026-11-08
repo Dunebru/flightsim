@@ -148,6 +148,10 @@ public struct FrameStats: Sendable, Equatable {
     /// Exponentially averaged GPU time per pass, milliseconds.
     public var gpuMilliseconds: [String: Double] = [:]
     public var gpuTotalMilliseconds: Double = 0
+    /// GPU span of a whole frame: first stage start to last stage end, averaged. Stages of
+    /// consecutive frames can overlap and the GPU clock varies, so the per-stage sum above
+    /// overstates the cost; this is the number to compare against the frame budget.
+    public var gpuFrameMilliseconds: Double = 0
     /// CPU time spent encoding the frame, milliseconds.
     public var cpuMilliseconds: Double = 0
     public var renderSize = SIMD2<Int>(0, 0)
