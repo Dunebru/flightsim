@@ -4,7 +4,16 @@ What is done, what is a placeholder, and what is next. Honest status only: anyth
 
 Last updated: 2026-11-07.
 
-## Current milestone: M2 Flight dynamics
+## Current milestone: M2 Flight dynamics (code complete; in-app flight on the phone not yet verified)
+
+### M2 report (2026-11-07), against PLAN.md section 13
+
+1. **JSBSim builds for iOS device, simulator and macOS: met.** v1.3.3 vendored unmodified and compiled by SwiftPM exactly as JSBSim's CMake does. Every C entry point takes one process-wide lock: JSBSim has static state, and two instances stepping on different threads crashed the test process.
+2. **Fixed 120 Hz physics thread, independent of rendering: met.** Step count within 1% of wall time over 3 s; simulation time does not depend on how often the state is read.
+3. **C172P published numbers: met after one tuning change.** Sources verified 2026-11-07: 1981 Cessna 172P POH Figure 5-3 (stall), Figures 5-5 and 5-6 (takeoff, climb). At 2,400 lb: stall 52.1 KCAS flaps up and 46.8 KCAS flaps 30 against 51 and 46 (minimum-speed method, the CAR 3 basis of the POH); climb 794 fpm at Vy against ~700 (+13%, tolerance 15%); takeoff ground roll 992 ft against 890 (+11%, tolerance 20%, flaps 10, short field); trim at 5,000 ft and 100 KIAS holds within 50 ft for 30 s. Tuning C1 (`aircraft/c172p/TUNING.md`): the shipped propeller let the engine turn 2,735 RPM at full throttle in the climb and climbed 25% too well. A negative control (the untuned propeller) fails the climb test.
+4. **A320 published numbers: met for what has a citable source, after four tuning changes (`aircraft/A320/TUNING.md`).** The shipped generic model could not rotate (static margin ~75%, no ground effect, no slats): its "stall" was 198 KCAS clean and its takeoff roll 10,683 ft. After T1-T4: VS1g CONF FULL 106.9 kt at 64 t against ~108.6 derived from Airbus's published 136 kt approach speed; approach attitude 2.5 degrees nose up at 136 kt on a 3 degree glide (real: about 2.5); trims at FL350, Mach 0.789; stable hands-off. No citable CONF 0 stall speed was found, so none is asserted. The app labels it "generic JSBSim A320, tuned".
+5. **Both aircraft fly in the app: built, not yet verified on the phone.** The app runs JSBSim with tilt steering (calibrated, dead zone, expo), game controllers, the HUD levers, live instruments, stall warning, and five camera views; the test pilot flies stalls, climbs and takeoffs headlessly. A screen recording of a hand-flown circuit on the phone is still owed (the phone is away; it also needs a human pilot).
+6. **Ground handling: partial.** Nosewheel steering follows tilt on the ground, fading out by 60 kt; ground effect is present and tested on both aircraft (factor above 1.05 at 0.2 spans, 1.0 at 2 spans). Not yet: toe brakes and differential braking (only the parking brake), crosswind on the ground (there is no wind until M7).
 
 ## M1 Renderer core: done (2026-11-07)
 

@@ -9,6 +9,7 @@ struct TestPilot {
     var controls = ControlInputs()
     let rate = 120.0
     var lastStallDiagnostics = ""
+    var lastClimbDiagnostics = ""
 
     init(model: String) throws {
         fdm = try FlightDynamics(model: model)
@@ -83,23 +84,53 @@ struct TestPilot {
         return vs
     }
 
-    /// Steady climb at a calibrated airspeed with full power; returns the average climb rate (fpm)
-    /// over `seconds` after `settle` seconds.
-    mutating func climbRate(atKnots target: Double, settle: Double = 20, seconds: Double = 30) -> Double {
+    /// Minimum calibrated airspeed in an idle-power ~1 kt/s deceleration while holding altitude:
+    /// the stall speed as light aircraft certified under CAR 3 publish it (the C172P POH).
+    mutating func minimumSpeedStall() -> Double {
+        controls.throttle = 0
+        let h0 = fdm.get("position/h-sl-ft")
+        var theta = fdm.get("attitude/theta-deg")
+        var minSpeed = Double.infinity
+        var losing = 0.0
+        for _ in 0..<Int(rate * 120) {
+            let h = fdm.get("position/h-sl-ft")
+            let vs = fdm.get("velocities/h-dot-fps") * 60
+            theta += (0.004 * (h0 - h) - 0.0008 * vs) / rate * 60
+            theta = min(theta, 25)
+            tick(pitch: pitchCommand(toward: theta))
+            let v = fdm.get("velocities/vc-kts")
+            if vs > -300 { minSpeed = min(minSpeed, v) }
+            losing = vs < -500 ? losing + 1 / rate : 0
+            if losing > 1.0 { break }
+        }
+        return minSpeed
+    }
+
+    /// Steady climb at a calibrated airspeed with full power; returns the energy-corrected climb
+    /// rate (fpm) over `seconds` after `settle` seconds, so airspeed traded for height does not
+    /// count as climb.
+    mutating func climbRate(atKnots target: Double, settle: Double = 25, seconds: Double = 30) -> Double {
         controls.throttle = 1
         var theta = fdm.get("attitude/theta-deg")
-        var climbed = 0.0
-        var startH = 0.0
+        var h0 = 0.0, v0 = 0.0
         for i in 0..<Int(rate * (settle + seconds)) {
             let v = fdm.get("velocities/vc-kts")
             let accel = fdm.get("accelerations/vdot-ft_sec2") * 0.5925
             theta += (0.06 * (v - target) + 0.2 * accel) / rate * 10
             theta = max(-5, min(20, theta))
             tick(pitch: pitchCommand(toward: theta))
-            if i == Int(rate * settle) { startH = fdm.get("position/h-sl-ft") }
+            if i == Int(rate * settle) {
+                h0 = fdm.get("position/h-sl-ft")
+                v0 = fdm.get("velocities/vt-fps")
+            }
         }
-        climbed = fdm.get("position/h-sl-ft") - startH
-        return climbed / seconds * 60
+        let dh = fdm.get("position/h-sl-ft") - h0
+        let v1 = fdm.get("velocities/vt-fps")
+        let energyHeight = (v1 * v1 - v0 * v0) / (2 * 32.174)
+        lastClimbDiagnostics = String(format: "rpm %.0f, thrust %.0f lb, airspeed drift %.1f kt, height %.0f ft",
+                                      fdm.get("propulsion/engine/engine-rpm"), fdm.get("propulsion/engine/thrust-lbs"),
+                                      (v1 - v0) * 0.5925, dh)
+        return (dh + energyHeight) / seconds * 60
     }
 
     /// Full-power takeoff roll from a standstill on the runway; rotates at `rotateKnots` and returns
