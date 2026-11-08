@@ -36,21 +36,14 @@ public enum A320Model {
         Livery(code: "AUA", fuselage: "AUA-fuselage.png", engine: "CFM56-white.png"),
     ]
 
-    /// Where FlightGear hangs the engines on the airframe (A320-200-CFM.xml: z +0.83109 m),
-    /// in the AC3D file's frame (y up).
-    public static let engineOffset = SIMD3<Float>(0, 0.83109, 0)
-
-    /// Reads the airframe and the engines from a folder and joins them, the engines raised to
-    /// where FlightGear places them. For the traffic: no animation.
+    /// Reads the airframe and the engines from a folder and joins them (they share an origin;
+    /// A320-200-CFM.xml's 0.83 m engine offset belongs to a different model root, and applying
+    /// it put the nacelles up into the wing). For the traffic: no animation.
     public static func load(from directory: URL) throws -> AC3DModel {
         func read(_ name: String) throws -> AC3DModel {
             try AC3DParser.parse(try String(contentsOf: directory.appendingPathComponent(name), encoding: .isoLatin1), part: part)
         }
-        var engines = try read("CFM56.ac")
-        for i in engines.groups.indices { engines.groups[i].positions = engines.groups[i].positions.map { $0 + engineOffset } }
-        engines.boundsMin += engineOffset
-        engines.boundsMax += engineOffset
-        return try read("A320-216.ac").merged(with: engines)
+        return try read("A320-216.ac").merged(with: try read("CFM56.ac"))
     }
 
     /// The flyable aircraft: airframe and engines with FlightGear's animations (gear and its
@@ -66,9 +59,7 @@ public enum A320Model {
             return ["hidden", "windshield"].contains(part(name)) ? part(name) : nil
         }
         try m.load(xml: "fuselage.xml", directory: directory, staticPart: "airframe", special: special)
-        var engines = matrix_identity_double4x4
-        engines.columns.3 = SIMD4(SIMD3<Double>(engineOffset), 1)
-        try m.load(xml: "a320.cfm.xml", directory: directory, placement: engines, staticPart: "airframe", special: special)
+        try m.load(xml: "a320.cfm.xml", directory: directory, staticPart: "airframe", special: special)
         // The flight deck (A320-interior.xml places it): its controls move, its hundreds of
         // switches and lamps are fixed as modelled.
         if FileManager.default.fileExists(atPath: directory.appendingPathComponent("a320.flightdeck.xml").path) {

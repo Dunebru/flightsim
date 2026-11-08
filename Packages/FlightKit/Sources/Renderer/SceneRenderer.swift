@@ -523,7 +523,9 @@ public final class SceneRenderer {
             aircraftModel = MatrixMath.translation(relative(aircraftWorld, to: camera)) * orient
             // The cabin and flight deck show only through the windows: not worth drawing from
             // more than 35 m (the A320's deck is 440,000 triangles).
-            interiorVisible = simd_length(relative(aircraftWorld, to: camera)) < 35
+            // An airliner's flight deck shows only from the pilot's seat (its windscreen is dark
+            // from outside); a light aircraft's cabin shows through its windows from nearby.
+            interiorVisible = scene.cockpitView || (!aircraft.hasWindshield && simd_length(relative(aircraftWorld, to: camera)) < 35)
             for (name, image) in scene.displays where displayVersions[name] != image.version {
                 uploadDisplay(name, image)
             }

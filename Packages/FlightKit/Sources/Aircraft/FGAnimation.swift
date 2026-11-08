@@ -291,9 +291,11 @@ public struct AnimatedModel: Sendable {
         let name = String(part[part.index(part.startIndex, offsetBy: 5)..<bar])
         var m = placements[name] ?? matrix_identity_double4x4
         for object in part[part.index(after: bar)...].split(separator: "/") {
-            // FlightGear wraps each animation around the object in turn: the first listed is
-            // innermost.
-            for anim in (animations["\(name)|\(object)"] ?? []).reversed() where anim.kind != .select && anim.kind != .textranslate {
+            // SimGear inserts each animation's transform between the object and the transform
+            // before it (SGAnimation::installInGroup), so the first listed is outermost and the
+            // last innermost: a wheel spins about its axle, then the strut compresses, then the
+            // gear swings.
+            for anim in animations["\(name)|\(object)"] ?? [] where anim.kind != .select && anim.kind != .textranslate {
                 let key = anim.kind == .spin ? "spin:" + anim.property : anim.property
                 m = m * anim.matrix(values[key] ?? defaults[key] ?? 0)
             }

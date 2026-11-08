@@ -43,6 +43,8 @@ final class AircraftMesh {
     let spinProperties: Set<String>
 
     private(set) var parts: [Part] = []
+    /// Whether the model has an airliner-style windscreen part (dark from outside).
+    var hasWindshield: Bool { parts.contains { $0.isWindshield } }
     /// Model space -> aircraft body frame (x forward, y left, z up, origin on the ground).
     let modelToBody: simd_float4x4
     /// Bounding sphere in the body frame, for the shadow map.

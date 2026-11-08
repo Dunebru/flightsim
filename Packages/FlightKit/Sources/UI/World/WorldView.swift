@@ -337,6 +337,7 @@ final class WorldEngine: NSObject {
         if pose.position.z < floor { pose.position.z = floor }
         scene.cameraPose = pose
         scene.showAircraft = rig.drawsAircraft
+        scene.cockpitView = rig.mode == .cockpit
         adjustResolution(renderer)
         renderer.render(scene, to: update.drawable.texture, drawable: update.drawable)
         renderer.exposureAdaptation = 0.05

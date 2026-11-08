@@ -244,6 +244,9 @@ public struct SceneDescription: Sendable {
     public var aircraftPivotHeight = 0.0
     /// Live images for the aircraft's display screens (parts named "display:<name>").
     public var displays: [String: DisplayImage] = [:]
+    /// The camera is the pilot's eye: the windscreen is clear and the flight deck drawn.
+    /// Otherwise an airliner's windscreen is dark glass, as it looks from outside by day.
+    public var cockpitView = false
     /// The aircraft's digital readouts (from its model): what each "display:text:<name>" shows.
     public var textLabels: [String: AnimatedModel.TextLabel] = [:]
     /// Readings for the aircraft's animated parts (instrument needles, yoke, pedals), by

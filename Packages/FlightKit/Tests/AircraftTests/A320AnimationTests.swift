@@ -121,3 +121,28 @@ struct A320FlightDeckTests {
                                  "display:mcdu", "display:dcdu", "display:isis", "display:clock", "display:atc", "display:batt1", "display:batt2"])
     }
 }
+
+/// A rolling wheel turns about its own axle wherever the strut has put it: its centre does not
+/// move as it spins (with the animations nested the wrong way round, it orbited the
+/// uncompressed axle and wobbled).
+struct WheelSpinTests {
+    @Test func wheelCentreStaysPutWhileSpinning() throws {
+        let m = try A320Model.loadAnimated(from: A320ModelTests.directory)
+        for object in ["MLGWheelsL", "NLGWheels"] {
+            let groups = m.model.groups.filter { $0.part.hasSuffix("|" + object) || $0.part.hasSuffix("/" + object) }
+            let pts = groups.flatMap(\.positions)
+            func centre(_ turns: Double) -> SIMD3<Float> {
+                var v = A320AnimationTests.readings(compression: 1.2)
+                for p in A320Model.Property.wheelSpeed { v["spin:" + p] = turns }
+                guard let t = m.transform(part: groups[0].part, values: v) else { return .zero }
+                let moved = pts.map { t * SIMD4($0, 1) }
+                let lo = moved.reduce(SIMD4<Float>(repeating: .infinity)) { simd_min($0, $1) }
+                let hi = moved.reduce(SIMD4<Float>(repeating: -.infinity)) { simd_max($0, $1) }
+                return SIMD3((lo.x + hi.x) / 2, (lo.y + hi.y) / 2, (lo.z + hi.z) / 2)
+            }
+            let drift = [0.01, 0.013, 0.021].map { simd_distance(centre(0), centre($0)) }.max() ?? 0
+            print("\(object): centre drifts \(drift) m while spinning")
+            #expect(drift < 0.02)
+        }
+    }
+}

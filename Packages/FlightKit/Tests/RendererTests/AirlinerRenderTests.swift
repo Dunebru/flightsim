@@ -39,6 +39,7 @@ struct AirlinerRenderTests {
                                               up: SIMD3(0, 0, 1), fovY: 45 * .pi / 180)))
         for (name, pose) in views {
             s.cameraPose = pose
+            s.cockpitView = name.hasPrefix("a320-flightdeck") || name == "a320-fcu" || name == "a320-pedestal" || name == "a320-centre-panel"
             r.exposureAdaptation = 1
             try TerrainRenderTests.settle(r, s, limit: .seconds(60))
             r.resetHistory()
@@ -134,6 +135,7 @@ struct AirlinerRenderTests {
         ]
         for (name, pose) in views {
             s.cameraPose = pose
+            s.cockpitView = name.hasPrefix("a320-flightdeck") || name == "a320-fcu" || name == "a320-pedestal" || name == "a320-centre-panel"
             r.exposureAdaptation = 1
             try TerrainRenderTests.settle(r, s, limit: .seconds(60))
             r.resetHistory()
@@ -200,6 +202,8 @@ struct AirlinerRenderTests {
         try shot("review-chase", p - fwd * 58 + SIMD3(0, 0, 13), p + fwd * 6, fov: 55)
         try shot("review-side", p + left * 40 + fwd * 4 + SIMD3(0, 0, 2), p + fwd * 2, fov: 50)
         try shot("review-front", p + fwd * 38 - left * 14 + SIMD3(0, 0, 1.5), p + fwd * 6, fov: 50)
+        try shot("review-cockpit-windows", p + fwd * 22 + left * 9 + SIMD3(0, 0, 2), p + fwd * 14 + SIMD3(0, 0, 1.5), fov: 35)
+        try shot("review-cockpit-windows-far", p + fwd * 45 + left * 25 + SIMD3(0, 0, 3), p + fwd * 14 + SIMD3(0, 0, 1.5), fov: 20)
         try shot("review-apron", ground + fwd * 30 + left * 20 + SIMD3(0, 0, 1.7), ground + fwd * 45 + left * 10, fov: 60)
         // In the air, from below and to the side, the gear at five stages.
         s.aircraftPosition = ground + SIMD3(0, 0, 60)
@@ -256,6 +260,7 @@ struct AirlinerRenderTests {
         ]
         for (name, pose) in views {
             s.cameraPose = pose
+            s.cockpitView = name.hasPrefix("a320-flightdeck") || name == "a320-fcu" || name == "a320-pedestal" || name == "a320-centre-panel"
             r.exposureAdaptation = 1
             try TerrainRenderTests.settle(r, s, limit: .seconds(60))
             r.resetHistory()
