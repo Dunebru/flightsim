@@ -1,4 +1,4 @@
-public import Foundation
+import Foundation
 import simd
 
 /// A triangle list in the airport's ENU frame (metres, relative to the airport origin).
@@ -125,9 +125,11 @@ public struct AirportGeometry: Sendable {
                           length: L, width: W, asphalt: r.surface == .asphalt)
     }
 
-    /// FAA precision instrument runway markings (AC 150/5340-1, dimensions as recalled; see
-    /// PROGRESS.md): side stripes, threshold stripes, designation with side letter, touchdown
-    /// zone and aiming point markings, centreline, and displaced-threshold arrows and bar.
+    /// FAA precision instrument runway markings: side stripes, threshold stripes, designation with
+    /// side letter, touchdown zone and aiming point markings, centreline, and displaced-threshold
+    /// arrows and bar. Checked against the draft AC 150/5340-1M text (2026-11-07): threshold
+    /// stripes, threshold bar, designation height, aiming point, touchdown zone lengths and
+    /// grouping, centreline stripes. Arrow and touchdown bar widths are as recalled.
     static func runwayMarkings(_ r: Runway, _ f: RunwayFrame, _ site: AirportSite) -> MeshData {
         var m = MeshData()
         let L = f.length, W = r.width
@@ -174,11 +176,15 @@ public struct AirportGeometry: Sendable {
                 // Arrowheads (13.7 m long, 4.6 m wide) pointing at the threshold, 1.5 m short of
                 // the bar.
                 tri(end: k, [SIMD2(disp - 1.5, 0), SIMD2(disp - 15.2, -2.3), SIMD2(disp - 15.2, 2.3)])
-                rect(end: k, d0: disp - 3, d1: disp, y0: -W / 2 + 1, y1: W / 2 - 1)
+                // The 10 ft (3.1 m) threshold bar lies on the landing side of the threshold
+                // (AC 150/5340-1M 2.9.1.3); threshold stripes start 10 ft beyond it.
+                rect(end: k, d0: disp, d1: disp + 3.1, y0: -W / 2 + 1, y1: W / 2 - 1)
             }
             let t0 = disp + 6.1
-            // Threshold stripes: 45.7 m long, 1.75 m wide and apart; 12 on a 45 m runway, 16 on 60 m.
-            let pairs = W >= 59 ? 8 : (W >= 44 ? 6 : 4)
+            // Threshold stripes: 45.7 m long, 1.75 m wide and apart (AC Table 2-2: 4, 6, 8, 12, 16
+            // stripes for 60, 75, 100, 150, 200 ft runways).
+            let feet = W / 0.3048
+            let pairs = feet >= 195 ? 8 : (feet >= 145 ? 6 : (feet >= 97 ? 4 : (feet >= 73 ? 3 : 2)))
             for i in 0..<pairs {
                 let o = 1.75 + Double(i) * 3.5
                 for side in [-1.0, 1.0] {

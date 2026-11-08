@@ -4,7 +4,27 @@ What is done, what is a placeholder, and what is next. Honest status only: anyth
 
 Last updated: 2026-11-07.
 
-## Current milestone: M4 Terrain streaming (met on the Mac and simulators; device timing owed)
+## Current milestone: M5 Airports, KPHX and KLAX only (in progress)
+
+Scope set by you on 2026-11-07: KPHX and KLAX, made as good as possible, before any other airport.
+
+### M5 status (2026-11-07)
+
+Built and visually reviewed on the Mac GPU (renders in `artifacts/renders/kphx-*` and `klax-*`):
+
+1. **Importer.** `flight-tools airport-import` reads FAA NASR (runway ends, elevations, displaced thresholds, TDZ, threshold crossing heights, PAPI, approach light type, centreline, TDZ and REIL flags, surface, edge light intensity) and OSM (taxiway centrelines and widths, aprons, stands with lead-in lines, hold positions with the runway side, buildings, boarding bridges, windsocks, aerodrome outline). KPHX: 3 runways, 556 taxiway segments, 19 aprons, 169 buildings, 253 stands, 226 holds, 22 bridges. KLAX: 4 runways, 382 taxiways, 26 aprons, 406 buildings, 400 stands, 194 holds, 117 bridges.
+2. **One airport surface.** Interpolates the published runway-end elevations; runways, taxiways, aprons, paint, buildings, the flattened terrain and the physics ground all stand on it (tested: the surface passes through every published end elevation; the physics ground matches it on every runway).
+3. **Runways and markings.** Concrete or asphalt per NASR, FAA precision markings with side letters and displaced thresholds. Checked against the draft AC 150/5340-1M: threshold stripe size, spacing and count, the threshold bar's side, numeral height, aiming point position and size, touchdown zone lengths and grouping, centreline stripes. Arrowhead and touchdown bar widths are still as recalled.
+4. **Taxiways, aprons, paint.** Taxiway ribbons with round joins, concrete slabs, yellow centrelines stopping at runway edges, runway holding position markings with enhanced centrelines, stand lead-in lines and stop bars.
+5. **Lighting (candela, physically scaled).** HIRL with the yellow caution zone, threshold and end lights, centreline and TDZ lights, MALSR/MALSF/ALSF-2 with sequenced flashers, PAPI that turns red and white with the viewer's angle (tested: two white and two red on a 3 degree path), REIL, blue taxiway edges, runway guard wig-wags, 25 m apron floodlight masts (night only).
+6. **Signs.** Holding position signs ordered by which threshold is on the pilot's left, taxiway location signs, distance-remaining signs; lit at night.
+7. **Buildings.** Extruded from OSM with procedural facades (terminal glass, hangar cladding, generic windows, parking decks), a glazed cab on the mapped tower (PHX Tower 99 m, LAX 86 m), boarding bridges (mapped plus generated for terminal stands without one), windsocks, lit windows at night.
+8. **Night.** City lights from NASA Black Marble, drawn as street-grid and lot lights near the camera and a glow farther out.
+9. **In the app.** Choose KPHX or KLAX; start on any runway end, a 3 nm final on the published path, or any named gate; the tower camera sits in the real tower cab.
+
+Not yet: taxiway direction signs at intersections, taxiway centreline lights, stop bars, terminal shapes beyond extruded footprints (no curved roofs, no detail), buildings outside the airport boundary, sloped runway profiles beyond the two published end elevations, the 0.6 m NAIP imagery. Not measured: frame time on the phone with airports and lights (the phone is away).
+
+## M4 Terrain streaming: met on the Mac and simulators; device timing owed
 
 ### M4 report (2026-11-07), against PLAN.md section 13
 
@@ -80,17 +100,17 @@ Build warnings: 1, the deprecated `UIRequiresFullScreen`, kept on purpose (see K
 | Renderer | **Working.** Physically based sky and aerial perspective, streamed satellite terrain, the KPHX 8/26 runway with markings, the aircraft with a sun shadow, MetalFX. No night lighting, stars, clouds or water yet. |
 | UI | **Working.** Apple-style HUD with live data, free-flight setup, persisted settings, five cameras, tilt, stick and controller input. |
 | Tools (`flight-tools`) | **Partial.** `terrain-bake` works (DEM, AWS terrain tiles, Sentinel-2 and USGS imagery with colour matching); `nav-import`, `airport-import` and `asset-cook` say "not implemented" and name their milestone. |
-| Weather, Nav, Autopilot, Airports, Traffic, ATC | **Placeholders.** Module identity only (M5 to M9). |
+| Airports | **Working (KPHX, KLAX).** Cooked layouts, airport surface, generated runways, markings, taxiways, aprons, buildings, lights and signs, start positions. |
+| Weather, Nav, Autopilot, Traffic, ATC | **Placeholders.** Module identity only (M7 to M9). |
 
 ## Placeholders in the app today
 
-Only runway 8/26 at KPHX is drawn as geometry; the other two runways, the taxiways and the terminals exist only in the satellite imagery, with no buildings (M5). The HUD carries a small "Prototype" tag. The autopilot panel's targets do nothing (M8). The map and ATC panels say they are not built. The tower camera position is a guess, not the real tower.
+Airports are generated, not modelled: terminals are extruded footprints with procedural glass, not the real architecture. There is no AI traffic (M9), so gates and taxiways are empty. The HUD carries a small "Prototype" tag. The autopilot panel's targets do nothing (M8). The map and ATC panels say they are not built. The tower camera position is a guess, not the real tower.
 
 ## Known issues
 
 - Night is near black: no stars, moon or city lights yet (stars and moon M7, night lighting M10).
 - Imagery comes from two sources (Sentinel-2 below zoom 12, USGS from zoom 12). Colour is matched statistically at bake time, so a faint tone change can remain where the levels meet.
-- The runway 08 displaced threshold (898 ft) is not drawn; markings assume none (M5).
 - The sea is satellite imagery on flat ground at sea level: no reflections, waves or shoreline foam (water rendering, M10). Terrain-tile heights are clamped at sea level to remove ocean depths, which also raises land below sea level (Death Valley, the Salton Sea) to sea level where no local DEM is used.
 
 - iPad landscape lock relies on `UIRequiresFullScreen`, deprecated since iOS 26 (one build warning). Verified on 2026-11-07 that iPadOS 27 still honors it: without it the iPad simulator rendered the app in portrait. When Apple stops honoring it, the iPad needs a different approach (likely a rotate-to-landscape prompt).

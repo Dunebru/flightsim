@@ -35,6 +35,7 @@ var targets: [Target] = [
         path: "Sources/CJSBSim",
         exclude: [
             "jsbsim/COPYING.LGPL", "jsbsim/JSBSIM_RELEASE.txt",
+            "jsbsim/GeographicLib/LICENSE.txt", "jsbsim/models/atmosphere/MSIS/DOCUMENTATION", "jsbsim/simgear/xml/COPYING",
             "jsbsim/simgear/xml/xmltok_impl.c", "jsbsim/simgear/xml/xmltok_ns.c",
             // Not built by JSBSim's CMake either (optional simplex trim).
             "jsbsim/initialization/FGSimplexTrim.cpp", "jsbsim/initialization/FGTrimAnalysis.cpp",
