@@ -8,6 +8,7 @@ public enum ToolCommand: String, CaseIterable, Sendable {
     case airportImport = "airport-import"
     case terrainBake = "terrain-bake"
     case assetCook = "asset-cook"
+    case starCook = "star-cook"
 
     public var plannedFor: String? {
         switch self {
@@ -15,6 +16,7 @@ public enum ToolCommand: String, CaseIterable, Sendable {
         case .airportImport: nil
         case .terrainBake: nil
         case .assetCook: "M6"
+        case .starCook: nil
         }
     }
 
@@ -22,6 +24,7 @@ public enum ToolCommand: String, CaseIterable, Sendable {
         "usage: flight-tools <command>\n" + allCases.map { c in
             if let m = c.plannedFor { return "  \(c.rawValue)  (not implemented, planned for \(m))" }
             if c == .airportImport { return "  \(c.rawValue)  --icao <ICAO> --nasr <dir> --osm-cache <dir> --out <file.json> [--surroundings <km>]" }
+            if c == .starCook { return "  \(c.rawValue)  --bsc5 <bsc5.dat> --out <stars.bin> [--faintest 6.5]" }
             if c == .navImport { return "  \(c.rawValue)  --nasr <dir> --box <south,west,north,east> --out <file.json>" }
             return "  \(c.rawValue)  " + (c == .terrainBake
                 ? "(--center <lat,lon> | --world <max zoom>) --name <name> --out <dir> [--dem <raster.bin> --dem-info <gdalinfo.json>]\n"
@@ -97,6 +100,19 @@ public func runTool(_ arguments: [String], log: @Sendable @escaping (String) -> 
             return (0, "baked \(index.tiles.count) tiles, zoom \(index.minZoom)-\(index.maxZoom), into \(out)")
         } catch {
             return (1, "terrain-bake failed: \(error)")
+        }
+    case .starCook:
+        let known: Set<String> = ["--bsc5", "--out", "--faintest"]
+        if let unknown = options.names.first(where: { !known.contains($0) }) {
+            return (64, "star-cook: unknown option \(unknown)\n" + ToolCommand.usage)
+        }
+        guard let bsc5 = options["--bsc5"], let out = options["--out"] else { return (64, ToolCommand.usage) }
+        do {
+            let n = try StarCook.run(bsc5: URL(fileURLWithPath: bsc5), out: URL(fileURLWithPath: out),
+                                     faintest: options["--faintest"].flatMap(Double.init) ?? 6.5)
+            return (0, "wrote \(out): \(n) stars")
+        } catch {
+            return (1, "star-cook failed: \(error)")
         }
     case .navImport:
         let known: Set<String> = ["--nasr", "--box", "--out"]

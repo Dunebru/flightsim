@@ -310,6 +310,8 @@ kernel void lightingState(device LightingState &state [[buffer(0)]],
     float3 sunT = sampleTransmittance(transmittanceLUT, viewHeight, sunDir.z);
     float earthShadow = raySphere(float3(0, 0, viewHeight), sunDir, kBottomRadius) >= 0.0 ? 0.0 : 1.0;
     float3 sun = u.sunIlluminance.rgb * sunT * earthShadow;
+    // Moonlight, slightly blue as the eye sees it at night, as part of the sky's light.
+    E += u.moonLight.x * float3(0.78, 0.86, 1.0);
 
     // Exposure that maps an 18% grey, horizontal surface under this light to mid grey. Below a
     // cloud deck that light is the overcast's: mostly diffuse, about a third of a clear day's.

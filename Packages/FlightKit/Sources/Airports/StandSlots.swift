@@ -1,4 +1,4 @@
-public import simd
+import simd
 
 /// A parking stand with a lead-in line, in the airport frame: where an aircraft stops, which way
 /// it faces, the line it taxis in along, and what fits there.

@@ -8,4 +8,6 @@ kernel void structSizes(device uint *out [[buffer(0)]], uint gid [[thread_positi
     out[4] = sizeof(PrecipUniforms);
     out[5] = sizeof(GPULight);
     out[6] = sizeof(LightUniforms);
+    out[7] = sizeof(StarGPU);
+    out[8] = sizeof(StarUniforms);
 }

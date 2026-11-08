@@ -32,6 +32,8 @@ struct FrameUniforms {
     float4 fog;                     // x: extinction at the field (1/m), y: scale height (m),
                                     // z: field height, w: camera height (m above sea level)
     float4 weather;                 // x: how wet the ground is (0-1)
+    float4 moonDirection;           // xyz: unit vector to the Moon (world), w: its angular radius (rad)
+    float4 moonLight;               // x: moonlight on level ground (scene units, perceptually scaled)
 };
 
 /// Optical depth of low-level fog, mist or haze from the camera along a unit direction to a

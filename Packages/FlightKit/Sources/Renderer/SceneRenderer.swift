@@ -77,6 +77,14 @@ public final class SceneRenderer {
     /// Per-frame buffers for the moving airliners' lights (three, so the GPU can still read the
     /// previous frames').
     private var trafficLightRing: [any MTLBuffer] = []
+    // Stars
+    private let starPipeline: any MTLRenderPipelineState
+    private var stars: (buffer: any MTLBuffer, count: Int)?
+    /// How much brighter than the renderer's capped night exposure a dark-adapted eye sees stars
+    /// (a zero-magnitude star near white, sixth magnitude just visible) and moonlight. Perceptual
+    /// choices, like the apron floodlights'.
+    public var starBoost: Float = 4_000
+    public var moonlightBoost: Float = 1_000
     /// Sun transmittance through the clouds over `cloudShadowExtent` around the camera.
     private let cloudShadowMap: any MTLTexture
     public var cloudShadowExtent: Double = 24_000
@@ -220,6 +228,15 @@ public final class SceneRenderer {
         treeMesh = tmb
         treeMeshVertexCount = tm.count / 2
         lightPipeline = try render("lightVertex", "lightFragment", colors: gbuffer, depth: Self.depthFormat) { d in
+            let c = d.colorAttachments[0]!
+            c.isBlendingEnabled = true
+            c.sourceRGBBlendFactor = .one
+            c.destinationRGBBlendFactor = .one
+            c.sourceAlphaBlendFactor = .zero
+            c.destinationAlphaBlendFactor = .one
+            d.colorAttachments[1].writeMask = []
+        }
+        starPipeline = try render("starVertex", "lightFragment", colors: gbuffer, depth: Self.depthFormat) { d in
             let c = d.colorAttachments[0]!
             c.isBlendingEnabled = true
             c.sourceRGBBlendFactor = .one
@@ -407,6 +424,12 @@ public final class SceneRenderer {
         u.fog = SIMD4(Float(mist), Float(max(scene.fogScaleHeight, 20)), Float(scene.origin.height),
                       Float(scene.origin.height + pose.position.z))
         u.weather = SIMD4(Float(min(max(scene.wetness, 0), 1)), 0, 0, 0)
+        // The Moon: where it is, how big it looks, and the light it gives (full moon about
+        // 0.27 lux overhead, falling steeply with phase).
+        let moon = Celestial.moon(at: scene.date, latitude: scene.origin.latitude, longitude: scene.origin.longitude)
+        u.moonDirection = SIMD4(SIMD3<Float>(moon.direction), Float(0.272_5 * .pi / 180 * 384_400 / moon.distanceKm))
+        let moonLux = 0.27 * pow(moon.illuminated, 3.5) * max(moon.direction.z, 0)
+        u.moonLight = SIMD4(Float(moonLux / 120_000) * moonlightBoost, 0, 0, 0)
 
         // Draws. With terrain loaded the procedural ground is only a fallback past the scenery's
         // edge, so it sits just below sea level (under all the terrain, whose heights are clamped
@@ -828,6 +851,21 @@ public final class SceneRenderer {
                 e.setDepthStencilState(depthSky)
                 e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
             }
+            // Stars, behind everything: only where the sky is (depth still 0).
+            if let stars, !settings.blackSkyForTest {
+                var su = StarUniforms()
+                let m = Celestial.equatorialToLocal(latitude: scene.origin.latitude, longitude: scene.origin.longitude, date: scene.date)
+                su.rotation = simd_float4x4(columns: (SIMD4(SIMD3<Float>(m.columns.0), 0), SIMD4(SIMD3<Float>(m.columns.1), 0),
+                                                      SIMD4(SIMD3<Float>(m.columns.2), 0), SIMD4(0, 0, 0, 1)))
+                su.params = SIMD4(Float(scene.date.timeIntervalSince1970.truncatingRemainder(dividingBy: 3_600)),
+                                  2 * tan(fov / 2) / Float(renderSize.y), 1.5, starBoost)
+                e.setRenderPipelineState(starPipeline)
+                e.setDepthStencilState(depthSky)
+                e.setVertexBuffer(stars.buffer, offset: 0, index: 0)
+                e.setVertexBytes(&su, length: MemoryLayout<StarUniforms>.stride, index: 2)
+                e.setVertexTexture(transmittanceLUT, index: 0)
+                e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: stars.count)
+            }
             // Airport lights over everything opaque (and the sky), depth-tested, not written.
             e.setRenderPipelineState(lightPipeline)
             e.setDepthStencilState(depthTestOnly)
@@ -1230,6 +1268,13 @@ public final class SceneRenderer {
         cb.commit()
     }
 
+    /// The catalogue stars to draw (from stars.bin).
+    public func setStars(_ list: [SkyStar]) {
+        let gpu = list.map { StarGPU(dirMag: SIMD4($0.direction, $0.magnitude), colour: SIMD4($0.colour, 0)) }
+        stars = gpu.isEmpty ? nil : device.makeBuffer(bytes: gpu, length: gpu.count * MemoryLayout<StarGPU>.stride,
+                                                      options: .storageModeShared).map { ($0, gpu.count) }
+    }
+
     /// Uniforms for this frame's rain or snow, advancing the drops' fall; nil when dry.
     private func precipUniforms(_ scene: SceneDescription, pose: CameraPose, cameraMoved: SIMD3<Double>, reset: Bool,
                                 pixelAngle: Float) -> PrecipUniforms? {
@@ -1272,8 +1317,8 @@ public final class SceneRenderer {
         c.endEncoding()
         cb.commit()
         cb.waitUntilCompleted()
-        let p = buffer.contents().bindMemory(to: UInt32.self, capacity: 7)
-        return (0..<7).map { Int(p[$0]) }
+        let p = buffer.contents().bindMemory(to: UInt32.self, capacity: 9)
+        return (0..<9).map { Int(p[$0]) }
     }
 
     /// The cloud shadow map's sun transmittance, row by row (tests; waits for the GPU).

@@ -38,7 +38,9 @@ Live weather from the departure airport's METAR (aviationweather.gov), parsed in
 6. **Turbulence in cloud.** MIL-spec severity from the layers the aircraft is in: light in stratus and cirrus, moderate in cumulus, severe in a cumulonimbus; gust turbulence only in the lowest kilometre (tested).
 7. **Cost (Mac GPU).** The cloud pass at 1920x884 with two layers: 1.55 ms. Not measured on the phone.
 
-Renders in `artifacts/renders/clouds-kphx-*`. Not yet: lightning, reflections of runway lights on wet pavement, winds aloft, a moon and stars.
+8. **Stars and the Moon.** 8,404 stars from the Yale Bright Star Catalogue (to magnitude 6.5) placed for the time and place (tested: Polaris at the latitude, Sirius due south at transit, stars rising in the east), at their catalogue brightness and colour through the atmosphere, twinkling near the horizon. The Moon from a lunar theory good to a third of a degree, corrected for parallax (tested: over the point of greatest eclipse on 8 April 2024 it sits 0.19 degrees from the Sun; fully lit and opposite it at the full moon of 23 April), drawn as a sphere lit by the Sun so it shows its phase, with darker maria; its light falls on the ground and turns the night sky a faint deep blue. Stars and moonlight are scaled up for a dark-adapted eye (a perceptual choice: the night exposure is capped). Precession since 2000 (about 0.36 degrees) is not applied.
+
+Renders in `artifacts/renders/clouds-kphx-*` and `sky-*`. Not yet: lightning, reflections of runway lights on wet pavement, winds aloft, planets.
 
 ## Current milestone: M5 Airports, KPHX and KLAX only (in progress)
 

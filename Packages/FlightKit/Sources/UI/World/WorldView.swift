@@ -103,6 +103,10 @@ final class WorldEngine: NSObject {
         // temporal resolve hides most of the difference. Not yet measured on the device.
         made?.cloudResolutionScale = 0.4
         #endif
+        // The bright star catalogue for the night sky.
+        if let url = Bundle.main.resourceURL?.appendingPathComponent("Bundle/Sky/stars.bin"), let list = try? SkyStar.load(url) {
+            made?.setStars(list)
+        }
         renderer = made
         startupError = error
         super.init()

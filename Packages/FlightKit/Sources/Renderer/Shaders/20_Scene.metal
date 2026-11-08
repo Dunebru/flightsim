@@ -788,6 +788,28 @@ fragment GBufferOut skyFragment(SkyOut in [[stage_in]],
         L += u.sunIlluminance.rgb / solidAngle * T * limb;
     }
 
+    // Moonlight scattered in the air: a faint deep blue, brighter toward the horizon.
+    if (dir.z > -0.05) L += u.moonLight.x * 0.08 * float3(0.32, 0.48, 1.0) * (1.0 - 0.6 * saturate(dir.z));
+
+    // The Moon: a sphere lit by the Sun, so it shows its phase; the maria darker, a little
+    // earthshine on the dark side, behind the atmosphere's transmittance.
+    float moonR = u.moonDirection.w;
+    if (moonR > 0.0 && dot(dir, u.moonDirection.xyz) > cos(moonR * 1.05) && dir.z > -0.02) {
+        float3 m = u.moonDirection.xyz;
+        float3 right = normalize(cross(m, float3(0.0, 0.0, 1.0)));
+        float3 upT = cross(right, m);
+        float2 q = float2(dot(dir, right), dot(dir, upT)) / sin(moonR);
+        float r2 = dot(q, q);
+        if (r2 < 1.0) {
+            float3 n = q.x * right + q.y * upT - sqrt(1.0 - r2) * m;
+            float lit = saturate(dot(n, sunDir));
+            float maria = 1.0 - 0.38 * smoothstep(0.42, 0.62, fbm(q * 1.9 + 7.3, 4));
+            float3 T = sampleTransmittance(transmittanceLUT, viewHeight, max(dir.z, 0.0));
+            float3 moon = (lit * 0.12 / kPi * maria + 0.00001) * u.sunIlluminance.rgb * T;
+            L += moon * smoothstep(1.0, 0.94, sqrt(r2));
+        }
+    }
+
     // Under an overcast whatever sky shows past the clouds' reach is the deck's grey, and mist
     // hides the sky toward the horizon.
     if (u.cloudLight.z < u.cloudShadowShift.y) L = mix(L, light.fogColour.rgb, u.cloudLight.x);

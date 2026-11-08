@@ -26,6 +26,55 @@ struct FrameUniforms {
     var cloudLight = SIMD4<Float>.zero
     var fog = SIMD4<Float>.zero
     var weather = SIMD4<Float>.zero
+    var moonDirection = SIMD4<Float>.zero
+    var moonLight = SIMD4<Float>.zero
+}
+
+/// Matches StarGPU and StarUniforms in 26_Stars.metal.
+struct StarGPU {
+    var dirMag: SIMD4<Float>
+    var colour: SIMD4<Float>
+}
+
+struct StarUniforms {
+    var rotation = matrix_identity_float4x4
+    var params = SIMD4<Float>.zero
+}
+
+/// A catalogue star for the sky: J2000 direction, visual magnitude, B-V colour index.
+public struct SkyStar: Sendable {
+    public var direction: SIMD3<Float>
+    public var magnitude: Float
+    public var colourIndex: Float
+
+    /// Reads stars.bin from `flight-tools star-cook`.
+    public static func load(_ url: URL) throws -> [SkyStar] {
+        let data = try Data(contentsOf: url)
+        guard data.count >= 8, data.prefix(4) == Data("STAR".utf8) else { return [] }
+        return data.withUnsafeBytes { raw -> [SkyStar] in
+            let count = Int(raw.loadUnaligned(fromByteOffset: 4, as: UInt32.self).littleEndian)
+            guard data.count >= 8 + count * 20 else { return [] }
+            return (0..<count).map { i in
+                func f(_ k: Int) -> Float { Float(bitPattern: raw.loadUnaligned(fromByteOffset: 8 + i * 20 + k * 4, as: UInt32.self).littleEndian) }
+                return SkyStar(direction: SIMD3(f(0), f(1), f(2)), magnitude: f(3), colourIndex: f(4))
+            }
+        }
+    }
+
+    /// Colour from B-V through the star's temperature (Ballesteros 2012) and a blackbody fit,
+    /// normalised to its brightest channel.
+    var colour: SIMD3<Float> {
+        let bv = Double(min(max(colourIndex, -0.4), 2.0))
+        let t = 4_600 * (1 / (0.92 * bv + 1.7) + 1 / (0.92 * bv + 0.62))
+        let k = t / 100
+        let r = k <= 66 ? 255 : 329.7 * pow(k - 60, -0.1332)
+        let g = k <= 66 ? 99.47 * log(k) - 161.12 : 288.12 * pow(k - 60, -0.0755)
+        let b = k >= 66 ? 255 : (k <= 19 ? 0 : 138.52 * log(k - 10) - 305.04)
+        let c = SIMD3(min(max(r, 0), 255), min(max(g, 0), 255), min(max(b, 0), 255)) / 255
+        // Stars look far less coloured than their spectra; keep a hint.
+        let tint = c / max(c.max(), 1e-3)
+        return SIMD3<Float>(simd_mix(SIMD3<Double>(repeating: 1), tint, SIMD3(repeating: 0.45)))
+    }
 }
 
 struct MeshVertex {
