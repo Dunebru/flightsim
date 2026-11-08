@@ -25,7 +25,9 @@ public struct FlightHUDView: View {
         self.settings = settings
         self.onExit = onExit
         #if os(iOS)
-        _engine = State(initialValue: WorldEngine(airport: settings.airport))
+        var stand: String?
+        if case .stand(let ref) = settings.spot { stand = ref }
+        _engine = State(initialValue: WorldEngine(airport: settings.airport, startStand: stand))
         #endif
     }
 

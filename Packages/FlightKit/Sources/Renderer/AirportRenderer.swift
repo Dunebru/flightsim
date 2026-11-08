@@ -37,12 +37,15 @@ final class AirportRenderer {
         let radius: Double
     }
     private(set) var city: [CityDraw] = []
+    /// Parked airliners: instance buffers (narrowbody, widebody) with their counts.
+    let parkedNarrow: (any MTLBuffer)?, parkedNarrowCount: Int
+    let parkedWide: (any MTLBuffer)?, parkedWideCount: Int
 
     /// Building facade codes for the shader (DrawUniforms.emissive.x).
     enum Facade: Float { case terminal = 1, hangar = 2, generic = 3, parking = 4, tower = 5, glass = 6, bridge = 7, windsock = 8 }
 
     init?(site: AirportSite, geometry: AirportGeometry, lights points: [LightPoint], signs: [SignPlacement],
-          city chunks: [CityChunk] = [], sceneFrame: LocalFrame, device: any MTLDevice) {
+          city chunks: [CityChunk] = [], excludeStand: String? = nil, sceneFrame: LocalFrame, device: any MTLDevice) {
         name = site.layout.icao
         let a = site.frame
         let o = sceneFrame.enu(a.origin)
@@ -73,6 +76,14 @@ final class AirportRenderer {
                             params: SIMD4(params.x, params.y, params.z, p.nightOnly ? 1 : 0))
         }
         lightCount = gpu.count
+        let parked = ParkedTraffic.placements(site, excluding: excludeStand)
+        func instances(_ a: [SIMD8<Float>]) -> (any MTLBuffer)? {
+            a.isEmpty ? nil : device.makeBuffer(bytes: a, length: a.count * MemoryLayout<SIMD8<Float>>.stride, options: .storageModeShared)
+        }
+        parkedNarrow = instances(parked.narrow)
+        parkedNarrowCount = parked.narrow.count
+        parkedWide = instances(parked.wide)
+        parkedWideCount = parked.wide.count
         city = chunks.compactMap { ch in
             guard !ch.indices.isEmpty else { return nil }
             var v = [CompactVertex]()

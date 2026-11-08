@@ -47,6 +47,7 @@ final class WorldEngine: NSObject {
     @ObservationIgnored private var cameraGround: GroundModel
     @ObservationIgnored private var pendingLayouts: [AirportLayout] = []
     @ObservationIgnored private var departureICAO: String?
+    @ObservationIgnored private let startStand: String?
 
     private(set) var framesPerSecond: Double = 0
     /// True until the terrain around the camera has streamed in (or 10 s have passed), so a
@@ -66,7 +67,9 @@ final class WorldEngine: NSObject {
         return MTLFXSupport.temporal(device)
     }
 
-    init(airport icao: String = "KPHX") {
+    /// `startStand`: the gate the flight starts at, left free of parked traffic.
+    init(airport icao: String = "KPHX", startStand: String? = nil) {
+        self.startStand = startStand
         let defaults = UserDefaults.standard
         timeOverride = defaults.string(forKey: "FlightTimeUTC").flatMap { ISO8601DateFormatter().date(from: $0) }
         scene = .phoenixTest(date: timeOverride ?? Date())
@@ -122,7 +125,7 @@ final class WorldEngine: NSObject {
             self.overrides = built.overrides
             self.cameraGround = GroundModel(scenery: self.scenery, frame: LocalFrame(origin: origin), flatten: built.overrides)
             self.renderer?.setTerrain(self.scenery, origin: origin, flatten: built.overrides)
-            self.renderer?.setAirports(built.assets, sceneOrigin: origin)
+            self.renderer?.setAirports(built.assets, sceneOrigin: origin, excludeStand: self.startStand)
             let departure = built.assets.first { $0.site.layout.icao == icao }?.site
             if let cab = departure?.towerCab { self.rig.towerPosition = cab }
             self.quietFrames = 0

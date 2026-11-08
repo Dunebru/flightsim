@@ -95,7 +95,7 @@ struct DrawUniforms {
 }
 
 enum SurfaceKind: Float {
-    case aircraft = 0, runway = 1, marking = 2, ground = 3, terrain = 4, pavement = 5, building = 6, sign = 7, tree = 8
+    case aircraft = 0, runway = 1, marking = 2, ground = 3, terrain = 4, pavement = 5, building = 6, sign = 7, tree = 8, parked = 9
 }
 
 /// Size of the GPU-side lighting state (three float4).

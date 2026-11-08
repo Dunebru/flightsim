@@ -31,6 +31,11 @@ public final class SceneRenderer {
     private let lightPipeline: any MTLRenderPipelineState
     private let compactPipeline: any MTLRenderPipelineState
     private let treePipeline: any MTLRenderPipelineState
+    private let parkedPipeline: any MTLRenderPipelineState
+    private let shadowParkedPipeline: any MTLRenderPipelineState
+    private let narrowbody: (buffer: any MTLBuffer, count: Int)
+    private let widebody: (buffer: any MTLBuffer, count: Int)
+    public private(set) var parkedDrawn = 0
     private let shadowTreePipeline: any MTLRenderPipelineState
     private let treeMesh: any MTLBuffer
     private let treeMeshVertexCount: Int
@@ -151,6 +156,17 @@ public final class SceneRenderer {
         terrainPipeline = try render("terrainVertex", "sceneFragment", colors: gbuffer, depth: Self.depthFormat)
         compactPipeline = try render("compactVertex", "sceneFragment", colors: gbuffer, depth: Self.depthFormat)
         treePipeline = try render("treeVertex", "sceneFragment", colors: gbuffer, depth: Self.depthFormat)
+        parkedPipeline = try render("parkedVertex", "sceneFragment", colors: gbuffer, depth: Self.depthFormat)
+        shadowParkedPipeline = try render("shadowParkedVertex", nil, colors: [], depth: Self.depthFormat)
+        func meshBuffer(_ spec: ParkedAircraftMesh.Spec) throws -> (any MTLBuffer, Int) {
+            let v = ParkedAircraftMesh.build(spec)
+            guard let b = device.makeBuffer(bytes: v, length: v.count * MemoryLayout<MeshVertex>.stride, options: .storageModeShared) else {
+                throw RendererError.resource("parked aircraft")
+            }
+            return (b, v.count)
+        }
+        narrowbody = try meshBuffer(ParkedAircraftMesh.narrowbody)
+        widebody = try meshBuffer(ParkedAircraftMesh.widebody)
         shadowTreePipeline = try render("shadowTreeVertex", nil, colors: [], depth: Self.depthFormat)
         let tm = TreeMesh.vertices()
         guard let tmb = device.makeBuffer(bytes: tm, length: tm.count * 16, options: .storageModeShared) else {
@@ -460,6 +476,20 @@ public final class SceneRenderer {
                                                 indexBuffer: chunk.indices, indexBufferOffset: 0)
                     }
                 }
+                // Parked airliners cast.
+                e.setRenderPipelineState(shadowParkedPipeline)
+                for airport in airports {
+                    var d = DrawUniforms()
+                    d.model = airport.model(relativeTo: camera, offset: offset)
+                    e.setVertexBytes(&d, length: MemoryLayout<DrawUniforms>.stride, index: 2)
+                    for (mesh, buffer, count) in [(narrowbody, airport.parkedNarrow, airport.parkedNarrowCount),
+                                                  (widebody, airport.parkedWide, airport.parkedWideCount)] {
+                        guard let buffer, count > 0 else { continue }
+                        e.setVertexBuffer(mesh.buffer, offset: 0, index: 0)
+                        e.setVertexBuffer(buffer, offset: 0, index: 3)
+                        e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: mesh.count, instanceCount: count)
+                    }
+                }
                 // Trees cast too.
                 e.setRenderPipelineState(shadowTreePipeline)
                 for tile in terrainTiles where tile.treeCount > 0 {
@@ -614,6 +644,32 @@ public final class SceneRenderer {
                 }
             }
             e.setDepthBias(0, slopeScale: 0, clamp: 0)
+            // Parked airliners at the stands.
+            var parked = 0
+            e.setRenderPipelineState(parkedPipeline)
+            e.setFragmentTexture(dummyTexture, index: 0)
+            for airport in airports {
+                guard simd_distance(airport.origin + offset, camera) < 12_000 else { continue }
+                let model = airport.model(relativeTo: camera, offset: offset)
+                let prev = airport.model(relativeTo: previousCam, offset: offset)
+                for (mesh, buffer, count, length) in [(narrowbody, airport.parkedNarrow, airport.parkedNarrowCount, ParkedAircraftMesh.narrowbody.length),
+                                                      (widebody, airport.parkedWide, airport.parkedWideCount, ParkedAircraftMesh.widebody.length)] {
+                    guard let buffer, count > 0 else { continue }
+                    var d = DrawUniforms()
+                    d.model = model
+                    d.prevModel = reset ? model : prev
+                    d.material = SIMD4(0.35, 0, 0, SurfaceKind.parked.rawValue)
+                    d.emissive = SIMD4(Float(length), 0, 0, 0)
+                    e.setVertexBuffer(mesh.buffer, offset: 0, index: 0)
+                    e.setVertexBuffer(buffer, offset: 0, index: 3)
+                    e.setVertexBytes(&d, length: MemoryLayout<DrawUniforms>.stride, index: 2)
+                    e.setFragmentBytes(&d, length: MemoryLayout<DrawUniforms>.stride, index: 2)
+                    e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: mesh.count, instanceCount: count)
+                    parked += count
+                }
+            }
+            parkedDrawn = parked
+            e.setRenderPipelineState(scenePipeline)
             // City buildings around the airports, chunk by chunk, near the camera only.
             var cityDrawn = 0
             for airport in airports where !airport.city.isEmpty {
@@ -779,11 +835,12 @@ public final class SceneRenderer {
 
     /// Airports to draw, each built in its own frame and placed into the scene frame of
     /// `sceneOrigin`. Replaces the stand-in runway.
-    public func setAirports(_ assets: [AirportAssets], sceneOrigin: Geodetic) {
+    /// `excludeStand`: the stand the flight starts at, left empty.
+    public func setAirports(_ assets: [AirportAssets], sceneOrigin: Geodetic, excludeStand: String? = nil) {
         let frame = LocalFrame(origin: sceneOrigin)
         airports = assets.compactMap {
             AirportRenderer(site: $0.site, geometry: $0.geometry, lights: $0.lights, signs: AirportSigns.build($0.site),
-                            city: $0.city, sceneFrame: frame, device: device)
+                            city: $0.city, excludeStand: excludeStand, sceneFrame: frame, device: device)
         }
         previousCamera = nil
     }

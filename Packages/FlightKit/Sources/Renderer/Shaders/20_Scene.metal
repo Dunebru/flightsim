@@ -27,6 +27,7 @@ constant float kKindPavement = 5.0;
 constant float kKindBuilding = 6.0;
 constant float kKindSign = 7.0;
 constant float kKindTree = 8.0;
+constant float kKindParked = 9.0;
 
 constexpr sampler kTerrainSampler(filter::linear, mip_filter::linear, address::clamp_to_edge, max_anisotropy(16));
 
@@ -179,6 +180,44 @@ vertex VertexOut treeVertex(uint vid [[vertex_id]], uint iid [[instance_id]],
     o.currentClip = u.viewProjNoJitter * world;
     o.previousClip = u.prevViewProjNoJitter * (d.prevModel * local);
     o.seed = t.params.y;
+    return o;
+}
+
+/// Parked airliners: a shared mesh (MeshVertex, body frame x forward, y left) placed by
+/// instances (x, y, z, heading radians; seed).
+struct ParkedInstance {
+    float4 positionHeading;
+    float4 params;
+};
+
+inline float3 parkedPoint(float3 p, ParkedInstance t) {
+    float h = t.positionHeading.w;
+    float2 fwd = float2(sin(h), cos(h)), left = float2(-cos(h), sin(h));
+    return float3(t.positionHeading.xy + fwd * p.x + left * p.y, t.positionHeading.z + p.z);
+}
+
+vertex VertexOut parkedVertex(uint vid [[vertex_id]], uint iid [[instance_id]],
+                              const device MeshVertex *vertices [[buffer(0)]],
+                              constant FrameUniforms &u [[buffer(1)]],
+                              constant DrawUniforms &d [[buffer(2)]],
+                              const device ParkedInstance *instances [[buffer(3)]])
+{
+    MeshVertex v = vertices[vid];
+    ParkedInstance t = instances[iid];
+    float4 local = float4(parkedPoint(v.position.xyz, t), 1.0);
+    float3 n = v.normal.xyz;
+    float h = t.positionHeading.w;
+    float2 fwd = float2(sin(h), cos(h)), left = float2(-cos(h), sin(h));
+    float3 nl = float3(fwd * n.x + left * n.y, n.z);
+    float4 world = d.model * local;
+    VertexOut o;
+    o.position = u.viewProj * world;
+    o.worldPos = world.xyz;
+    o.normal = normalize((d.model * float4(nl, 0.0)).xyz);
+    o.uv = v.uv;
+    o.currentClip = u.viewProjNoJitter * world;
+    o.previousClip = u.prevViewProjNoJitter * (d.prevModel * local);
+    o.seed = t.params.x;
     return o;
 }
 
@@ -553,6 +592,31 @@ fragment GBufferOut sceneFragment(VertexOut in [[stage_in]],
     } else if (kind == kKindPavement) {
         albedo = pavementAlbedo(in.uv, d.emissive.x > 0.5, distance);
         N = float3(0, 0, 1);
+    } else if (kind == kKindParked) {
+        // Generic liveries: white fuselage with a window line and a grey belly, the fin and
+        // engines in one of eight colours. No real airline's marks.
+        const float3 palette[8] = { float3(0.05, 0.10, 0.35), float3(0.55, 0.05, 0.06), float3(0.10, 0.35, 0.65),
+                                    float3(0.05, 0.35, 0.18), float3(0.80, 0.35, 0.05), float3(0.30, 0.10, 0.40),
+                                    float3(0.05, 0.40, 0.42), float3(0.35, 0.06, 0.12) };
+        float3 livery = palette[int(in.seed * 7.99)];
+        float part = in.uv.x, along = in.uv.y;
+        roughness = 0.35;
+        if (part < 0.5) {
+            albedo = float3(0.82, 0.82, 0.80);
+            if (N.z < -0.35) albedo = float3(0.55, 0.56, 0.57);
+            bool cabin = along > 6.0 && along < d.emissive.x * 0.78 && N.z > 0.08 && N.z < 0.32 && fract(along / 0.53) < 0.42;
+            bool cockpit = along > 1.2 && along < 3.2 && N.z > 0.25 && N.z < 0.6;
+            if (cabin || cockpit) { albedo = float3(0.03, 0.04, 0.05); roughness = 0.1; }
+            if (cabin) windowGlow = float3(1.0, 0.85, 0.6) * 1.2e-4;
+        } else if (part < 1.5) {
+            albedo = float3(0.62, 0.63, 0.64);
+        } else if (part < 2.5) {
+            albedo = livery;
+        } else if (part < 3.5) {
+            albedo = mix(float3(0.7, 0.7, 0.7), livery, 0.6);
+        } else {
+            albedo = float3(0.80, 0.80, 0.78);
+        }
     } else if (kind == kKindTree) {
         // Canopy greens from olive to deep green, mottled; brown trunks.
         if (in.uv.x > 0.5) {
@@ -678,6 +742,15 @@ fragment GBufferOut skyFragment(SkyOut in [[stage_in]],
 }
 
 // MARK: - Shadow map
+
+vertex float4 shadowParkedVertex(uint vid [[vertex_id]], uint iid [[instance_id]],
+                                 const device MeshVertex *vertices [[buffer(0)]],
+                                 constant FrameUniforms &u [[buffer(1)]],
+                                 constant DrawUniforms &d [[buffer(2)]],
+                                 const device ParkedInstance *instances [[buffer(3)]])
+{
+    return u.shadowViewProj * (d.model * float4(parkedPoint(vertices[vid].position.xyz, instances[iid]), 1.0));
+}
 
 vertex float4 shadowTreeVertex(uint vid [[vertex_id]], uint iid [[instance_id]],
                                const device float4 *mesh [[buffer(0)]],
