@@ -13,6 +13,8 @@ final class AircraftMesh {
         let texture: (any MTLTexture)?
         var draw: DrawUniforms
         let isGlass: Bool
+        /// Landing gear: not drawn while the gear is up.
+        var isGear = false
     }
 
     private(set) var parts: [Part] = []
@@ -41,7 +43,10 @@ final class AircraftMesh {
         boundsRadius = Float(spec.span / 2) + 4
     }
 
-    init(model: AC3DModel, textureDirectory: URL?, device: any MTLDevice) throws {
+    /// `textureMap` swaps texture names (a livery's sheets for the base model's); parts named in
+    /// `hiddenParts` are left out.
+    init(model: AC3DModel, textureDirectory: URL?, textureMap: [String: String] = [:], hiddenParts: Set<String> = [],
+         device: any MTLDevice) throws {
         // FlightGear AC3D: x runs along the fuselage, y is up, z is the span. Find the nose by
         // where the propeller sits; default to FlightGear's convention (nose toward -x).
         let center = (model.boundsMin + model.boundsMax) / 2
@@ -79,7 +84,7 @@ final class AircraftMesh {
             return t
         }
 
-        for group in model.groups where !group.positions.isEmpty {
+        for group in model.groups where !group.positions.isEmpty && !hiddenParts.contains(group.part) {
             var verts: [MeshVertex] = []
             verts.reserveCapacity(group.positions.count)
             for i in 0..<group.positions.count {
@@ -93,7 +98,7 @@ final class AircraftMesh {
             let material = group.materialIndex < model.materials.count
                 ? model.materials[group.materialIndex]
                 : AC3DModel.Material(name: "", diffuse: SIMD3(0.8, 0.8, 0.8), emissive: .zero, specular: .zero, shininess: 16, transparency: 0)
-            let tex = texture(named: group.texture)
+            let tex = texture(named: group.texture.map { textureMap[$0] ?? $0 })
             // AC3D materials darken textures (FlightGear lights them brighter); keep the tint,
             // drop the darkening, so textured parts show their painted colour.
             var tint = material.diffuse
@@ -104,7 +109,8 @@ final class AircraftMesh {
             let roughness = min(max(sqrt(2 / (material.shininess + 2)), 0.18), 0.9)
             draw.material = SIMD4(roughness, 0, tex == nil ? 0 : 1, SurfaceKind.aircraft.rawValue)
             draw.emissive = SIMD4(material.emissive, 0)
-            parts.append(Part(vertices: buffer, vertexCount: verts.count, texture: tex, draw: draw, isGlass: isGlass))
+            parts.append(Part(vertices: buffer, vertexCount: verts.count, texture: tex, draw: draw, isGlass: isGlass,
+                              isGear: group.part == "gear"))
         }
     }
 }

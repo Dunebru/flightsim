@@ -31,6 +31,9 @@ public struct AC3DModel: Sendable {
         public var texture: String?
         public var materialIndex: Int
         public var twoSided: Bool
+        /// The part these triangles belong to, from the object names (see `parse(_:part:)`);
+        /// empty when parts are not asked for.
+        public var part: String = ""
         public var positions: [SIMD3<Float>] = []
         public var normals: [SIMD3<Float>] = []
         public var uvs: [SIMD2<Float>] = []
@@ -44,6 +47,22 @@ public struct AC3DModel: Sendable {
     public var boundsMax = SIMD3<Float>(repeating: -.greatestFiniteMagnitude)
 
     public var triangleCount: Int { groups.reduce(0) { $0 + $1.triangleCount } }
+
+    /// This model with another's groups added (the other's materials appended), for models
+    /// FlightGear assembles from several files at one origin (an airframe and its engines).
+    public func merged(with other: AC3DModel) -> AC3DModel {
+        var m = self
+        let offset = m.materials.count
+        m.materials += other.materials
+        m.groups += other.groups.map { g in
+            var g = g
+            g.materialIndex += offset
+            return g
+        }
+        m.boundsMin = simd_min(m.boundsMin, other.boundsMin)
+        m.boundsMax = simd_max(m.boundsMax, other.boundsMax)
+        return m
+    }
 }
 
 public enum AC3DError: Error, Equatable {
@@ -56,7 +75,10 @@ public enum AC3DError: Error, Equatable {
 /// line surfaces are skipped, and smooth-shaded surfaces get averaged normals within the
 /// object's crease angle.
 public enum AC3DParser {
-    public static func parse(_ text: String) throws -> AC3DModel {
+    /// `part` names the part an object belongs to from its name (a child object inherits its
+    /// parent's part when it returns ""), so callers can keep, hide or animate pieces such as
+    /// landing gear. By default everything is one part.
+    public static func parse(_ text: String, part: (String) -> String = { _ in "" }) throws -> AC3DModel {
         var reader = LineReader(text)
         guard let header = reader.next(), header.hasPrefix("AC3D") else { throw AC3DError.notAC3D }
         var model = AC3DModel()
@@ -67,7 +89,7 @@ public enum AC3DParser {
                 _ = reader.next()
                 model.materials.append(try parseMaterial(line, lineNumber: reader.lineNumber))
             } else if line.hasPrefix("OBJECT") {
-                try parseObject(&reader, parent: matrix_identity_float4x4, model: &model, groupIndex: &groupIndex)
+                try parseObject(&reader, parent: matrix_identity_float4x4, parentPart: "", part: part, model: &model, groupIndex: &groupIndex)
             } else {
                 _ = reader.next()
             }
@@ -108,6 +130,7 @@ public enum AC3DParser {
         var texture: String?
         var material: Int
         var twoSided: Bool
+        var part: String
     }
 
     private struct Surface {
@@ -122,6 +145,8 @@ public enum AC3DParser {
     static func parseObject(
         _ reader: inout LineReader,
         parent: simd_float4x4,
+        parentPart: String,
+        part: (String) -> String,
         model: inout AC3DModel,
         groupIndex: inout [GroupKey: Int]
     ) throws {
@@ -134,12 +159,17 @@ public enum AC3DParser {
         var crease: Float = 61
         var vertices: [SIMD3<Float>] = []
         var surfaces: [Surface] = []
+        var objectPart = parentPart
 
         while let line = reader.next() {
             let tokens = line.split(separator: " ")
             guard let keyword = tokens.first else { continue }
             switch keyword {
-            case "name", "url", "subdiv", "hidden", "locked", "folded":
+            case "name":
+                let name = line.split(separator: "\"", omittingEmptySubsequences: false).dropFirst().first.map(String.init) ?? ""
+                let p = part(name)
+                if !p.isEmpty { objectPart = p }
+            case "url", "subdiv", "hidden", "locked", "folded":
                 continue
             case "data":
                 // A block of exactly N characters follows, possibly across lines.
@@ -184,14 +214,14 @@ public enum AC3DParser {
             case "kids":
                 let local = transform(rotation: rotation, location: location)
                 let world = parent * local
-                emit(vertices: vertices, surfaces: surfaces, transform: world, texture: texture,
+                emit(vertices: vertices, surfaces: surfaces, transform: world, texture: texture, part: objectPart,
                      texrep: texrep, texoff: texoff, crease: crease, model: &model, groupIndex: &groupIndex)
                 let kids = tokens.count > 1 ? Int(tokens[1]) ?? 0 : 0
                 for _ in 0..<kids {
                     guard let next = reader.peek(), next.hasPrefix("OBJECT") else {
                         throw AC3DError.malformed(line: reader.lineNumber, "expected \(kids) child objects")
                     }
-                    try parseObject(&reader, parent: world, model: &model, groupIndex: &groupIndex)
+                    try parseObject(&reader, parent: world, parentPart: objectPart, part: part, model: &model, groupIndex: &groupIndex)
                 }
                 return
             default:
@@ -240,7 +270,7 @@ public enum AC3DParser {
 
     private static func emit(
         vertices: [SIMD3<Float>], surfaces: [Surface], transform: simd_float4x4,
-        texture: String?, texrep: SIMD2<Float>, texoff: SIMD2<Float>, crease: Float,
+        texture: String?, part: String, texrep: SIMD2<Float>, texoff: SIMD2<Float>, crease: Float,
         model: inout AC3DModel, groupIndex: inout [GroupKey: Int]
     ) {
         guard !vertices.isEmpty, !surfaces.isEmpty else { return }
@@ -262,14 +292,14 @@ public enum AC3DParser {
         let cosCrease = cos(crease * .pi / 180)
 
         for (f, s) in surfaces.enumerated() where s.isPolygon && s.refs.count >= 3 {
-            let key = GroupKey(texture: texture, material: s.material, twoSided: s.twoSided)
+            let key = GroupKey(texture: texture, material: s.material, twoSided: s.twoSided, part: part)
             let g: Int
             if let existing = groupIndex[key] {
                 g = existing
             } else {
                 g = model.groups.count
                 groupIndex[key] = g
-                model.groups.append(AC3DModel.Group(texture: texture, materialIndex: s.material, twoSided: s.twoSided))
+                model.groups.append(AC3DModel.Group(texture: texture, materialIndex: s.material, twoSided: s.twoSided, part: part))
             }
             let n0 = faceNormals[f]
             func corner(_ r: (index: Int, uv: SIMD2<Float>)) -> (SIMD3<Float>, SIMD3<Float>, SIMD2<Float>) {

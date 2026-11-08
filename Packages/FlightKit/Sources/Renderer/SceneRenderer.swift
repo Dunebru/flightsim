@@ -77,6 +77,13 @@ public final class SceneRenderer {
     /// Per-frame buffers for the moving airliners' lights (three, so the GPU can still read the
     /// previous frames').
     private var trafficLightRing: [any MTLBuffer] = []
+    /// The A320 for parked and moving airliners, once loaded (the generic shapes until then),
+    /// and per-frame instance buffers for it.
+    private var fleet: AirlinerFleet?
+    private var fleetRing: [any MTLBuffer] = []
+    /// Airliners nearer than this (m) get the full model; the rest the simplified one.
+    public var fleetDetailDistance: Double = 300
+    public var fleetTriangles: (full: Int, distant: Int) { (fleet?.fullTriangles ?? 0, fleet?.distantTriangles ?? 0) }
     // Stars
     private let starPipeline: any MTLRenderPipelineState
     private var stars: (buffer: any MTLBuffer, count: Int)?
@@ -521,6 +528,8 @@ public final class SceneRenderer {
         cbAtmosphere.commit()
         signposter.endInterval("Encode atmosphere", encodeAtmosphere)
 
+        let fleetFrames = fleetFrame(scene, camera: camera, offset: offset)
+
         // World shadows: buildings cast onto the ground and each other in a square around the
         // view, centred 450 m ahead of the camera and snapped to whole texels so edges hold still.
         var worldShadowOn = false
@@ -584,7 +593,17 @@ public final class SceneRenderer {
                 }
                 // Parked airliners cast.
                 e.setRenderPipelineState(shadowParkedPipeline)
-                for airport in airports {
+                if let fleet {
+                    for f in fleetFrames {
+                        var d = DrawUniforms()
+                        d.model = f.airport.model(relativeTo: camera, offset: offset)
+                        e.setVertexBytes(&d, length: MemoryLayout<DrawUniforms>.stride, index: 2)
+                        e.setVertexBuffer(fleet.shadow.buffer, offset: 0, index: 0)
+                        e.setVertexBuffer(f.buffer, offset: f.first * MemoryLayout<SIMD8<Float>>.stride, index: 3)
+                        e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: fleet.shadow.count, instanceCount: f.total)
+                    }
+                }
+                for airport in airports where fleet == nil {
                     var d = DrawUniforms()
                     d.model = airport.model(relativeTo: camera, offset: offset)
                     e.setVertexBytes(&d, length: MemoryLayout<DrawUniforms>.stride, index: 2)
@@ -634,7 +653,7 @@ public final class SceneRenderer {
                 e.setCullMode(.none)
                 e.setDepthBias(1, slopeScale: 2, clamp: 0.01)
                 e.setVertexBytes(&u, length: MemoryLayout<FrameUniforms>.stride, index: 1)
-                for part in aircraft.parts where !part.isGlass {
+                for part in aircraft.parts where !part.isGlass && (scene.aircraftGearDown || !part.isGear) {
                     var d = part.draw
                     d.model = aircraftModel
                     e.setVertexBuffer(part.vertices, offset: 0, index: 0)
@@ -763,7 +782,27 @@ public final class SceneRenderer {
             var parked = 0
             e.setRenderPipelineState(parkedPipeline)
             e.setFragmentTexture(dummyTexture, index: 0)
-            for airport in airports {
+            if let fleet {
+                for f in fleetFrames {
+                    let model = f.airport.model(relativeTo: camera, offset: offset)
+                    let prev = f.airport.model(relativeTo: previousCam, offset: offset)
+                    for run in f.runs {
+                        e.setVertexBuffer(f.buffer, offset: run.start * MemoryLayout<SIMD8<Float>>.stride, index: 3)
+                        for g in run.lod == 0 ? fleet.full : fleet.distant {
+                            var d = g.draw
+                            d.model = model
+                            d.prevModel = reset ? model : prev
+                            e.setVertexBuffer(g.buffer, offset: 0, index: 0)
+                            e.setVertexBytes(&d, length: MemoryLayout<DrawUniforms>.stride, index: 2)
+                            e.setFragmentBytes(&d, length: MemoryLayout<DrawUniforms>.stride, index: 2)
+                            e.setFragmentTexture(g.textureName.flatMap { fleet.textures[run.livery][$0] } ?? dummyTexture, index: 0)
+                            e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: g.count, instanceCount: run.count)
+                        }
+                        parked += run.count
+                    }
+                }
+            }
+            for airport in airports where fleet == nil {
                 guard simd_distance(airport.origin + offset, camera) < 12_000 else { continue }
                 let model = airport.model(relativeTo: camera, offset: offset)
                 let prev = airport.model(relativeTo: previousCam, offset: offset)
@@ -784,7 +823,7 @@ public final class SceneRenderer {
                 }
             }
             // Moving traffic: on approach it can be well beyond the parked aircraft's 12 km.
-            for airport in airports {
+            for airport in airports where fleet == nil {
                 guard let moving = scene.traffic[airport.name], simd_distance(airport.origin + offset, camera) < 40_000 else { continue }
                 let model = airport.model(relativeTo: camera, offset: offset)
                 let prev = airport.model(relativeTo: previousCam, offset: offset)
@@ -839,7 +878,7 @@ public final class SceneRenderer {
                 e.setDepthBias(0, slopeScale: 0, clamp: 0)
             }
             if let aircraft, scene.showAircraft {
-                for part in aircraft.parts where !part.isGlass {
+                for part in aircraft.parts where !part.isGlass && (scene.aircraftGearDown || !part.isGear) {
                     var d = part.draw
                     d.model = aircraftModel
                     d.prevModel = aircraftPrev
@@ -914,7 +953,7 @@ public final class SceneRenderer {
             if let aircraft, scene.showAircraft {
                 e.setRenderPipelineState(glassPipeline)
                 e.setDepthStencilState(depthTestOnly)
-                for part in aircraft.parts where part.isGlass {
+                for part in aircraft.parts where part.isGlass && (scene.aircraftGearDown || !part.isGear) {
                     var d = part.draw
                     d.model = aircraftModel
                     d.prevModel = aircraftPrev
@@ -1094,8 +1133,62 @@ public final class SceneRenderer {
     }
 
     /// Replaces the aircraft (models load in the background after the first frame).
-    public func setAircraft(_ model: AC3DModel, textures: URL?) throws {
-        aircraft = try AircraftMesh(model: model, textureDirectory: textures, device: device)
+    /// Draws every parked and moving airliner with this model (the A320) and its liveries.
+    public func setAirliners(_ model: AC3DModel, directory: URL) throws {
+        fleet = try AirlinerFleet(model: model, directory: directory, device: device)
+    }
+
+    /// This frame's airliners at each airport, sorted into (level of detail, livery) runs in a
+    /// ring buffer: per airport its first instance and, per run, offset and count.
+    private struct FleetFrame {
+        let airport: AirportRenderer
+        let buffer: any MTLBuffer
+        let first: Int
+        let total: Int
+        var runs: [(lod: Int, livery: Int, start: Int, count: Int)]
+    }
+
+    private func fleetFrame(_ scene: SceneDescription, camera: SIMD3<Double>, offset: SIMD3<Double>) -> [FleetFrame] {
+        guard let fleet else { return [] }
+        if fleetRing.isEmpty {
+            fleetRing = (0..<3).compactMap { _ in device.makeBuffer(length: 4_096 * MemoryLayout<SIMD8<Float>>.stride, options: .storageModeShared) }
+        }
+        guard !fleetRing.isEmpty else { return [] }
+        let ring = fleetRing[frameIndex % fleetRing.count]
+        let base = ring.contents().bindMemory(to: SIMD8<Float>.self, capacity: 4_096)
+        var cursor = 0
+        var frames: [FleetFrame] = []
+        for airport in airports {
+            let distance = simd_distance(airport.origin + offset, camera)
+            var all: [SIMD8<Float>] = distance < 12_000 ? airport.parkedInstances : []
+            if let moving = scene.traffic[airport.name], distance < 40_000 { all += moving.narrow + moving.wide }
+            guard !all.isEmpty else { continue }
+            var buckets = [[SIMD8<Float>]](repeating: [], count: 2 * fleet.liveryCount)
+            for inst in all {
+                let local = SIMD3<Double>(Double(inst[0]), Double(inst[1]), Double(inst[2]))
+                let world = airport.origin + offset + airport.rotation * local
+                let lod = simd_distance(world, camera) < fleetDetailDistance ? 0 : 1
+                let livery = min(Int(inst[4] * Float(fleet.liveryCount)), fleet.liveryCount - 1)
+                buckets[lod * fleet.liveryCount + livery].append(inst)
+            }
+            let first = cursor
+            var runs: [(Int, Int, Int, Int)] = []
+            for (k, bucket) in buckets.enumerated() where !bucket.isEmpty {
+                let n = min(bucket.count, 4_096 - cursor)
+                guard n > 0 else { break }
+                bucket.withUnsafeBufferPointer { (base + cursor).update(from: $0.baseAddress!, count: n) }
+                runs.append((k / fleet.liveryCount, k % fleet.liveryCount, cursor, n))
+                cursor += n
+            }
+            frames.append(FleetFrame(airport: airport, buffer: ring, first: first, total: cursor - first, runs: runs))
+        }
+        return frames
+    }
+
+    public func setAircraft(_ model: AC3DModel, textures: URL?, textureMap: [String: String] = [:],
+                            hiddenParts: Set<String> = []) throws {
+        aircraft = try AircraftMesh(model: model, textureDirectory: textures, textureMap: textureMap, hiddenParts: hiddenParts,
+                                    device: device)
         previousCamera = nil
     }
 

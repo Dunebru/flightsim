@@ -33,8 +33,9 @@ nonisolated struct CameraRig {
     /// eye behind the windscreen, a right-side cabin window over the wing, a longer chase).
     mutating func configure(forAircraft id: String) {
         if id == "A320" {
-            eyeOffset = SIMD3(13.4, 0.55, 4.4)
-            wingOffset = SIMD3(-9.0, -2.3, 4.2)
+            // The FlightGear A320 is centred on its length: nose at +18.8 m.
+            eyeOffset = SIMD3(15.8, 0.55, 4.7)
+            wingOffset = SIMD3(-1.5, -2.3, 4.6)
             wingLook = SIMD3(0.45, -1.0, -0.14)
             orbitDistance = 60
         } else {

@@ -483,16 +483,25 @@ inline float3 facadeAlbedo(float code, float2 uv, float3 N, thread float &roughn
         if (uv.y < -0.5) return float3(0.7, 0.7, 0.68);
         return fract(uv.x / 0.72) < 0.5 ? float3(0.85, 0.28, 0.04) : float3(0.82, 0.82, 0.80);
     }
-    if (N.z > 0.7) {
+    if (N.z > 0.7 && code != 7.0) {
         roughness = 0.9;
         return float3(0.36, 0.35, 0.33) * (0.85 + 0.3 * fbm(uv * 0.05, 3));
     }
     if (code == 7.0) {
-        // Boarding bridge: light grey cladding with a band of windows.
-        bool window = uv.y > 1.1 && uv.y < 2.1 && fract(uv.x / 1.4) > 0.15;
-        roughness = window ? 0.15 : 0.5;
-        glow = window ? float3(1.0, 0.85, 0.6) * 1.5e-4 : float3(0.0);
-        return window ? float3(0.05, 0.06, 0.07) : float3(0.62, 0.63, 0.64);
+        // Boarding bridges and floodlight masts. uv.y: the canopy's rubber (-100), painted steel
+        // for columns, beams, bogie and masts (-1), roofs (-2), else metres above the floor.
+        if (uv.y < -50.0) { roughness = 0.9; return float3(0.035, 0.035, 0.035); }
+        if (uv.y < -1.5) { roughness = 0.7; return float3(0.48, 0.49, 0.50); }
+        if (uv.y < -0.5) { roughness = 0.55; return float3(0.52, 0.53, 0.54) * (0.92 + 0.08 * fbm(uv * 3.0, 2)); }
+        // Ribbed cladding (0.3 m flutes) with a glazed band from 0.9 m to 2.3 m, 1.2 m panes.
+        bool window = uv.y > 0.9 && uv.y < 2.3 && fract(uv.x / 1.2) > 0.08;
+        bool trim = abs(uv.y - 0.85) < 0.05 || abs(uv.y - 2.35) < 0.05;
+        roughness = window ? 0.08 : 0.45;
+        glow = window ? float3(1.0, 0.86, 0.62) * 1.6e-4 : float3(0.0);
+        if (window) return float3(0.035, 0.045, 0.055);
+        if (trim) return float3(0.30, 0.31, 0.32);
+        float flute = 0.5 + 0.5 * cos(uv.x * 6.2831 / 0.3);
+        return float3(0.76, 0.77, 0.78) * (0.94 + 0.06 * flute);
     }
     if (code == 6.0) { roughness = 0.06; return float3(0.025, 0.035, 0.04); }   // tower cab glass
     if (code == 5.0) { roughness = 0.8; return float3(0.62, 0.60, 0.56); }      // tower shaft

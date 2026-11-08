@@ -181,9 +181,10 @@ final class WorldEngine: NSObject {
         renderer.settings.renderScale = upscaler == .off ? 1.0 : 0.67
     }
 
-    /// Which aircraft to draw: "c172p" (the FlightGear model) or "A320" (the generic narrowbody).
+    /// Which aircraft to draw: "c172p" or "A320" (both FlightGear models).
     @ObservationIgnored private var aircraftID = "c172p"
     @ObservationIgnored private var c172: AC3DModel?
+    @ObservationIgnored private var a320: AC3DModel?
 
     private func loadAircraft() {
         guard let directory = Bundle.main.resourceURL?.appendingPathComponent("Bundle/Aircraft/c172p") else { return }
@@ -195,6 +196,17 @@ final class WorldEngine: NSObject {
             self?.c172 = model
             if self?.aircraftID == "c172p" { self?.applyAircraft() }
         }
+        guard let a320Directory = Bundle.main.resourceURL?.appendingPathComponent("Bundle/Aircraft/A320") else { return }
+        Task { [weak self] in
+            guard let model = await Self.parseA320(a320Directory) else { return }
+            self?.a320 = model
+            if self?.aircraftID == "A320" { self?.applyAircraft() }
+        }
+    }
+
+    @concurrent
+    private nonisolated static func parseA320(_ directory: URL) async -> AC3DModel? {
+        try? A320Model.load(from: directory)
     }
 
     /// Draws the aircraft for a profile (the C172 once its model has loaded).
@@ -207,7 +219,12 @@ final class WorldEngine: NSObject {
     private func applyAircraft() {
         do {
             if aircraftID == "A320" {
-                try renderer?.setGenericAirliner()
+                if let a320, let directory = Bundle.main.resourceURL?.appendingPathComponent("Bundle/Aircraft/A320") {
+                    try renderer?.setAircraft(a320, textures: directory, textureMap: A320Model.liveries[0].textures,
+                                              hiddenParts: ["hidden"])
+                } else {
+                    try renderer?.setGenericAirliner()    // until the model has loaded
+                }
             } else if let c172, let directory = Bundle.main.resourceURL?.appendingPathComponent("Bundle/Aircraft/c172p") {
                 try renderer?.setAircraft(c172, textures: directory)
             }

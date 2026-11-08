@@ -232,6 +232,8 @@ public struct SceneDescription: Sendable {
     public var showGround = true
     public var showRunway = true
     public var showAircraft = true
+    /// The aircraft's gear is down (its gear parts are drawn).
+    public var aircraftGearDown = true
     /// Added to every world position (camera included). Used by the floating-origin test.
     public var worldOffset = SIMD3<Double>.zero
     /// Cloud layers to draw (at most three are used, lowest first).

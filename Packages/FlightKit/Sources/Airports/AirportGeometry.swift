@@ -93,7 +93,7 @@ public struct AirportGeometry: Sendable {
         for h in site.layout.holdPositions { hold(h, site, into: &g.yellowPaint) }
         for s in site.layout.stands where s.line.count >= 2 { leadIn(s, site, into: &g.yellowPaint) }
         for b in site.layout.buildings { building(b, site, into: &g) }
-        for line in jetBridges(site) { bridge(line, site, into: &g.bridges) }
+        for run in jetBridges(site) { bridge(run, site, into: &g.bridges) }
         for w in site.layout.windsocks ?? [] { windsock(site.xy(w), site, into: &g.windsocks) }
         for c in AirportLights.mastPositions(site) { mast(c, site, into: &g.bridges) }
         return g
@@ -367,19 +367,40 @@ public struct AirportGeometry: Sendable {
 
     // MARK: Boarding bridges and windsocks
 
-    /// Mapped bridges, plus one for every stand that stops within 60 m of a terminal and has no
-    /// mapped bridge: from the nearest terminal wall to the aircraft's forward left door (about
-    /// 4 m behind and 2.5 m left of the stop position).
-    public static func jetBridges(_ site: AirportSite) -> [[SIMD2<Double>]] {
-        var out = (site.layout.jetBridges ?? []).map { $0.map(site.xy) }
+    /// Where a parked A320's forward left door is at a stand: 1.6 m ahead of the nose wheel (on the
+    /// stand's point) and 2 m left of the centreline, its sill 3.4 m up; and the
+    /// aircraft's heading and left unit vectors.
+    static func doorAt(_ stand: Stand, _ site: AirportSite) -> (door: SIMD2<Double>, forward: SIMD2<Double>, left: SIMD2<Double>)? {
+        guard stand.line.count >= 2 else { return nil }
+        // The same reference the parked aircraft use: the stand's mapped point, heading along the
+        // last stretch of its lead-in line.
+        let pts = stand.line.map(site.xy)
+        let stop = site.xy(stand.position), dir = simd_normalize(pts[pts.count - 1] - pts[pts.count - 2])
+        let left = SIMD2(-dir.y, dir.x)
+        return (stop + dir * 1.6 + left * 2.0, dir, left)
+    }
+
+    /// A boarding bridge: from a point on the terminal to a stand's door.
+    public struct BridgeRun: Sendable {
+        public var terminal: SIMD2<Double>
+        public var door: SIMD2<Double>
+        /// The parked aircraft's forward and left directions (the cab turns to face its side).
+        public var forward: SIMD2<Double>
+        public var left: SIMD2<Double>
+    }
+
+    /// One bridge for every stand whose door is 8 to 60 m from a terminal wall: from the nearest
+    /// point of the wall (or from a mapped bridge's terminal end, when one serves this stand).
+    public static func jetBridges(_ site: AirportSite) -> [BridgeRun] {
+        let mapped = (site.layout.jetBridges ?? []).map { $0.map(site.xy) }.filter { $0.count >= 2 }
         let terminals = site.layout.buildings.filter { $0.kind == .terminal }.map { Polygon2D.open($0.outer.map(site.xy)) }
-        let mappedEnds = out.compactMap(\.last)
-        for s in site.layout.stands where s.line.count >= 2 {
-            let pts = s.line.map(site.xy)
-            let stop = pts[pts.count - 1], dir = simd_normalize(stop - pts[pts.count - 2])
-            let left = SIMD2(-dir.y, dir.x)
-            let door = stop - dir * 4 + left * 2.5
-            if mappedEnds.contains(where: { simd_distance($0, door) < 25 }) { continue }
+        var out: [BridgeRun] = []
+        for s in site.layout.stands {
+            guard let (door, forward, left) = doorAt(s, site) else { continue }
+            if let m = mapped.first(where: { simd_distance($0.last!, door) < 25 }) {
+                out.append(BridgeRun(terminal: m[0], door: door, forward: forward, left: left))
+                continue
+            }
             var best: (SIMD2<Double>, Double) = (.zero, .infinity)
             for ring in terminals {
                 for i in 0..<ring.count {
@@ -390,60 +411,134 @@ public struct AirportGeometry: Sendable {
                     if d < best.1 { best = (q, d) }
                 }
             }
-            guard best.1 < 60, best.1 > 6 else { continue }
-            out.append([best.0, door])
+            guard best.1 < 60, best.1 > 8 else { continue }
+            out.append(BridgeRun(terminal: best.0, door: door, forward: forward, left: left))
         }
         return out
     }
 
-    /// A boarding bridge: a 3 m by 3 m tunnel at floor height 3.2 m, a support leg near the
-    /// aircraft end.
-    static func bridge(_ line: [SIMD2<Double>], _ site: AirportSite, into m: inout MeshData) {
-        guard line.count >= 2 else { return }
-        let floor = 3.2, height = 3.0, half = 1.5
-        func box(_ a: SIMD2<Double>, _ b: SIMD2<Double>, z0: Double, z1: Double, half: Double) {
-            let d = b - a, len = simd_length(d)
-            guard len > 0.1 else { return }
-            let f = d / len, n = SIMD2(-f.y, f.x)
-            let base = site.z((a + b) / 2)
-            let corners = [a + n * half, b + n * half, b - n * half, a - n * half]
-            func p(_ q: SIMD2<Double>, _ z: Double) -> SIMD3<Double> { SIMD3(q.x, q.y, base + z) }
-            // Four sides, uv in metres.
-            let sides: [(Int, Int, SIMD2<Double>)] = [(0, 1, n), (1, 2, f), (2, 3, -n), (3, 0, -f)]
-            for (i, j, out) in sides {
-                let w = simd_distance(corners[i], corners[j])
-                let normal = SIMD3(out.x, out.y, 0)
-                m.add(p(corners[i], z0), normal, SIMD2(0, 0)); m.add(p(corners[j], z0), normal, SIMD2(w, 0)); m.add(p(corners[j], z1), normal, SIMD2(w, z1 - z0))
-                m.add(p(corners[i], z0), normal, SIMD2(0, 0)); m.add(p(corners[j], z1), normal, SIMD2(w, z1 - z0)); m.add(p(corners[i], z1), normal, SIMD2(0, z1 - z0))
-            }
-            let up = SIMD3<Double>(0, 0, 1)
-            m.add(p(corners[0], z1), up, .zero); m.add(p(corners[1], z1), up, .zero); m.add(p(corners[2], z1), up, .zero)
-            m.add(p(corners[0], z1), up, .zero); m.add(p(corners[2], z1), up, .zero); m.add(p(corners[3], z1), up, .zero)
+    // Shading codes in uv.y for the bridge facade: >= 0 cladding (metres above the floor, for
+    // the window band), -1 steel (columns, beams, bogie), -100 the cab's rubber canopy.
+    static let steel = -1.0, rubber = -100.0
+
+    /// A box whose floor runs from `a` to `b` (3D, may slope), `half` wide each side, `height` tall.
+    static func prism(_ a: SIMD3<Double>, _ b: SIMD3<Double>, half: Double, height: Double, code: Double?, into m: inout MeshData) {
+        let d2 = SIMD2(b.x - a.x, b.y - a.y)
+        let len = simd_length(d2)
+        guard len > 0.05 else { return }
+        let f = d2 / len, n = SIMD2(-f.y, f.x)
+        let up = SIMD3<Double>(0, 0, height)
+        func q(_ p: SIMD3<Double>, _ side: Double) -> SIMD3<Double> { p + SIMD3(n.x, n.y, 0) * side }
+        let a0 = q(a, half), a1 = q(a, -half), b0 = q(b, half), b1 = q(b, -half)
+        func uv(_ along: Double, _ h: Double) -> SIMD2<Double> { SIMD2(along, code ?? h) }
+        func quad(_ p0: SIMD3<Double>, _ p1: SIMD3<Double>, _ p2: SIMD3<Double>, _ p3: SIMD3<Double>, _ normal: SIMD3<Double>,
+                  _ t0: SIMD2<Double>, _ t1: SIMD2<Double>, _ t2: SIMD2<Double>, _ t3: SIMD2<Double>) {
+            m.add(p0, normal, t0); m.add(p1, normal, t1); m.add(p2, normal, t2)
+            m.add(p0, normal, t0); m.add(p2, normal, t2); m.add(p3, normal, t3)
         }
-        for i in 0..<(line.count - 1) { box(line[i], line[i + 1], z0: floor, z1: floor + height, half: half) }
-        // Support leg and wheel bogie 4 m from the aircraft end.
-        let end = line[line.count - 1], prev = line[line.count - 2]
-        let leg = end + simd_normalize(prev - end) * 4
-        box(leg - SIMD2(0.3, 0), leg + SIMD2(0.3, 0), z0: 0, z1: floor, half: 0.3)
+        let nl = SIMD3(n.x, n.y, 0), nr = -nl, nf = SIMD3(f.x, f.y, 0)
+        quad(a0, b0, b0 + up, a0 + up, nl, uv(0, 0), uv(len, 0), uv(len, height), uv(0, height))
+        quad(b1, a1, a1 + up, b1 + up, nr, uv(len, 0), uv(0, 0), uv(0, height), uv(len, height))
+        quad(b0, b1, b1 + up, b0 + up, nf, uv(0, 0), uv(half * 2, 0), uv(half * 2, height), uv(0, height))
+        quad(a1, a0, a0 + up, a1 + up, -nf, uv(0, 0), uv(half * 2, 0), uv(half * 2, height), uv(0, height))
+        let roof = SIMD3<Double>(0, 0, 1)
+        quad(a0 + up, b0 + up, b1 + up, a1 + up, roof, SIMD2(0, -2), SIMD2(len, -2), SIMD2(len, -2), SIMD2(0, -2))
+        quad(a1, b1, b0, a0, -roof, uv(0, 0), uv(len, 0), uv(len, 0), uv(0, 0))
     }
 
-    /// A 25 m floodlight mast: a tapered pole and a lamp head.
+    /// A vertical cylinder (sixteen sides) with a top cap.
+    static func cylinder(_ c: SIMD2<Double>, z0: Double, z1: Double, radius: Double, code: Double?, into m: inout MeshData) {
+        let k = 16
+        for i in 0..<k {
+            let a0 = Double(i) / Double(k) * 2 * .pi, a1 = Double(i + 1) / Double(k) * 2 * .pi
+            let n0 = SIMD3(cos(a0), sin(a0), 0), n1 = SIMD3(cos(a1), sin(a1), 0)
+            func p(_ n: SIMD3<Double>, _ z: Double) -> SIMD3<Double> { SIMD3(c.x, c.y, z) + n * radius }
+            let s0 = Double(i) * radius * 0.39, s1 = Double(i + 1) * radius * 0.39
+            let h = z1 - z0
+            m.add(p(n0, z0), n0, SIMD2(s0, code ?? 0)); m.add(p(n1, z0), n1, SIMD2(s1, code ?? 0)); m.add(p(n1, z1), n1, SIMD2(s1, code ?? h))
+            m.add(p(n0, z0), n0, SIMD2(s0, code ?? 0)); m.add(p(n1, z1), n1, SIMD2(s1, code ?? h)); m.add(p(n0, z1), n0, SIMD2(s0, code ?? h))
+            let top = SIMD3<Double>(0, 0, 1)
+            m.add(SIMD3(c.x, c.y, z1), top, SIMD2(0, -2)); m.add(p(n0, z1), top, SIMD2(0, -2)); m.add(p(n1, z1), top, SIMD2(0, -2))
+        }
+    }
+
+    /// An apron-drive boarding bridge: a rotunda drum on a column at the terminal, a two-section
+    /// telescoping tunnel with a window band sloping from the terminal's upper floor to the
+    /// aircraft's sill, a drive column with a wheel bogie under the outer section, and a cab turned
+    /// to meet the door with its dark rubber canopy against the fuselage.
+    static func bridge(_ run: BridgeRun, _ site: AirportSite, into m: inout MeshData) {
+        let ground = site.z(run.door)
+        let terminalFloor = site.z(run.terminal) + 4.4, sill = ground + 3.4
+        // The rotunda stands 2.5 m out from the wall, toward the door.
+        let toDoor = simd_normalize(run.door - run.terminal)
+        let rotunda = run.terminal + toDoor * 2.5
+        cylinder(rotunda, z0: site.z(rotunda), z1: terminalFloor - 0.3, radius: 0.55, code: steel, into: &m)
+        cylinder(rotunda, z0: terminalFloor - 0.3, z1: terminalFloor + 3.1, radius: 2.3, code: nil, into: &m)
+        // The cab: 3.4 m along the fuselage, 2.8 m deep, its face 0.35 m off the door.
+        let cabCentre = run.door + run.left * (0.35 + 1.4)
+        let cabBack = cabCentre + run.left * 1.4
+        let half = run.forward * 1.7
+        prism(SIMD3(cabCentre.x - half.x, cabCentre.y - half.y, sill), SIMD3(cabCentre.x + half.x, cabCentre.y + half.y, sill),
+              half: 1.4, height: 2.9, code: nil, into: &m)
+        // Canopy: a soft dark frame between the cab and the fuselage.
+        let canopy = run.door + run.left * 0.18
+        let ch = run.forward * 1.25
+        prism(SIMD3(canopy.x - ch.x, canopy.y - ch.y, sill + 0.05), SIMD3(canopy.x + ch.x, canopy.y + ch.y, sill + 0.05),
+              half: 0.2, height: 2.4, code: rubber, into: &m)
+        // Tunnel: the outer section from the rotunda, the inner (smaller) sliding out of it to the cab.
+        let start = rotunda + simd_normalize(cabBack - rotunda) * 2.2
+        let length = simd_distance(start, cabBack)
+        guard length > 2 else { return }
+        let dir = (cabBack - start) / length
+        func at(_ s: Double) -> SIMD3<Double> {
+            let p = start + dir * s
+            return SIMD3(p.x, p.y, terminalFloor + (sill - terminalFloor) * (s / length))
+        }
+        let split = length * 0.55
+        prism(at(0), at(split), half: 1.6, height: 3.1, code: nil, into: &m)
+        prism(at(split - 1.5), at(length), half: 1.42, height: 2.8, code: nil, into: &m)
+        // Drive column and bogie 3 m behind the cab.
+        let leg = start + dir * max(length - 3, length * 0.6)
+        let legTop = at(simd_distance(start, leg)).z
+        let side = SIMD2(-dir.y, dir.x)
+        for k in [-1.0, 1.0] {
+            let l = leg + side * (1.1 * k)
+            prism(SIMD3(l.x - dir.x * 0.2, l.y - dir.y * 0.2, site.z(l) + 0.9), SIMD3(l.x + dir.x * 0.2, l.y + dir.y * 0.2, site.z(l) + 0.9),
+                  half: 0.2, height: legTop - site.z(l) - 0.9, code: steel, into: &m)
+        }
+        let bz = site.z(leg)
+        prism(SIMD3(leg.x - dir.x * 1.0, leg.y - dir.y * 1.0, bz + 0.45), SIMD3(leg.x + dir.x * 1.0, leg.y + dir.y * 1.0, bz + 0.45),
+              half: 1.5, height: 0.5, code: steel, into: &m)
+        for k in [-1.0, 1.0] {
+            let w = leg + side * (1.25 * k)
+            prism(SIMD3(w.x - dir.x * 0.45, w.y - dir.y * 0.45, bz), SIMD3(w.x + dir.x * 0.45, w.y + dir.y * 0.45, bz),
+                  half: 0.22, height: 0.9, code: rubber, into: &m)
+        }
+    }
+
+    /// A 25 m high-mast floodlight: a tapered octagonal pole, and a crown ring carrying eight lamp
+    /// boxes angled down.
     static func mast(_ c: SIMD2<Double>, _ site: AirportSite, into m: inout MeshData) {
         let z = site.z(c)
-        func prism(_ half0: Double, _ half1: Double, _ z0: Double, _ z1: Double) {
-            let corners = [SIMD2(1.0, 1.0), SIMD2(-1.0, 1.0), SIMD2(-1.0, -1.0), SIMD2(1.0, -1.0)]
-            for i in 0..<4 {
-                let a = corners[i], b = corners[(i + 1) % 4]
-                let n2 = simd_normalize(a + b)
-                let n = SIMD3(n2.x, n2.y, 0)
-                let p0 = SIMD3(c.x + a.x * half0, c.y + a.y * half0, z + z0), p1 = SIMD3(c.x + b.x * half0, c.y + b.y * half0, z + z0)
-                let p2 = SIMD3(c.x + b.x * half1, c.y + b.y * half1, z + z1), p3 = SIMD3(c.x + a.x * half1, c.y + a.y * half1, z + z1)
-                m.add(p0, n, SIMD2(0, 0)); m.add(p1, n, SIMD2(1, 0)); m.add(p2, n, SIMD2(1, z1 - z0))
-                m.add(p0, n, SIMD2(0, 0)); m.add(p2, n, SIMD2(1, z1 - z0)); m.add(p3, n, SIMD2(0, z1 - z0))
-            }
+        let k = 8
+        for i in 0..<k {
+            let a0 = Double(i) / Double(k) * 2 * .pi, a1 = Double(i + 1) / Double(k) * 2 * .pi
+            let d0 = SIMD2(cos(a0), sin(a0)), d1 = SIMD2(cos(a1), sin(a1))
+            let n = SIMD3(cos((a0 + a1) / 2), sin((a0 + a1) / 2), 0)
+            func p(_ d: SIMD2<Double>, _ r: Double, _ h: Double) -> SIMD3<Double> { SIMD3(c.x + d.x * r, c.y + d.y * r, z + h) }
+            m.add(p(d0, 0.32, 0), n, SIMD2(0, -1)); m.add(p(d1, 0.32, 0), n, SIMD2(1, -1)); m.add(p(d1, 0.13, 24.2), n, SIMD2(1, -1))
+            m.add(p(d0, 0.32, 0), n, SIMD2(0, -1)); m.add(p(d1, 0.13, 24.2), n, SIMD2(1, -1)); m.add(p(d0, 0.13, 24.2), n, SIMD2(0, -1))
         }
-        prism(0.25, 0.12, 0, 24.5)
-        prism(0.9, 0.9, 24.5, 25.3)
+        // Crown: a ring (eight short beams) and the lamps hanging off it, facing out and down.
+        for i in 0..<k {
+            let a = Double(i) / Double(k) * 2 * .pi
+            let d = SIMD2(cos(a), sin(a))
+            let p0 = c + d * 0.1, p1 = c + d * 1.3
+            prism(SIMD3(p0.x, p0.y, z + 24.2), SIMD3(p1.x, p1.y, z + 24.2), half: 0.07, height: 0.15, code: steel, into: &m)
+            let lamp = c + d * 1.25
+            prism(SIMD3(lamp.x - d.x * 0.3, lamp.y - d.y * 0.3, z + 23.6), SIMD3(lamp.x + d.x * 0.3, lamp.y + d.y * 0.3, z + 23.75),
+                  half: 0.35, height: 0.45, code: steel, into: &m)
+        }
     }
 
     /// A windsock: a 6 m pole and a striped cone hanging limp (there is no wind until M7).

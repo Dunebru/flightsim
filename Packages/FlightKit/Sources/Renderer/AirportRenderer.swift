@@ -40,6 +40,8 @@ final class AirportRenderer {
     /// Parked airliners: instance buffers (narrowbody, widebody) with their counts.
     let parkedNarrow: (any MTLBuffer)?, parkedNarrowCount: Int
     let parkedWide: (any MTLBuffer)?, parkedWideCount: Int
+    /// Every parked airliner's instance, for drawing them all as the A320 model.
+    let parkedInstances: [SIMD8<Float>]
 
     /// Building facade codes for the shader (DrawUniforms.emissive.x).
     enum Facade: Float { case terminal = 1, hangar = 2, generic = 3, parking = 4, tower = 5, glass = 6, bridge = 7, windsock = 8 }
@@ -84,6 +86,7 @@ final class AirportRenderer {
         parkedNarrowCount = parked.narrow.count
         parkedWide = instances(parked.wide)
         parkedWideCount = parked.wide.count
+        parkedInstances = parked.narrow + parked.wide
         city = chunks.compactMap { ch in
             guard !ch.indices.isEmpty else { return nil }
             var v = [CompactVertex]()

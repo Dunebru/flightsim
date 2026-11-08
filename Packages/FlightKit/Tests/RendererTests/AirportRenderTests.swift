@@ -32,6 +32,9 @@ struct AirportRenderTests {
             let city = CityGeometry.build(surroundings, site: s) { p in ground.groundZ(atENU: SIMD3(p.x, p.y, 0)) }
             return AirportAssets(site: s, geometry: AirportGeometry.build(s), lights: AirportLights.build(s), city: city)
         }, sceneOrigin: site.frame.origin)
+        // Every airliner as the A320 model.
+        let a320 = RendererTests.repoRoot.appendingPathComponent("Data/Bundle/Aircraft/A320")
+        try r.setAirliners(try A320Model.load(from: a320), directory: a320)
         var s = SceneDescription.phoenixTest(date: TerrainRenderTests.afternoon)
         s.origin = site.frame.origin
         s.showAircraft = aircraft
@@ -207,6 +210,23 @@ struct AirportRenderTests {
         }
     }
 
+    /// Looking straight down on a terminal's gates: every bridge should end at a parked
+    /// aircraft's forward door (or an empty stand).
+    @Test func kphxGatesFromAbove() throws {
+        let site = try AirportSite.load(Self.airportsURL.appendingPathComponent("KPHX.json"))
+        let (r, base) = try Self.scene(site, aircraft: false)
+        let gate = try #require(site.layout.stands.first { $0.line.count >= 2 && $0.ref != nil })
+        let p = site.xy(gate.position)
+        var s = base
+        s.cameraPose = CameraPose(position: site.onSurface(p) + SIMD3(0, 0, 220), forward: SIMD3(0, 0, -1), up: SIMD3(0, 1, 0),
+                                  fovY: 50 * .pi / 180)
+        r.exposureAdaptation = 1
+        try TerrainRenderTests.settle(r, s, limit: .seconds(60))
+        r.resetHistory()
+        let img = try r.renderImage(s, width: 1600, height: 900)
+        try RendererTests.savePNG(img, 1600, 900, name: "kphx-gates-above")
+    }
+
     /// KPHX with its traffic running: an arrival on short final over the city, aircraft taxiing
     /// and lined up, seen from the tower's side of the field.
     @Test func kphxTraffic() throws {
@@ -279,5 +299,13 @@ struct AirportRenderTests {
         print(String(format: "FRAMECOST klax-24r-final 1920x884: GPU frame %.2f ms (stages: %@), terrain drawn %d, city chunks %d",
                      spans.last ?? 0, st.gpuMilliseconds.map { String(format: "%@ %.2f", $0.key, $0.value) }.sorted().joined(separator: ", "),
                      r.terrainDrawn, r.cityChunksDrawn))
+        print("FRAMECOST airliners drawn \(r.parkedDrawn), A320 triangles full \(r.fleetTriangles.full), distant \(r.fleetTriangles.distant)")
+        // At a gate among the parked aircraft, the heaviest airliner view.
+        var gate = base
+        gate.cameraPose = CameraPose(position: SIMD3(-200, -1_300, 60), forward: simd_normalize(SIMD3(0, 1, -0.25)), up: SIMD3(0, 0, 1),
+                                     fovY: 60 * .pi / 180)
+        try TerrainRenderTests.settle(r, gate, limit: .seconds(60))
+        for _ in 0..<60 { r.render(gate, to: target).waitUntilCompleted() }
+        print(String(format: "FRAMECOST klax terminals 1920x884: GPU frame %.2f ms, airliners %d", r.stats.gpuFrameMilliseconds, r.parkedDrawn))
     }
 }

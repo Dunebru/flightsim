@@ -289,6 +289,7 @@ final class FlightSession {
         let height = max(0, (s.heightAboveGroundFeet - physics.restingHeightFeet) * 0.3048)
         scene.aircraftPosition = SIMD3(base.x, base.y, base.z + height)
         scene.aircraftHeading = s.heading
+        scene.aircraftGearDown = s.gearPosition > 0.5
         scene.aircraftRoll = s.roll
         scene.aircraftPitch = s.pitch
 

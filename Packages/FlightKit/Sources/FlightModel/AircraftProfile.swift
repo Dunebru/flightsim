@@ -34,8 +34,8 @@ public struct AircraftProfile: Sendable, Hashable, Identifiable {
     public static let a320 = AircraftProfile(
         id: "A320", name: "Airbus A320",
         flapLabels: ["0", "1", "2", "3", "FULL"], flapCommands: [0, 10.0 / 40, 15.0 / 40, 20.0 / 40, 1],
-        hasSpoilers: true, retractableGear: true, isTurbine: true, visualIsStandIn: true,
-        fidelityNote: "Generic JSBSim A320, tuned (see TUNING.md): no slats, no fly-by-wire. Drawn as a generic narrowbody shape until the fleet arrives in M6.",
+        hasSpoilers: true, retractableGear: true, isTurbine: true, visualIsStandIn: false,
+        fidelityNote: "Generic JSBSim A320, tuned (see TUNING.md): no slats, no fly-by-wire. Drawn with the FlightGear A320 model (GPL) in American colours; no cockpit panel yet.",
         stallWarningAlpha: 14,
         approachKnots: 140, approachFlapIndex: 4
     )
