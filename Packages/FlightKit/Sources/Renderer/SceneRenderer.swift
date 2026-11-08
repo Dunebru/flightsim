@@ -140,6 +140,14 @@ public final class SceneRenderer {
     /// animation hides.
     private var partTransforms: [String: simd_float4x4] = [:]
     private var hiddenParts: Set<String> = []
+    /// The world shadow map's last redraw: where it was centred (scene frame), the sun, its half width.
+    private var lastWorldShadow: (centre: SIMD3<Double>, sun: SIMD3<Float>, half: Double)?
+    private var worldShadowRedraw = true
+    private var cloudShadowWorldCentre: SIMD2<Double>?
+    private var cloudShadowRedraw = true
+    private var cloudShadowLayers: [CloudLayer] = []
+    private var cloudShadowSun = SIMD4<Float>.zero
+    private var previousPartTransforms: [String: simd_float4x4] = [:]
     private var interiorVisible = true
     private var spinTurns: [String: Double] = [:]
     private var lastAnimationTime: Double?
@@ -490,8 +498,8 @@ public final class SceneRenderer {
                 * aircraft.modelToBody
             aircraftModel = MatrixMath.translation(relative(aircraftWorld, to: camera)) * orient
             // The cabin and flight deck show only through the windows: not worth drawing from
-            // more than 80 m.
-            interiorVisible = simd_length(relative(aircraftWorld, to: camera)) < 80
+            // more than 35 m (the A320's deck is 440,000 triangles).
+            interiorVisible = simd_length(relative(aircraftWorld, to: camera)) < 35
             if let animation = aircraft.animation {
                 // Spinning parts (fans, wheels, propeller) turn at their property's rpm: keep
                 // each one's revolutions.
@@ -500,7 +508,9 @@ public final class SceneRenderer {
                 lastAnimationTime = now
                 var values = scene.instrumentValues
                 for p in aircraft.spinProperties {
-                    spinTurns[p, default: 0] += (values[p] ?? 0) / 60 * dt
+                    // "spinrate:" overrides the rate a part is seen to turn (a wheel or fan faster
+                    // than about 30 degrees a frame strobes).
+                    spinTurns[p, default: 0] += (values["spinrate:" + p] ?? values[p] ?? 0) / 60 * dt
                     values["spin:" + p] = spinTurns[p]
                 }
                 var cache: [String: simd_float4x4] = [:]
@@ -509,6 +519,7 @@ public final class SceneRenderer {
                     if !animation.isVisible(part: part.animated, values: values) { hidden.insert(part.animated) }
                     cache[part.animated] = animation.transform(part: part.animated, values: values) ?? matrix_identity_float4x4
                 }
+                previousPartTransforms = reset ? cache : partTransforms
                 partTransforms = cache
                 hiddenParts = hidden
             } else {
@@ -545,8 +556,14 @@ public final class SceneRenderer {
                 lutsReady = true
             }
             c.setBytes(&u, length: MemoryLayout<FrameUniforms>.stride, index: 0)
-            dispatch(c, skyViewPipeline, textures: [skyViewLUT, transmittanceLUT, multiScatterLUT], size: SIMD3(192, 108, 1))
-            dispatch(c, aerialPipeline, textures: [aerialVolume, transmittanceLUT, multiScatterLUT], size: SIMD3(32, 32, 1))
+            // The sky changes slowly: its view table every fourth frame, the aerial-perspective
+            // volume (which turns with the view) every other one.
+            if reset || frameIndex % 4 == 0 {
+                dispatch(c, skyViewPipeline, textures: [skyViewLUT, transmittanceLUT, multiScatterLUT], size: SIMD3(192, 108, 1))
+            }
+            if reset || frameIndex % 2 == 0 {
+                dispatch(c, aerialPipeline, textures: [aerialVolume, transmittanceLUT, multiScatterLUT], size: SIMD3(32, 32, 1))
+            }
             c.setComputePipelineState(lightingPipeline)
             c.setBuffer(lightingBuffer, offset: 0, index: 0)
             c.setBytes(&u, length: MemoryLayout<FrameUniforms>.stride, index: 1)
@@ -555,7 +572,7 @@ public final class SceneRenderer {
             c.setTexture(skyViewLUT, index: 0)
             c.setTexture(transmittanceLUT, index: 1)
             c.dispatchThreads(MTLSize(width: 1, height: 1, depth: 1), threadsPerThreadgroup: MTLSize(width: 1, height: 1, depth: 1))
-            if let cloud { encodeCloudShadows(c, cloud: cloud, uniforms: u) }
+            if let cloud, cloudShadowRedraw { encodeCloudShadows(c, cloud: cloud, uniforms: u) }
             c.endEncoding()
         }
         // Terrain: upload finished tiles (mipmaps go into this command buffer) and select the
@@ -586,7 +603,15 @@ public final class SceneRenderer {
             let texel = 2 * half / Double(shadowSize)
             let a = simd_dot(centre, r), b = simd_dot(centre, v)
             centre += r * ((a / texel).rounded() * texel - a) + v * ((b / texel).rounded() * texel - b)
-            let c = SIMD3<Float>(centre - camera)
+            // The map is redrawn every fourth frame, or sooner when the view has moved a tenth
+            // of its width or the sun has moved; between redraws the last one is reused, with
+            // its own projection. Drawing it every frame cost about 12 ms on the phone once
+            // the map widened over the city's trees in flight.
+            let moved = lastWorldShadow.map { simd_distance($0.centre, centre) > half * 0.1 || simd_dot($0.sun, sunDir) < 0.99995 || $0.half != half } ?? true
+            worldShadowRedraw = moved || frameIndex % 4 == 0 || reset
+            if worldShadowRedraw { lastWorldShadow = (centre, sunDir, half) }
+            let mapCentre = lastWorldShadow?.centre ?? centre
+            let c = SIMD3<Float>(mapCentre - camera)
             let lightView = MatrixMath.lookAt(eye: c + sunDir * 3_000, target: c, up: SIMD3<Float>(upHint))
             u.worldShadowViewProj = MatrixMath.orthographic(halfWidth: halfF, halfHeight: halfF, near: 1, far: 6_000) * lightView
             // Bias and normal offset scale with the texel (0.6 to 2.3 m): a fixed bias left acne
@@ -597,7 +622,7 @@ public final class SceneRenderer {
             worldShadowUniforms.shadowViewProj = u.worldShadowViewProj
             worldShadowOn = true
         }
-        if worldShadowOn {
+        if worldShadowOn && worldShadowRedraw {
             let cbWorld = makeCommandBuffer(label: "World shadow")
             let pass = MTLRenderPassDescriptor()
             pass.depthAttachment.texture = worldShadowMap
@@ -665,7 +690,8 @@ public final class SceneRenderer {
                 e.setRenderPipelineState(shadowTreePipeline)
                 for tile in terrainTiles where tile.treeCount > 0 {
                     let rel = relative(tile.centre + offset, to: camera)
-                    guard Double(simd_length(SIMD2(rel.x, rel.y))) - tile.radius < reach * 1.2, let buffer = tile.trees else { continue }
+                    // Trees within 800 m: further out their shadows are a texel or two.
+                    guard Double(simd_length(SIMD2(rel.x, rel.y))) - tile.radius < min(reach * 1.2, 800), let buffer = tile.trees else { continue }
                     var d = DrawUniforms()
                     d.model = MatrixMath.translation(rel)
                     e.setVertexBuffer(treeMesh, offset: 0, index: 0)
@@ -826,7 +852,7 @@ public final class SceneRenderer {
                     let prev = f.airport.model(relativeTo: previousCam, offset: offset)
                     for run in f.runs {
                         e.setVertexBuffer(f.buffer, offset: run.start * MemoryLayout<SIMD8<Float>>.stride, index: 3)
-                        for g in run.lod == 0 ? fleet.full : fleet.distant {
+                        for g in [fleet.full, fleet.distant, fleet.far][run.lod] {
                             var d = g.draw
                             d.model = model
                             d.prevModel = reset ? model : prev
@@ -920,7 +946,8 @@ public final class SceneRenderer {
                     var d = part.draw
                     let pt = part.animated.isEmpty ? matrix_identity_float4x4 : (partTransforms[part.animated] ?? matrix_identity_float4x4)
                     d.model = aircraftModel * pt
-                    d.prevModel = aircraftPrev * pt
+                    // Last frame's pose of the part, so moving parts get true motion vectors.
+                    d.prevModel = aircraftPrev * (part.animated.isEmpty ? pt : (previousPartTransforms[part.animated] ?? pt))
                     e.setCullMode(part.twoSided ? .none : .front)   // AC3D fronts wind counter-clockwise; Metal's default front is clockwise
                     draw(part.vertices, count: part.vertexCount, d, texture: part.texture)
                 }
@@ -998,7 +1025,8 @@ public final class SceneRenderer {
                     var d = part.draw
                     let pt = part.animated.isEmpty ? matrix_identity_float4x4 : (partTransforms[part.animated] ?? matrix_identity_float4x4)
                     d.model = aircraftModel * pt
-                    d.prevModel = aircraftPrev * pt
+                    // Last frame's pose of the part, so moving parts get true motion vectors.
+                    d.prevModel = aircraftPrev * (part.animated.isEmpty ? pt : (previousPartTransforms[part.animated] ?? pt))
                     e.setCullMode(part.twoSided ? .none : .front)   // AC3D fronts wind counter-clockwise; Metal's default front is clockwise
                     draw(part.vertices, count: part.vertexCount, d, texture: part.texture)
                 }
@@ -1163,6 +1191,11 @@ public final class SceneRenderer {
     /// True while terrain needs more memory than its budget (detail is backing off).
     public var terrainOverBudget: Bool { terrain?.overBudget ?? false }
     /// One line on the streamer's state, for logs and test failures.
+    /// Metal memory in use and the device's recommended working-set limit, MB.
+    public var gpuMemory: (allocated: Double, recommended: Double) {
+        (Double(device.currentAllocatedSize) / 1_048_576, Double(device.recommendedMaxWorkingSetSize) / 1_048_576)
+    }
+
     public var terrainDebug: String {
         guard let t = terrain else { return "no terrain" }
         return String(format: "selected %d, drawn %d, resident %d (%.0f MB, budget %d MB), pending %d, broken %d, detail back-off %.2f",
@@ -1207,11 +1240,12 @@ public final class SceneRenderer {
             var all: [SIMD8<Float>] = distance < 12_000 ? airport.parkedInstances : []
             if let moving = scene.traffic[airport.name], distance < 40_000 { all += moving.narrow + moving.wide }
             guard !all.isEmpty else { continue }
-            var buckets = [[SIMD8<Float>]](repeating: [], count: 2 * fleet.liveryCount)
+            var buckets = [[SIMD8<Float>]](repeating: [], count: 3 * fleet.liveryCount)
             for inst in all {
                 let local = SIMD3<Double>(Double(inst[0]), Double(inst[1]), Double(inst[2]))
                 let world = airport.origin + offset + airport.rotation * local
-                let lod = simd_distance(world, camera) < fleetDetailDistance ? 0 : 1
+                let d = simd_distance(world, camera)
+                let lod = d < fleetDetailDistance ? 0 : (d < 1_200 ? 1 : 2)
                 let livery = min(Int(inst[4] * Float(fleet.liveryCount)), fleet.liveryCount - 1)
                 buckets[lod * fleet.liveryCount + livery].append(inst)
             }
@@ -1290,9 +1324,21 @@ public final class SceneRenderer {
         cu.bounds.z = Float(min(max(reach + 20_000, 40_000), cloudRange))
 
         // Shadow map: centred on the camera, snapped to whole texels so it does not shimmer.
+        // Redrawn every fourth frame (or once the view has moved a tenth of its width); in
+        // between, the last map is reused where it was drawn.
         let texel = cloudShadowExtent / Double(cloudShadowMap.width)
         let camera2 = SIMD2<Double>(pose.position.x, pose.position.y)
-        let centre = (camera2 / texel).rounded(.toNearestOrEven) * texel - camera2
+        let snapped = (camera2 / texel).rounded(.toNearestOrEven) * texel
+        if let w = cloudShadowWorldCentre, frameIndex % 4 != 0, simd_distance(w, snapped) < cloudShadowExtent * 0.1,
+           cloudShadowLayers == scene.clouds, cloudShadowSun == u.sunDirection {
+            cloudShadowRedraw = false
+        } else {
+            cloudShadowWorldCentre = snapped
+            cloudShadowLayers = scene.clouds
+            cloudShadowSun = u.sunDirection
+            cloudShadowRedraw = true
+        }
+        let centre = (cloudShadowWorldCentre ?? snapped) - camera2
         let sun = SIMD3<Double>(Double(u.sunDirection.x), Double(u.sunDirection.y), Double(u.sunDirection.z))
         let sz = max(sun.z, 0.08)
         u.cloudShadow = SIMD4(sun.z > -0.05 ? 1 : 0, Float(1 / cloudShadowExtent), Float(centre.x), Float(centre.y))
@@ -1365,7 +1411,15 @@ public final class SceneRenderer {
             historyValid = false
         }
         cloudHistoryLayers = scene.clouds
-        guard let ct = cloudTargets, let c = cb.makeComputeCommandEncoder() else { return }
+        guard let ct = cloudTargets else { return }
+        // The march runs every other frame; between, the last resolved clouds are composited
+        // again (one frame old at 60 fps).
+        if historyValid && frameIndex % 2 == 1 {
+            compositeClouds(cb, ct.history[cloudHistoryIndex], ct.historyDistance[cloudHistoryIndex], u: &u, targets: t)
+            cb.commit()
+            return
+        }
+        guard let c = cb.makeComputeCommandEncoder() else { return }
         cu.size = SIMD4(Float(size.x), Float(size.y), 1 / Float(size.x), 1 / Float(size.y))
         cu.bounds.w = historyValid ? 0.9 : 0
         c.setComputePipelineState(cloudMarchPipeline)
@@ -1389,7 +1443,12 @@ public final class SceneRenderer {
         c.dispatchThreads(grid, threadsPerThreadgroup: group)
         c.endEncoding()
         cloudHistoryIndex = next
+        compositeClouds(cb, ct.history[next], ct.historyDistance[next], u: &u, targets: t)
+        cb.commit()
+    }
 
+    private func compositeClouds(_ cb: any MTLCommandBuffer, _ radiance: any MTLTexture, _ distance: any MTLTexture,
+                                 u: inout FrameUniforms, targets t: Targets) {
         let pass = MTLRenderPassDescriptor()
         pass.colorAttachments[0].texture = t.hdr
         pass.colorAttachments[0].loadAction = .load
@@ -1397,15 +1456,14 @@ public final class SceneRenderer {
         if let e = cb.makeRenderCommandEncoder(descriptor: pass) {
             e.setRenderPipelineState(cloudCompositePipeline)
             e.setFragmentBytes(&u, length: MemoryLayout<FrameUniforms>.stride, index: 1)
-            e.setFragmentTexture(ct.history[next], index: 0)
-            e.setFragmentTexture(ct.historyDistance[next], index: 1)
+            e.setFragmentTexture(radiance, index: 0)
+            e.setFragmentTexture(distance, index: 1)
             e.setFragmentTexture(t.depth, index: 2)
             e.setFragmentTexture(aerialVolume, index: 3)
             e.setFragmentBuffer(lightingBuffer, offset: 0, index: 2)
             e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
             e.endEncoding()
         }
-        cb.commit()
     }
 
     /// The catalogue stars to draw (from stars.bin).

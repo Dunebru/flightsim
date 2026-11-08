@@ -32,7 +32,7 @@ struct MetricsBar: View {
         .lineLimit(1)
         .padding(.horizontal, 22)
         .frame(height: 52)
-        .glassEffect(HUDStyle.glass, in: .capsule)
+        .hudSurface(in: .capsule)
         .fixedSize()
     }
 
@@ -63,7 +63,7 @@ struct ToolCluster: View {
     @Bindable var model: HUDModel
 
     var body: some View {
-        GlassEffectContainer {
+        Group {
             HStack(spacing: 0) {
                 Menu {
                     Picker("Camera", selection: $model.camera) {
@@ -84,7 +84,7 @@ struct ToolCluster: View {
             .font(.system(size: 17, weight: .semibold))
             .foregroundStyle(.white)
             .padding(.horizontal, 6)
-            .glassEffect(HUDStyle.glassInteractive, in: .capsule)
+            .hudSurface(in: .capsule)
         }
     }
 
@@ -150,7 +150,7 @@ struct AutopilotStatus: View {
         .fixedSize()
         .padding(.horizontal, 16)
         .frame(height: 34)
-        .glassEffect(HUDStyle.glass, in: .capsule)
+        .hudSurface(in: .capsule)
     }
 
     private func mode(_ text: String) -> some View {

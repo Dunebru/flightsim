@@ -18,12 +18,15 @@ final class AirlinerFleet {
 
     let full: [Group]
     let distant: [Group]
-    /// Every distant triangle in one buffer, for the shadow map.
+    /// Beyond about a kilometre: merged on a 1.6 m grid, a few thousand triangles, the shape
+    /// and the paint and nothing else.
+    let far: [Group]
+    /// Every far triangle in one buffer, for the shadow maps.
     let shadow: (buffer: any MTLBuffer, count: Int)
     /// Per livery: texture by base name.
     let textures: [[String: any MTLTexture]]
     let liveryCount: Int
-    let fullTriangles: Int, distantTriangles: Int
+    let fullTriangles: Int, distantTriangles: Int, farTriangles: Int
 
     init(model: AC3DModel, directory: URL, device: any MTLDevice) throws {
         // FlightGear axes (x aft, y up, z right) to the body frame, nose wheel at the origin.
@@ -33,9 +36,9 @@ final class AirlinerFleet {
         func body(_ p: SIMD3<Float>) -> SIMD3<Float> { SIMD3(-(p.x - noseX), p.z, p.y - ground) }
         func bodyNormal(_ n: SIMD3<Float>) -> SIMD3<Float> { SIMD3(-n.x, n.z, n.y) }
 
-        var full: [Group] = [], distant: [Group] = []
+        var full: [Group] = [], distant: [Group] = [], far: [Group] = []
         var shadowVerts: [MeshVertex] = []
-        var fullTris = 0, distantTris = 0
+        var fullTris = 0, distantTris = 0, farTris = 0
         for g in model.groups where g.part == "airframe" || g.part == "gear" || g.part == "windshield" {
             guard !g.positions.isEmpty else { continue }
             let material = g.materialIndex < model.materials.count ? model.materials[g.materialIndex] : nil
@@ -65,15 +68,23 @@ final class AirlinerFleet {
             guard let db = device.makeBuffer(bytes: dv, length: dv.count * MemoryLayout<MeshVertex>.stride, options: .storageModeShared) else { continue }
             distant.append(Group(buffer: db, count: dv.count, textureName: g.texture, draw: draw))
             distantTris += dv.count / 3
-            if !isGlass { shadowVerts += dv }
+            let fd = Self.decimate(positions: positions, normals: normals, uvs: uvs, cell: 1.6)
+            guard !fd.0.isEmpty else { continue }
+            let farVerts = vertices(fd.0, fd.1, fd.2)
+            guard let fb2 = device.makeBuffer(bytes: farVerts, length: farVerts.count * MemoryLayout<MeshVertex>.stride, options: .storageModeShared) else { continue }
+            far.append(Group(buffer: fb2, count: farVerts.count, textureName: g.texture, draw: draw))
+            farTris += farVerts.count / 3
+            if !isGlass { shadowVerts += farVerts }
         }
         guard let sb = device.makeBuffer(bytes: shadowVerts, length: max(shadowVerts.count, 1) * MemoryLayout<MeshVertex>.stride,
                                          options: .storageModeShared) else { throw RendererError.resource("fleet shadow mesh") }
         self.full = full
         self.distant = distant
+        self.far = far
         shadow = (sb, shadowVerts.count)
         fullTriangles = fullTris
         distantTriangles = distantTris
+        farTriangles = farTris
 
         let loader = MTKTextureLoader(device: device)
         var cache: [String: any MTLTexture] = [:]

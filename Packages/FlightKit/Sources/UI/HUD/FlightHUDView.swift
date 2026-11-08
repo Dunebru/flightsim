@@ -42,6 +42,8 @@ public struct FlightHUDView: View {
     /// Symmetric inset for the top center: clear of the pause button.
     static let topCenterInset: CGFloat = HUDStyle.edge + 48 + HUDStyle.gap
 
+    static let hideHUD = UserDefaults.standard.bool(forKey: "FlightHideHUD")
+
     public var body: some View {
         ZStack {
             #if os(iOS)
@@ -52,6 +54,9 @@ public struct FlightHUDView: View {
                 .ignoresSafeArea()
             #endif
 
+            // `-FlightHideHUD YES` draws the world alone (for measuring what the HUD costs).
+            if !Self.hideHUD {
+            ZStack {
             // Thumb columns.
             HStack(alignment: .bottom, spacing: 0) {
                 leftEdge
@@ -136,6 +141,8 @@ public struct FlightHUDView: View {
                 crashOverlay(message)
             } else if model.paused {
                 pausedOverlay
+            }
+            }
             }
         }
         .preferredColorScheme(.dark)
@@ -471,7 +478,7 @@ public struct FlightHUDView: View {
         .foregroundStyle(.white)
         .padding(.horizontal, 10)
         .frame(height: 22)
-        .glassEffect(HUDStyle.glass, in: .capsule)
+        .hudSurface(in: .capsule)
         .accessibilityLabel(model.windKnots > 0 ? "Wind \(model.windFrom) degrees at \(model.windKnots) knots" : "Wind calm")
     }
 
@@ -481,7 +488,7 @@ public struct FlightHUDView: View {
             .foregroundStyle(.white)
             .padding(.horizontal, 10)
             .frame(height: 22)
-            .glassEffect(HUDStyle.glass, in: .capsule)
+            .hudSurface(in: .capsule)
     }
 
     /// Maps a detent index to a 0...1 slider value and back.

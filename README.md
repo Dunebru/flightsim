@@ -1,12 +1,12 @@
 # Flight
 
-A flight simulator for iPhone and iPad, written in Swift with a Metal renderer and JSBSim flight dynamics. It is a personal project and a work in progress: the plan, the honest quality ceiling for each area, and the milestone acceptance criteria are in [PLAN.md](PLAN.md), and what is actually done (and what is still a placeholder) is in [PROGRESS.md](PROGRESS.md).
+A flight simulator for iPhone and iPad. Swift, Metal, and JSBSim for the flight dynamics. Personal project, still in progress. [PLAN.md](PLAN.md) is the plan.
 
 ## Status
 
-Scaffolding (M0) and the renderer core (M1) are done and measured on an iPhone 18 Pro Max: a physically based sky and atmosphere, a marked runway, a test Cessna 172 with sun shadows, a floating origin, and MetalFX upscaling at 60 fps. Flight dynamics (M2) is in progress: JSBSim runs on its own 120 Hz thread and the Cessna 172P and a tuned generic A320 can be flown with tilt or a game controller. Terrain, airports, the aircraft fleet, weather, navigation, ATC and traffic are later milestones.
+Runs at 60 fps on an iPhone 18 Pro Max. Phoenix (KPHX) and LA (KLAX) are built from OpenStreetMap. You can fly a Cessna 172P or an A320, both with FlightGear cockpits and JSBSim flight models. There's weather, an autopilot with ILS, AI traffic and ATC. Plenty is still rough; [PROGRESS.md](PROGRESS.md) has the details.
 
-The in-flight interface follows Apple's platform design language (Liquid Glass, SF Pro, Control Center style controls) arranged the way mobile flight sims are usually laid out. See [DESIGN.md](DESIGN.md).
+UI notes are in [DESIGN.md](DESIGN.md).
 
 ## Building
 
@@ -24,8 +24,10 @@ You need Xcode 27 with the iOS 27 SDK and [XcodeGen](https://github.com/yonaskol
 
 [JSBSim](https://github.com/JSBSim-Team/jsbsim) v1.3.3 is vendored unmodified in `Packages/FlightKit/Sources/CJSBSim/jsbsim` under the LGPL-2.1 (license text alongside it in `COPYING.LGPL`). The JSBSim `c172p` and `A320` aircraft definitions, engines and systems ship in `Packages/FlightKit/Sources/FlightModel/Resources/JSBSim`; the A320 definition is modified, and every change is listed in its `TUNING.md`.
 
-The FlightGear [Cessna 172P](https://github.com/c172p-team/c172p) 3D model (GPL-2.0) is downloaded by `scripts/fetch-assets.sh` and is not part of this repository.
+The FlightGear [Cessna 172P](https://github.com/c172p-team/c172p) and [A320 family](https://github.com/legoboyvdlp/A320-family) models, cockpits, animation files and the A320's CFM56 engine recordings (all GPL-2.0) are downloaded by `scripts/fetch-assets.sh`, pinned to exact commits and checked against SHA-256 hashes; they are not part of this repository. Airport and city data comes from OpenStreetMap (ODbL), navigation data from the FAA's NASR (public domain), the magnetic model from NOAA's WMM2025 (public domain) and the star catalogue from the Yale Bright Star Catalogue.
 
 ## License
 
-The project's own code does not carry an open-source license yet, so all rights are reserved by default. This project is not affiliated with Infinite Flight, Microsoft Flight Simulator, Apple, Airbus or Textron Aviation.
+GPL-2.0-or-later, see [LICENSE](LICENSE). Picked so it stays compatible with the GPL-2.0 FlightGear models and LGPL JSBSim. Third-party stuff keeps its own license (above).
+
+This project is not affiliated with Infinite Flight, Microsoft Flight Simulator, FlightGear, Apple, Airbus or Textron Aviation.

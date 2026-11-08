@@ -129,6 +129,11 @@ public enum A320Model {
         for p in Property.elevator { r[p] = elevator }
         for (i, p) in Property.gear.enumerated() { r[p] = gear; r[Property.compression[i]] = compression[i]; r[Property.wheelSpeed[i]] = wheelSpeed[i] }
         for p in Property.n1 { r[p] = n1 }
+        // Seen turning at most about 30 degrees a frame at 60 fps: the bladed fan's 1,000 rpm at
+        // idle, or a wheel at 150 knots, would otherwise strobe (above 40% N1 the fan is the
+        // blurred disc anyway).
+        for p in Property.n1 { r["spinrate:" + p] = min(n1, 6) }
+        for p in Property.wheelSpeed { r["spinrate:" + p] = min(r[p] ?? 0, 12) }
         for p in Property.reverser { r[p] = reverser }
         for p in Property.spoilers { r[p] = speedbrake * 40 }
         return r

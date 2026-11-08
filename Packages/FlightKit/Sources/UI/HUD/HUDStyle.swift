@@ -44,3 +44,16 @@ extension View {
         shadow(color: .black.opacity(0.35), radius: 2, y: 1)
     }
 }
+
+extension View {
+    /// The always-on flight HUD's surface: a translucent dark fill with a hairline edge, as
+    /// mobile flight sims draw theirs. Not Liquid Glass: glass re-blurs the live 3D view under
+    /// every control each frame, which cost the phone about 5 ms of GPU time (measured with the
+    /// HUD shown and hidden: 45 fps against 60). Panels and menus, open briefly, keep the glass.
+    func hudSurface<S: Shape>(in shape: S) -> some View {
+        background {
+            shape.fill(Color.black.opacity(0.38))
+                .overlay(shape.stroke(Color.white.opacity(0.14), lineWidth: 0.5))
+        }
+    }
+}

@@ -16,7 +16,7 @@ struct VirtualStick: View {
         ZStack {
             Circle()
                 .fill(.clear)
-                .glassEffect(HUDStyle.glassInteractive, in: .circle)
+                .hudSurface(in: .circle)
             // Centre mark and travel ring.
             Circle()
                 .strokeBorder(.white.opacity(0.18), lineWidth: 1)
@@ -72,7 +72,7 @@ struct RudderSlider: View {
         ZStack {
             Capsule()
                 .fill(.clear)
-                .glassEffect(HUDStyle.glassInteractive, in: .capsule)
+                .hudSurface(in: .capsule)
             // Centre mark.
             Rectangle()
                 .fill(.white.opacity(0.35))

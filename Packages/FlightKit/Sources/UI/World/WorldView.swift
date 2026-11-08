@@ -1,7 +1,9 @@
 #if os(iOS)
 import Aircraft
 import Airports
+import Darwin
 import Foundation
+import os
 import Metal
 import Observation
 import QuartzCore
@@ -101,7 +103,7 @@ final class WorldEngine: NSObject {
         #if os(iOS)
         // Clouds march at 40% of the render resolution on the phone (half on the Mac); the
         // temporal resolve hides most of the difference. Not yet measured on the device.
-        made?.cloudResolutionScale = 0.4
+        made?.cloudResolutionScale = 0.35
         #endif
         // The bright star catalogue for the night sky.
         if let url = Bundle.main.resourceURL?.appendingPathComponent("Bundle/Sky/stars.bin"), let list = try? SkyStar.load(url) {
@@ -178,7 +180,30 @@ final class WorldEngine: NSObject {
         guard let renderer else { return }
         renderer.settings.upscaler = upscaler
         // Without MetalFX the final pass upsamples bilinearly; render at full size instead.
-        renderer.settings.renderScale = upscaler == .off ? 1.0 : 0.67
+        renderer.settings.renderScale = upscaler == .off ? 1.0 : Self.maxRenderScale
+    }
+
+    /// Dynamic resolution. A phone under sustained load clocks its GPU down (measured: every
+    /// pass at once taking twice as long after 20 s of flight on a warm iPhone, with the thermal
+    /// state still nominal), so the internal resolution steps down while the GPU frame runs
+    /// long and back up when there is room. Changes are at least 3 s apart: each one rebuilds
+    /// the render targets and restarts the upscaler's history.
+    static let maxRenderScale = 0.8, minRenderScale = 0.5
+    @ObservationIgnored private var lastScaleChange = 0.0
+
+    private func adjustResolution(_ renderer: SceneRenderer) {
+        guard upscaler != .off else { return }
+        let now = CACurrentMediaTime()
+        guard now - lastScaleChange > 3 else { return }
+        let gpu = renderer.stats.gpuFrameMilliseconds
+        let scale = renderer.settings.renderScale
+        var next = scale
+        if gpu > 13.5 { next = max(Self.minRenderScale, scale - 0.1) }
+        else if gpu < 9 { next = min(Self.maxRenderScale, scale + 0.05) }
+        guard abs(next - scale) > 0.001 else { return }
+        renderer.settings.renderScale = next
+        lastScaleChange = now
+        if logStats { print(String(format: "RESOLUTION %.2f -> %.2f (gpu %.1f ms)", scale, next, gpu)) }
     }
 
     /// Which aircraft to draw: "c172p" or "A320" (both FlightGear models).
@@ -200,7 +225,9 @@ final class WorldEngine: NSObject {
         }
         guard let a320Directory = Bundle.main.resourceURL?.appendingPathComponent("Bundle/Aircraft/A320") else { return }
         Task { [weak self] in
+            let start = Date()
             guard let model = await Self.parseA320(a320Directory) else { return }
+            if self?.logStats == true { print(String(format: "AIRCRAFTLOAD A320 %.2f s, %d triangles", Date().timeIntervalSince(start), model.model.triangleCount)) }
             self?.a320 = model
             if self?.aircraftID == "A320" { self?.applyAircraft() }
         }
@@ -209,6 +236,16 @@ final class WorldEngine: NSObject {
     @concurrent
     private nonisolated static func parseA320(_ directory: URL) async -> AnimatedModel? {
         try? A320Model.loadAnimated(from: directory)
+    }
+
+    /// The app's physical memory footprint (what iOS counts against its limit), MB.
+    nonisolated static func footprintMB() -> Double {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size)
+        let r = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count) }
+        }
+        return r == KERN_SUCCESS ? Double(info.phys_footprint) / 1_048_576 : -1
     }
 
     /// Draws the aircraft for a profile (the C172 once its model has loaded).
@@ -260,7 +297,10 @@ final class WorldEngine: NSObject {
         layer.pixelFormat = .bgra8Unorm
         layer.framebufferOnly = true
         let link = CAMetalDisplayLink(metalLayer: layer)
-        link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
+        // 60 fps required, not "30 to 60": given the wider range, iOS lowers the GPU clock until
+        // frames just make its own target (measured: a steady 10 ms frame became 23 ms and 45 fps
+        // about 20 s into a flight, whatever the resolution, even with the scene frozen).
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 60, preferred: 60)
         link.preferredFrameLatency = 2
         link.delegate = self
         link.add(to: .main, forMode: .common)
@@ -290,6 +330,7 @@ final class WorldEngine: NSObject {
         if pose.position.z < floor { pose.position.z = floor }
         scene.cameraPose = pose
         scene.showAircraft = rig.drawsAircraft
+        adjustResolution(renderer)
         renderer.render(scene, to: update.drawable.texture, drawable: update.drawable)
         renderer.exposureAdaptation = 0.05
         // The flight starts once the airports are built and the terrain around the camera has
@@ -307,7 +348,7 @@ final class WorldEngine: NSObject {
             if framesSinceLog >= 120 {
                 framesSinceLog = 0
                 let st = renderer.stats
-                let passes = ["Atmosphere", "Shadow", "Scene", "Clouds", "Precipitation", "Post"]
+                let passes = ["Atmosphere", "World shadow", "Shadow", "Scene", "Clouds", "Precipitation", "Post"]
                     .map { String(format: "%@=%.2f", $0, st.gpuMilliseconds[$0] ?? 0) }.joined(separator: " ")
                 if let s = physicsProbe?() {
                     print(String(format: "FLIGHTSTATE ias=%.1f alt=%.0f agl=%.1f hdg=%.1f pitch=%.1f roll=%.1f vs=%.0f eng=%.0f ground=%d t=%.1f",
@@ -315,6 +356,9 @@ final class WorldEngine: NSObject {
                                  s.pitch * 180 / .pi, s.roll * 180 / .pi, s.verticalSpeedFPM, s.engineIndication, s.onGround ? 1 : 0, s.time))
                 }
                 print("TERRAINSTATS \(renderer.terrainDebug)")
+                let g = renderer.gpuMemory
+                print(String(format: "MEMSTATS footprint=%.0fMB available=%.0fMB gpuAllocated=%.0fMB gpuRecommended=%.0fMB",
+                             Self.footprintMB(), Double(os_proc_available_memory()) / 1_048_576, g.allocated, g.recommended))
                 let moving = scene.traffic.values.reduce(0) { $0 + $1.narrow.count + $1.wide.count }
                 print("TRAFFICSTATS moving=\(moving) airliners drawn=\(renderer.parkedDrawn)")
                 print(String(format: "FLIGHTSTATS fps=%.1f gpuFrame=%.2fms gpuStageSum=%.2fms cpu=%.2fms %@ render=%dx%d output=%dx%d upscaler=%@ thermal=%d",
@@ -417,7 +461,10 @@ final class MetalHostView: UIView {
     }
 
     private func updateDrawableSize() {
-        let scale = window?.screen.nativeScale ?? traitCollection.displayScale
+        // At most 1.6x: a phone's native 3x makes the final passes (upscaling, tone mapping)
+        // cost 3.5 times as much for detail the compositor's scaling hides (measured on the
+        // phone: 9-12 ms in those passes at 2868x1320, frames dropping to 48 fps on approach).
+        let scale = min(window?.screen.nativeScale ?? traitCollection.displayScale, 1.6)
         metalLayer.contentsScale = scale
         metalLayer.drawableSize = CGSize(width: bounds.width * scale, height: bounds.height * scale)
     }
