@@ -12,6 +12,9 @@ public enum A320Model {
             || name.hasPrefix("NurbsPath") { return "hidden" }
         // Gear doors stay: without them the bays would show as holes.
         if name.contains("Door") { return "airframe" }
+        // FlightGear gives the windscreen a fully transparent material and its look from an
+        // effect; it is glass here.
+        if name == "Windsheild" { return "windshield" }
         if name.hasPrefix("MLG") || name.hasPrefix("NLG") || name.hasPrefix("SideStay") { return "gear" }
         return "airframe"
     }
@@ -54,12 +57,41 @@ public enum A320Model {
     /// doors, struts, wheels, fans, flight controls, spoilers, slats, flaps, reversers).
     public static func loadAnimated(from directory: URL) throws -> AnimatedModel {
         var m = AnimatedModel()
-        let special: (String) -> String? = { part($0) == "hidden" ? "hidden" : nil }
+        let special: (String) -> String? = { ["hidden", "windshield"].contains(part($0)) ? part($0) : nil }
         try m.load(xml: "fuselage.xml", directory: directory, staticPart: "airframe", special: special)
         var engines = matrix_identity_double4x4
         engines.columns.3 = SIMD4(SIMD3<Double>(engineOffset), 1)
         try m.load(xml: "a320.cfm.xml", directory: directory, placement: engines, staticPart: "airframe", special: special)
+        // The flight deck (A320-interior.xml places it): its controls move, its hundreds of
+        // switches and lamps are fixed as modelled.
+        if FileManager.default.fileExists(atPath: directory.appendingPathComponent("a320.flightdeck.xml").path) {
+            var deck = matrix_identity_double4x4
+            deck.columns.3 = SIMD4(FGAnimation.acFrame(SIMD3(-16.47411, -0.00015, -0.09483)), 1)
+            try m.load(xml: "a320.flightdeck.xml", directory: directory, placement: deck,
+                       excluding: ["Instruments/"], staticPart: "cabin",
+                       animate: { Self.deckControls.contains($0.property) }, fixedSelects: true)
+        }
         return m
+    }
+
+    /// The flight deck controls that move with the flight.
+    static let deckControls: Set<String> = [
+        DeckControl.sidestickPitch, DeckControl.sidestickRoll, "controls/cockpit/elevator-sidestick-fo", "controls/cockpit/aileron-sidestick-fo",
+        DeckControl.tiller, DeckControl.pedals, DeckControl.gear, DeckControl.throttle[0], DeckControl.throttle[1],
+        DeckControl.reverse[0], DeckControl.reverse[1], DeckControl.speedbrake, "controls/cockpit/spoilers-lever-translate",
+        DeckControl.flaps, "controls/cockpit/flaps-lever-translate-pos",
+    ]
+
+    public enum DeckControl {
+        public static let sidestickPitch = "controls/cockpit/elevator-sidestick-capt"
+        public static let sidestickRoll = "controls/cockpit/aileron-sidestick-capt"
+        public static let tiller = "controls/cockpit/tiller-handle"
+        public static let pedals = "controls/cockpit/rudder-pedal"
+        public static let gear = "controls/cockpit/gear-lever"
+        public static let throttle = ["controls/cockpit/throttle-lever[0]", "controls/cockpit/throttle-lever[1]"]
+        public static let reverse = ["controls/cockpit/reverse-lever[0]", "controls/cockpit/reverse-lever[1]"]
+        public static let speedbrake = "controls/cockpit/spoilers-lever-rotate"
+        public static let flaps = "controls/cockpit/flaps-lever-rotate"
     }
 
     /// FlightGear's names for what the flight supplies, from JSBSim's surface angles (degrees),

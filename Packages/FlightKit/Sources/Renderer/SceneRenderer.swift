@@ -140,6 +140,7 @@ public final class SceneRenderer {
     /// animation hides.
     private var partTransforms: [String: simd_float4x4] = [:]
     private var hiddenParts: Set<String> = []
+    private var interiorVisible = true
     private var spinTurns: [String: Double] = [:]
     private var lastAnimationTime: Double?
 
@@ -488,6 +489,9 @@ public final class SceneRenderer {
                 * MatrixMath.translation(-pivot)
                 * aircraft.modelToBody
             aircraftModel = MatrixMath.translation(relative(aircraftWorld, to: camera)) * orient
+            // The cabin and flight deck show only through the windows: not worth drawing from
+            // more than 80 m.
+            interiorVisible = simd_length(relative(aircraftWorld, to: camera)) < 80
             if let animation = aircraft.animation {
                 // Spinning parts (fans, wheels, propeller) turn at their property's rpm: keep
                 // each one's revolutions.
@@ -687,7 +691,7 @@ public final class SceneRenderer {
                 e.setCullMode(.none)
                 e.setDepthBias(1, slopeScale: 2, clamp: 0.01)
                 e.setVertexBytes(&u, length: MemoryLayout<FrameUniforms>.stride, index: 1)
-                for part in aircraft.parts where !part.isGlass && (scene.aircraftGearDown || !part.isGear) && part.variant != (scene.propellerSpinning ? "prop-slow" : "prop-fast") && !hiddenParts.contains(part.animated) {
+                for part in aircraft.parts where !part.isGlass && (scene.aircraftGearDown || !part.isGear) && part.variant != (scene.propellerSpinning ? "prop-slow" : "prop-fast") && !hiddenParts.contains(part.animated) && !part.interior {
                     var d = part.draw
                     d.model = aircraftModel * (partTransforms[part.animated] ?? matrix_identity_float4x4)
                     e.setVertexBuffer(part.vertices, offset: 0, index: 0)
@@ -912,7 +916,7 @@ public final class SceneRenderer {
                 e.setDepthBias(0, slopeScale: 0, clamp: 0)
             }
             if let aircraft, scene.showAircraft {
-                for part in aircraft.parts where !part.isGlass && (scene.aircraftGearDown || !part.isGear) && part.variant != (scene.propellerSpinning ? "prop-slow" : "prop-fast") && !hiddenParts.contains(part.animated) {
+                for part in aircraft.parts where !part.isGlass && (scene.aircraftGearDown || !part.isGear) && part.variant != (scene.propellerSpinning ? "prop-slow" : "prop-fast") && !hiddenParts.contains(part.animated) && (!part.interior || interiorVisible) {
                     var d = part.draw
                     let pt = part.animated.isEmpty ? matrix_identity_float4x4 : (partTransforms[part.animated] ?? matrix_identity_float4x4)
                     d.model = aircraftModel * pt
@@ -990,7 +994,7 @@ public final class SceneRenderer {
             if let aircraft, scene.showAircraft {
                 e.setRenderPipelineState(glassPipeline)
                 e.setDepthStencilState(depthTestOnly)
-                for part in aircraft.parts where part.isGlass && (scene.aircraftGearDown || !part.isGear) && part.variant != (scene.propellerSpinning ? "prop-slow" : "prop-fast") && !hiddenParts.contains(part.animated) {
+                for part in aircraft.parts where part.isGlass && (scene.aircraftGearDown || !part.isGear) && part.variant != (scene.propellerSpinning ? "prop-slow" : "prop-fast") && !hiddenParts.contains(part.animated) && (!part.interior || interiorVisible) {
                     var d = part.draw
                     let pt = part.animated.isEmpty ? matrix_identity_float4x4 : (partTransforms[part.animated] ?? matrix_identity_float4x4)
                     d.model = aircraftModel * pt

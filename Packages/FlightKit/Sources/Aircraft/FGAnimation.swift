@@ -271,12 +271,24 @@ public struct AnimatedModel: Sendable {
     /// "prop-fast") ahead of the rest.
     public mutating func load(xml file: String, directory: URL, placement: simd_double4x4 = matrix_identity_double4x4,
                               excluding: [String] = [], staticPart: String = "cabin",
-                              special: (String) -> String? = { _ in nil }) throws {
+                              special: (String) -> String? = { _ in nil },
+                              animate: (FGAnimation) -> Bool = { _ in true }, fixedSelects: Bool = false) throws {
         let root = try XMLElementNode.parse(contentsOf: directory.appendingPathComponent(file))
         let name = (file as NSString).deletingPathExtension
         if self.root.isEmpty { self.root = name }
         if staticPart == "cabin" { interiorModels.insert(name) }
-        let anims = FGAnimation.parse(root)
+        var anims = FGAnimation.parse(root)
+        // `fixedSelects`: decide every select once, from the defaults (a busy panel's hundreds
+        // of lamps), rather than keeping each lamp a separate moving part.
+        var hiddenBySelect = Set<String>()
+        if fixedSelects {
+            let d = defaults
+            for a in anims where a.kind == .select {
+                if let c = a.condition, !c.holds({ d[$0] ?? 0 }) { hiddenBySelect.formUnion(a.objects) }
+            }
+            anims.removeAll { $0.kind == .select }
+        }
+        anims = anims.filter { $0.kind == .select || animate($0) }
         var animated = Set<String>()
         for a in anims {
             for o in a.objects {
@@ -291,7 +303,7 @@ public struct AnimatedModel: Sendable {
             let base = placement != matrix_identity_double4x4 ? "anim:\(name)|" : ""
             let hidden = hiddenObjects
             var parsed = try AC3DParser.parse(text, objectPart: { object, parent in
-                if hidden.contains(object) { return "hidden" }
+                if hidden.contains(object) || hiddenBySelect.contains(object) { return "hidden" }
                 if let own = special(object) { return own }
                 guard animated.contains(object) else { return "" }
                 if parent.hasPrefix("anim:\(name)|") { return parent.hasSuffix("|") ? parent + object : parent + "/" + object }

@@ -718,7 +718,9 @@ fragment GBufferOut sceneFragment(VertexOut in [[stage_in]],
     // Aircraft interiors carry their sky occlusion in emissive.w (0 means open air).
     float occlusion = (kind == kKindAircraft && d.emissive.w > 0.0) ? d.emissive.w : 1.0;
     float3 color = shadeSurface(albedo, roughness, d.material.y, N, in.worldPos, shadow, u, light, skyView, occlusion);
-    color += d.emissive.rgb * (kind == kKindAircraft ? 1.0 : 0.0);
+    // Aircraft emission (AC3D materials) lights the surface's own colour, as OpenGL's
+    // modulate does, rather than adding flat white.
+    color += d.emissive.rgb * albedo * (kind == kKindAircraft ? 1.0 : 0.0);
     float night = smoothstep(0.05, -0.08, u.sunDirection.z);
     color += windowGlow * night;
     if (kind == kKindPavement && d.emissive.y > 0.5) {

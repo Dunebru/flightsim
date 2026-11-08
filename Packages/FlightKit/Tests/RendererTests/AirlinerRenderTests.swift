@@ -56,7 +56,7 @@ struct AirlinerRenderTests {
         let m = try A320Model.loadAnimated(from: Self.a320)
         let nose = try #require(m.centre(ofObject: "NLGWheels"))
         try r.setAircraft(m.model, textures: Self.a320, textureMap: A320Model.liveries[0].textures, hiddenParts: ["hidden"],
-                          animation: m, cullsBackFaces: true, opaqueGlass: true, noseWheel: (nose, Float((672 - 196.1) * 0.0254)))
+                          animation: m, cullsBackFaces: true, noseWheel: (nose, Float((672 - 196.1) * 0.0254)))
         let placement = try #require(site.placement(.stand(ref)))
         let h = placement.heading * .pi / 180
         let fwd = SIMD3(sin(h), cos(h), 0.0), left = SIMD3(-cos(h), sin(h), 0.0)
@@ -75,6 +75,8 @@ struct AirlinerRenderTests {
                                      forward: simd_normalize(-left * 38 + fwd * 30 - SIMD3(0, 0, 12)), up: SIMD3(0, 0, 1), fovY: 55 * .pi / 180)),
             ("a320-gate-wheels", CameraPose(position: p - left * 9 + fwd * 1 + SIMD3(0, 0, 0.6),
                                             forward: simd_normalize(left * 9 - fwd * 1 - SIMD3(0, 0, 0.3)), up: SIMD3(0, 0, 1), fovY: 40 * .pi / 180)),
+            ("a320-flightdeck", CameraPose(position: p + fwd * 14.7 + left * 0.53 + SIMD3(0, 0, 5.0),
+                                           forward: simd_normalize(fwd - SIMD3(0, 0, 0.2)), up: SIMD3(0, 0, 1), fovY: 68 * .pi / 180)),
             ("a320-gate-nose", CameraPose(position: p + left * 14 + fwd * 6 + SIMD3(0, 0, 4),
                                           forward: simd_normalize(-left * 14 + fwd * 8 - SIMD3(0, 0, 0.5)), up: SIMD3(0, 0, 1), fovY: 55 * .pi / 180)),
         ]

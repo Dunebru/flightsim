@@ -22,6 +22,9 @@ final class AircraftMesh {
         /// AC3D's two-sided flag. One-sided surfaces are culled from behind, as FlightGear
         /// does; the models rely on it (an instrument's case is capped in front of its face).
         var twoSided = true
+        /// Inside the airframe (cockpit, flight deck): left out of the shadow map and when the
+        /// camera is far outside.
+        var interior = false
     }
 
     /// Animations for the parts that move (the cockpit's needles, yoke and pedals).
@@ -121,17 +124,22 @@ final class AircraftMesh {
                 ? model.materials[group.materialIndex]
                 : AC3DModel.Material(name: "", diffuse: SIMD3(0.8, 0.8, 0.8), emissive: .zero, specular: .zero, shininess: 16, transparency: 0)
             // Fully transparent objects are FlightGear's click areas: never seen.
-            if material.transparency >= 0.99 { continue }
+            if material.transparency >= 0.99 && group.part != "windshield" { continue }
             let tex = texture(named: group.texture.map { textureMap[$0] ?? $0 })
             // AC3D materials darken textures (FlightGear lights them brighter); keep the tint,
             // drop the darkening, so textured parts show their painted colour.
             var tint = material.diffuse
             if tex != nil { tint /= max(tint.max(), 1e-3) }
             var isGlass = material.transparency > 0.05 || (group.texture?.lowercased().contains("glass") ?? false)
+                || group.part == "windshield"
             var draw = DrawUniforms()
             draw.baseColor = SIMD4(tint, isGlass ? max(0.15, 1 - material.transparency) : 1)
+            if group.part == "windshield" {
+                // Untextured, lightly tinted: the painted window frames stay on the airframe.
+                draw.baseColor = SIMD4(0.55, 0.6, 0.62, 0.18)
+            }
             var roughness = min(max(sqrt(2 / (material.shininess + 2)), 0.18), 0.9)
-            draw.material = SIMD4(roughness, 0, tex == nil ? 0 : 1, SurfaceKind.aircraft.rawValue)
+            draw.material = SIMD4(roughness, 0, tex == nil || group.part == "windshield" ? 0 : 1, SurfaceKind.aircraft.rawValue)
             if isGlass && opaqueGlass {
                 // Dark, glossy, drawn opaque: an aircraft with nothing modelled behind its windows.
                 isGlass = false
@@ -141,10 +149,12 @@ final class AircraftMesh {
             }
             // The cabin sees the sky only through its windows: about a third of it.
             let inside = animation?.isInterior(part: group.part) ?? false
-            draw.emissive = SIMD4(material.emissive, inside ? 0.3 : 0)
+            // FlightGear's panels carry emission for their lighting effects; a little of it
+            // reads as backlit labels, all of it as a white wash.
+            draw.emissive = SIMD4(material.emissive * 0.08, inside ? 0.3 : 0)
             parts.append(Part(vertices: buffer, vertexCount: verts.count, texture: tex, draw: draw, isGlass: isGlass,
                               isGear: group.part == "gear", variant: group.part.hasPrefix("prop-") ? group.part : "",
-                              animated: group.part.hasPrefix("anim:") ? group.part : "", twoSided: group.twoSided || !cullsBackFaces))
+                              animated: group.part.hasPrefix("anim:") ? group.part : "", twoSided: group.twoSided || !cullsBackFaces, interior: inside))
         }
     }
 }

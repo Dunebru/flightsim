@@ -99,3 +99,19 @@ struct NoseWheelPlacementProbe {
         }
     }
 }
+
+/// The flight deck loads with the airframe: its controls move, its lamps are fixed.
+struct A320FlightDeckTests {
+    @Test func flightDeckLoads() throws {
+        let start = Date()
+        let m = try A320Model.loadAnimated(from: A320ModelTests.directory)
+        let parts = Set(m.model.groups.map(\.part))
+        let deckParts = parts.filter { $0.hasPrefix("anim:a320.flightdeck|") }
+        print("A320 with flight deck: \(m.model.triangleCount) triangles, \(m.model.groups.count) groups, \(deckParts.count) moving deck parts, loaded in \(Date().timeIntervalSince(start)) s")
+        #expect(m.interiorModels.contains("a320.flightdeck"))
+        #expect(deckParts.contains { $0.contains("sidestick_1") })
+        #expect(deckParts.contains { $0.contains("thr_l_body") })
+        #expect(deckParts.count < 40, "lamps and switches should not each be a separate moving part")
+        #expect(parts.contains("windshield"))
+    }
+}

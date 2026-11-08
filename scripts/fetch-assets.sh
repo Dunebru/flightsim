@@ -189,6 +189,46 @@ fetch_set "$A320_BASE/Liveries/CFM/2k" "$A320_RAW" \
 fetch_set "$A320_BASE/Fuselage" "$A320_RAW" \
   "fuselage.xml 718a74bbf84d444dd86beed3a8427be2e451ad2246eb50cfaa928e80338b5a6d" \
   "a320.cfm.xml 6a23afce46658c418892e9926ffd97b72cbc0960b97b16424bc3a755cf8f3436"
+# The A320 flight deck (Models/FlightDeck, same repository): the model, its animation file and
+# the textures it uses; the 4K sheets scaled to 2048 px for the phone.
+fetch_set "$A320_BASE/FlightDeck" "$A320_RAW/FlightDeck" \
+  "a320.flightdeck.xml 423586d54d95bff48bcb1ed3316289abcb604ddf29066cc6e10857b5d0423a10" \
+  "res/fd_complete.ac a6f85edf93f54f89e1513e394cd23d934403aedd5cfad2f91f4944c90de489ae" \
+  "res/Clock.jpg d55ebd97d53d886aae3492ea8289dd4c2b9fa573dc6c188c4b0d901aff843ac4" \
+  "res/DDRMI.png 34c14b41741644370d911ea63a1620bf58241cfa5794b791fc83d7a8b7c6d9fb" \
+  "res/ECAM.png 8409f1e77ef63690599f45ecece8e09fed8dca17ef17cb11bd0edf806d2c7a58" \
+  "res/MCDU_screen.png 6860b583d65fd0423ada637c4aa5bf4698bf2b6d92aa4db2e9c4708a2f34fb03" \
+  "res/Pedestal_low.png 60ca3c92f71a02984119782d2c506ab7ec848def5e9eb80767b1e9eadfc605f8" \
+  "res/Radio.jpg 2daf3430d88babb2f9f841b9e67e0273e573f74be39f04e0d56186fa85d1f33b" \
+  "res/carpet2.png 1164fe410f82b8a69f14470d56ef4c41389044d9229323986d825f9a3fd6711d" \
+  "res/checklist.png db65d7a31bd6b6fafa64b9246a7e20d9a9709e28271e9f0a311058d13b526b3d" \
+  "res/cpit_5.png 9a78bb1fcfcaab20205019d5243684997dd40ebef400b7e7c760647c7b13c28b" \
+  "res/dcdu-screen.png dce3088e12ec73d0710dddfc0fd103974d88e128aa832d2340be7ab6a1d1061f" \
+  "res/dcdu.png cd99923393aa2bdb7eb7730d5a193f175d3931027df03e8214046c04b879f48d" \
+  "res/fabric2.png ee552cb8d75f8c826ff976393ed4d053295149203e92b8622d4a6c727cc9ae1a" \
+  "res/fcu.png 0a1b18cda6b73afdf72bba366eeaa563de54eda59b8dd601a9d685f2d092af77" \
+  "res/fcu2.png adbc1a80c78c3cee1d5e401322a8b1704fd55c4efd28bf0da84e99db1d86443d" \
+  "res/fd_buttons.png 39ad3031a43144f964b52702d5f7a7a655ebe03a3ec346802fd00edcb7b111a4" \
+  "res/fd_glare.png 59ae855a3081c286da384d51e8c4f2149a7835df553fa626e76928371ad99489" \
+  "res/fd_leather.png 25913dded8ea20d22666d8cc7d814a67281af2d069e7add3e38b857d4f1d271e" \
+  "res/fd_main.png 589e911842888a713c20c7fdd308563ecbaec1dbfa864f6123164bf164546751" \
+  "res/fd_other.png be5dfc11937d7eaee089f349cac7c510f90c35e83ae169a64a857113b54c630e" \
+  "res/glare_sw.png 1afc7c7682414b92deb42f67a129fae52d898ea3ae560e45f674406a8383b8ea" \
+  "res/hud.png 9dd8619408e4d7e83b150a7a6f9e535d67830123210b6f901040c4ffdc04db77" \
+  "res/hud_box_grid.png 773cf73a2607a001ba5aaeb9317e51f3b987cf6ed2bc113b9a9cfc5ed9b424cb" \
+  "res/iesi.png 273ac887a96618dab70e681cd7a43bfeba62a59e31c3c890aec473a6df45cd72" \
+  "res/inop.png f244510d4bfed309c772846094555294b4b3cb476abc4262cd9bd46f0bf2b8f4"
+for f in a320.flightdeck.xml res/fd_complete.ac; do
+  cmp -s "$A320_RAW/FlightDeck/$f" "$A320_DIR/$(basename "$f")" || cp -f "$A320_RAW/FlightDeck/$f" "$A320_DIR/$(basename "$f")"
+done
+for t in $(grep -h "^texture" "$A320_RAW/FlightDeck/res/fd_complete.ac" | sort -u | cut -d'"' -f2); do
+  src="$A320_RAW/FlightDeck/res/$t"; out="$A320_DIR/$t"
+  if [ ! -f "$out" ] || [ "$src" -nt "$out" ]; then
+    # sips -Z also enlarges, so only the sheets wider than 2048 px go through it.
+    if [ "$(sips -g pixelWidth "$src" | awk 'END {print $2}')" -gt 2048 ]; then sips -Z 2048 "$src" --out "$out" >/dev/null; else cp -f "$src" "$out"; fi
+  fi
+done
+
 # CFM56 recordings from the same A320 repository (Sounds/SASA/CFM56B, GPL-2.0): outside and
 # flight-deck sets. The app gets mono 16-bit copies named ext-* and ckpt-*.
 fetch_set "https://raw.githubusercontent.com/legoboyvdlp/A320-family/$A320_COMMIT/Sounds/SASA/CFM56B" "$A320_RAW/sounds" \

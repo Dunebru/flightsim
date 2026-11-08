@@ -18,9 +18,8 @@ nonisolated struct CameraRig {
     var lookPitch: Double = -6 * .pi / 180
     var zoom: Double = 1                        // tower and wing field-of-view factor
 
-    /// Whether the aircraft's own geometry is drawn in this view. The C172 has its FlightGear
-    /// cockpit (panel, instruments, yoke, seats); the A320's flight deck is not imported yet, so
-    /// its cockpit view is a clear pilot's-eye view rather than the inside of an empty shell.
+    /// Whether the aircraft's own geometry is drawn in this view: both aircraft have their
+    /// FlightGear cockpits, so it always is.
     var drawsAircraft: Bool { mode != .cockpit || hasCockpit }
     var hasCockpit = true
 
@@ -35,11 +34,11 @@ nonisolated struct CameraRig {
     mutating func configure(forAircraft id: String) {
         if id == "A320" {
             // Origin under the flight model's centre of gravity: the nose tip about 17 m ahead.
-            eyeOffset = SIMD3(14.23, 0.55, 4.7)
+            eyeOffset = SIMD3(14.7, 0.53, 5.0)
             wingOffset = SIMD3(-3.07, -2.3, 4.6)
             wingLook = SIMD3(0.45, -1.0, -0.14)
             orbitDistance = 60
-            hasCockpit = false
+            hasCockpit = true
         } else {
             hasCockpit = true
             eyeOffset = SIMD3(-0.26, 0.21, 1.6)

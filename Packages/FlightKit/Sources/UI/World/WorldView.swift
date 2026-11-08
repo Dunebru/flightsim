@@ -227,10 +227,8 @@ final class WorldEngine: NSObject {
         do {
             if aircraftID == "A320" {
                 if let a320, let directory = Bundle.main.resourceURL?.appendingPathComponent("Bundle/Aircraft/A320") {
-                    // No flight deck yet: the cockpit windows are tinted, not clear, so the empty
-                    // nose does not show through them.
                     try renderer?.setAircraft(a320.model, textures: directory, textureMap: A320Model.liveries[0].textures,
-                                              hiddenParts: ["hidden"], animation: a320, cullsBackFaces: true, opaqueGlass: true,
+                                              hiddenParts: ["hidden"], animation: a320, cullsBackFaces: true,
                                               noseWheel: Self.noseWheel(a320, "NLGWheels", AircraftProfile.a320))
                 } else {
                     try renderer?.setGenericAirliner()    // until the model has loaded

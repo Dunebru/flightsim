@@ -36,10 +36,10 @@ final class AirlinerFleet {
         var full: [Group] = [], distant: [Group] = []
         var shadowVerts: [MeshVertex] = []
         var fullTris = 0, distantTris = 0
-        for g in model.groups where g.part == "airframe" || g.part == "gear" {
+        for g in model.groups where g.part == "airframe" || g.part == "gear" || g.part == "windshield" {
             guard !g.positions.isEmpty else { continue }
             let material = g.materialIndex < model.materials.count ? model.materials[g.materialIndex] : nil
-            let isGlass = (material?.transparency ?? 0) > 0.05
+            let isGlass = (material?.transparency ?? 0) > 0.05 || g.part == "windshield"
             var positions = g.positions.map(body), normals = g.normals.map(bodyNormal)
             let uvs = g.uvs.map { SIMD2($0.x, 1 - $0.y) }
             func vertices(_ p: [SIMD3<Float>], _ n: [SIMD3<Float>], _ t: [SIMD2<Float>]) -> [MeshVertex] {

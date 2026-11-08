@@ -11,7 +11,7 @@ struct A320ModelTests {
     @Test func loadsWithGearAndHiddenParts() throws {
         let m = try A320Model.load(from: Self.directory)
         let parts = Set(m.groups.map(\.part))
-        #expect(parts == ["airframe", "gear", "hidden"], "\(parts)")
+        #expect(parts == ["airframe", "gear", "hidden", "windshield"], "\(parts)")
         #expect(m.triangleCount > 100_000)
         // Length about 37.6 m along x, span about 34.1 m along z (wingtip fences included).
         let size = m.boundsMax - m.boundsMin

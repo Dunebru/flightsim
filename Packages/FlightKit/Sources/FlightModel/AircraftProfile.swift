@@ -43,7 +43,7 @@ public struct AircraftProfile: Sendable, Hashable, Identifiable {
         id: "A320", name: "Airbus A320",
         flapLabels: ["0", "1", "2", "3", "FULL"], flapCommands: [0, 10.0 / 40, 15.0 / 40, 20.0 / 40, 1],
         hasSpoilers: true, retractableGear: true, isTurbine: true, visualIsStandIn: false,
-        fidelityNote: "Generic JSBSim A320, tuned (see TUNING.md): no slats, no fly-by-wire. Drawn with the FlightGear A320 model (GPL) in American colours; no cockpit panel yet.",
+        fidelityNote: "Generic JSBSim A320, tuned (see TUNING.md): no slats, no fly-by-wire. Drawn with the FlightGear A320 model and flight deck (GPL) in American colours; the flight deck's screens are blank.",
         stallWarningAlpha: 14,
         approachKnots: 140, approachFlapIndex: 4,
         // A320.xml: CG x 672 in, z -40; NOSE_LG x 196.1; LEFT_MLG z -142.
