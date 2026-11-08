@@ -251,6 +251,8 @@ final class FlightSession {
         // Pilot preferences: sensitivity scales deflection; invert flips pitch.
         inputs.pitch = max(-1, min(1, inputs.pitch * settings.sensitivity * (settings.invertPitch ? -1 : 1)))
         inputs.roll = max(-1, min(1, inputs.roll * settings.sensitivity))
+        // The rudder slider (a gamepad's own rudder wins).
+        if gamepad.read() == nil { inputs.yaw = hud.rudder }
         // On the ground, tilt also steers the nosewheel (and rudder), fading out by 60 kt.
         if let last = lastState, last.onGround {
             let blend = max(0, 1 - last.groundSpeedKnots / 60)

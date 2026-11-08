@@ -55,3 +55,52 @@ struct VirtualStick: View {
         .accessibilityValue("Pitch \(Int(Double(offset.height))), roll \(Int(Double(offset.width)))")
     }
 }
+
+/// The rudder: a horizontal slider that springs back to centre when you let go, as rudder
+/// pedals do. Left of centre is left rudder (and nosewheel left on the ground).
+struct RudderSlider: View {
+    /// Output: -1 full left ... 1 full right.
+    let onChange: (Double) -> Void
+    var width: CGFloat = 240
+
+    @State private var offset: CGFloat = 0
+    @State private var centred = true
+
+    var body: some View {
+        let knob: CGFloat = 34
+        let travel = (width - knob) / 2 - 4
+        ZStack {
+            Capsule()
+                .fill(.clear)
+                .glassEffect(HUDStyle.glassInteractive, in: .capsule)
+            // Centre mark.
+            Rectangle()
+                .fill(.white.opacity(0.35))
+                .frame(width: 1.5, height: 14)
+            Capsule()
+                .fill(.white)
+                .frame(width: knob, height: 26)
+                .shadow(color: .black.opacity(0.25), radius: 4, y: 1)
+                .offset(x: offset)
+        }
+        .frame(width: width, height: 36)
+        .contentShape(.capsule)
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { value in
+                    offset = max(-travel, min(travel, value.translation.width))
+                    centred = abs(offset) < 2
+                    onChange(Double(offset / travel))
+                }
+                .onEnded { _ in
+                    withAnimation(.spring(duration: 0.25, bounce: 0.2)) { offset = 0 }
+                    centred = true
+                    onChange(0)
+                }
+        )
+        .sensoryFeedback(.selection, trigger: centred) { _, now in now }
+        .accessibilityElement()
+        .accessibilityLabel("Rudder")
+        .accessibilityValue(offset == 0 ? "Centred" : (offset < 0 ? "Left" : "Right"))
+    }
+}

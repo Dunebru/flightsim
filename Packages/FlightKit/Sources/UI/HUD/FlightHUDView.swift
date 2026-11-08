@@ -111,6 +111,9 @@ public struct FlightHUDView: View {
                 .overlay(alignment: .bottom) {
                     VStack(spacing: 10) {
                         panel
+                        if model.openPanel == nil {
+                            RudderSlider { model.rudder = $0 }
+                        }
                         ToolCluster(model: model)
                     }
                     .padding(.horizontal, Self.bottomCenterInset)

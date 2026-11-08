@@ -133,6 +133,8 @@ final class HUDModel {
     /// On-screen stick, -1...1 (pitch + is nose up).
     var stickPitch = 0.0
     var stickRoll = 0.0
+    /// Rudder from the on-screen slider, -1 left ... 1 right.
+    var rudder = 0.0
     /// Wheel brakes held.
     var wheelBrakes = false
 
