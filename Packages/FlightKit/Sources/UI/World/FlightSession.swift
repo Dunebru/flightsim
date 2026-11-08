@@ -14,14 +14,15 @@ final class FlightSession {
     let tilt = TiltInput()
     let gamepad = GamepadInput()
 
-    /// Spawn point: runway 8 threshold area at KPHX, in the scene's ENU frame (metres).
-    static let spawn = SIMD3<Double>(-1_700, 0, 0)
-    static let spawnHeading = 90.0
+    let start: StartPosition
+    let settings: AppSettings
     private var lastHUDUpdate: TimeInterval = 0
     private var lastState: FlightState?
 
-    init(profile: AircraftProfile, origin: Geodetic) {
+    init(profile: AircraftProfile, origin: Geodetic, start: StartPosition, settings: AppSettings) {
         self.profile = profile
+        self.start = start
+        self.settings = settings
         frame = LocalFrame(origin: origin)
         do {
             physics = try PhysicsLoop(model: profile.id, initial: spawnConditions())
@@ -36,17 +37,42 @@ final class FlightSession {
         tilt.stop()
     }
 
+    var isAirborneStart: Bool { start.placement.heightFeet > 0 }
+
     func spawnConditions() -> InitialConditions {
-        let g = frame.geodetic(Self.spawn)
-        return InitialConditions(latitude: g.latitude, longitude: g.longitude,
-                                 terrainElevationFeet: frame.origin.height / 0.3048,
-                                 heightAboveGroundFeet: 0, headingDegrees: Self.spawnHeading, airspeedKnots: 0)
+        let p = start.placement
+        let g = frame.geodetic(p.position)
+        var ic = InitialConditions(latitude: g.latitude, longitude: g.longitude,
+                                   terrainElevationFeet: frame.origin.height / 0.3048,
+                                   heightAboveGroundFeet: p.heightFeet, headingDegrees: p.heading,
+                                   airspeedKnots: isAirborneStart ? profile.approachKnots : 0)
+        if isAirborneStart {
+            ic.flaps = profile.flapCommands[min(profile.approachFlapIndex, profile.flapCommands.count - 1)]
+            ic.gearDown = true
+        }
+        return ic
     }
 
-    func resetToRunway(hud: HUDModel) {
+    /// Sets the HUD levers to match the start: idle and parked on the runway, or configured
+    /// for the approach on final.
+    func configureHUD(_ hud: HUDModel) {
+        hud.reverse = false
+        if isAirborneStart {
+            hud.setThrottle(profile.isTurbine ? 0.45 : 0.45)
+            hud.parkingBrake = false
+            hud.flapIndex = min(profile.approachFlapIndex, profile.flapCommands.count - 1)
+        } else {
+            hud.setThrottle(0)
+            hud.parkingBrake = true
+            hud.flapIndex = 0
+        }
+        hud.gear = .down
+    }
+
+    func resetToStart(hud: HUDModel) {
         physics?.send(.reset(spawnConditions()))
-        hud.setThrottle(0)
-        hud.parkingBrake = true
+        if isAirborneStart { physics?.send(.trim) }
+        configureHUD(hud)
         tilt.calibrate()
     }
 
@@ -60,10 +86,16 @@ final class FlightSession {
             inputs.roll = pad.roll
             inputs.yaw = pad.yaw
             if pad.throttleRate != 0 { hud.setThrottle(hud.throttle + pad.throttleRate * dt) }
+        } else if settings.controlMode == .stick {
+            inputs.pitch = hud.stickPitch
+            inputs.roll = hud.stickRoll
         } else if let t = tilt.read() {
             inputs.pitch = t.pitch
             inputs.roll = t.roll
         }
+        // Pilot preferences: sensitivity scales deflection; invert flips pitch.
+        inputs.pitch = max(-1, min(1, inputs.pitch * settings.sensitivity * (settings.invertPitch ? -1 : 1)))
+        inputs.roll = max(-1, min(1, inputs.roll * settings.sensitivity))
         // On the ground, tilt also steers the nosewheel (and rudder), fading out by 60 kt.
         if let last = lastState, last.onGround {
             let blend = max(0, 1 - last.groundSpeedKnots / 60)
@@ -80,6 +112,7 @@ final class FlightSession {
         }
         if !profile.retractableGear { inputs.gearDown = true }
         inputs.parkingBrake = hud.parkingBrake
+        inputs.brakes = hud.wheelBrakes ? 1 : 0
         inputs.pitchTrim = hud.trim
         physics.setInputs(inputs)
         physics.setPaused(hud.paused)

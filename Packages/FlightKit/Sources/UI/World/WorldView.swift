@@ -27,6 +27,8 @@ final class WorldEngine: NSObject {
     /// Called every display frame before rendering with the frame time (s); a flight session
     /// uses it to move the aircraft.
     @ObservationIgnored var frameHook: ((Double, inout SceneDescription) -> Void)?
+    /// The flight's date (real time or a pinned time of day); the launch argument wins.
+    @ObservationIgnored var dateProvider: (() -> Date)?
     /// Latest flight state, for the stats log.
     @ObservationIgnored var physicsProbe: (() -> FlightState?)?
     /// Cockpit, chase, tower, wing and free-orbit views; drag and pinch adjust the current one.
@@ -124,7 +126,7 @@ final class WorldEngine: NSObject {
             framesPerSecond = framesPerSecond == 0 ? fps : framesPerSecond * 0.9 + fps * 0.1
         }
         lastPresentation = t
-        scene.date = timeOverride ?? Date()
+        scene.date = timeOverride ?? dateProvider?() ?? Date()
         frameHook?(dt, &scene)
         scene.cameraPose = rig.pose(aircraftPosition: scene.aircraftPosition, heading: scene.aircraftHeading,
                                     pitch: scene.aircraftPitch, roll: scene.aircraftRoll, dt: dt)

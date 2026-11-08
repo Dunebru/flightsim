@@ -41,16 +41,26 @@ public final class PhysicsLoop: Sendable {
         self.rate = rate
         let fdm = try FlightDynamics(model: model, root: root, rate: rate)
         try fdm.initialize(initial)
-        // Let the gear settle so the resting height is meaningful; hold the brakes so idle
-        // thrust does not creep and turn the aircraft meanwhile.
-        var settle = ControlInputs()
-        settle.parkingBrake = true
-        fdm.apply(settle)
-        fdm.step(Int(rate))
+        let resting: Double
+        if initial.heightAboveGroundFeet <= 0 {
+            // Let the gear settle so the resting height is meaningful; hold the brakes so idle
+            // thrust does not creep and turn the aircraft meanwhile.
+            var settle = ControlInputs()
+            settle.parkingBrake = true
+            settle.flaps = initial.flaps
+            fdm.apply(settle)
+            fdm.step(Int(rate))
+            resting = fdm.state.heightAboveGroundFeet
+        } else {
+            // Airborne start: trim for the given speed, and learn the resting height on the gear
+            // from a separate, short-lived instance so the drawn aircraft lands on its wheels.
+            try? fdm.trim(.full)
+            resting = Self.restingHeight(model: model, root: root, rate: rate) ?? 0
+        }
         let settled = fdm.state
         shared.withLock {
             $0.state = settled
-            $0.restingHeightFeet = initial.heightAboveGroundFeet == 0 ? settled.heightAboveGroundFeet : 0
+            $0.restingHeightFeet = resting
         }
         let box = ModelBox(fdm)
         let thread = Thread { [shared] in Self.run(box: box, shared: shared, rate: rate) }
@@ -60,6 +70,19 @@ public final class PhysicsLoop: Sendable {
     }
 
     deinit { shared.withLock { $0.running = false } }
+
+    /// Height of the reference point above the ground when the aircraft rests on its gear.
+    static func restingHeight(model: String, root: URL?, rate: Double) -> Double? {
+        guard let probe = try? FlightDynamics(model: model, root: root, rate: rate) else { return nil }
+        let ic = InitialConditions(latitude: 0, longitude: 0, terrainElevationFeet: 0,
+                                   heightAboveGroundFeet: 0, headingDegrees: 0, airspeedKnots: 0)
+        guard (try? probe.initialize(ic, enginesRunning: false)) != nil else { return nil }
+        var c = ControlInputs()
+        c.parkingBrake = true
+        probe.apply(c)
+        probe.step(Int(rate))
+        return probe.state.heightAboveGroundFeet
+    }
 
     // MARK: Interface
 

@@ -210,6 +210,7 @@ struct SettingsPanel: View {
     #if os(iOS)
     @Bindable var engine: WorldEngine
     let profile: AircraftProfile
+    @Bindable var settings: AppSettings
     let onSelectAircraft: (AircraftProfile) -> Void
     let onReset: () -> Void
     let onCalibrateTilt: () -> Void
@@ -234,7 +235,7 @@ struct SettingsPanel: View {
             }
             HStack(spacing: 8) {
                 Button(action: onReset) {
-                    Text("Reset to runway").font(.system(size: 14, weight: .semibold)).frame(maxWidth: .infinity).frame(height: 40)
+                    Text("Restart").font(.system(size: 14, weight: .semibold)).frame(maxWidth: .infinity).frame(height: 40)
                 }
                 .buttonStyle(.glass)
                 Button(action: onCalibrateTilt) {
@@ -243,13 +244,31 @@ struct SettingsPanel: View {
                 .buttonStyle(.glass)
             }
             VStack(alignment: .leading, spacing: 6) {
+                Text("Controls")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(HUDStyle.secondaryText)
+                Picker("Controls", selection: $settings.controlMode) {
+                    Text("Tilt").tag(ControlMode.tilt)
+                    Text("On-screen stick").tag(ControlMode.stick)
+                }
+                .pickerStyle(.segmented)
+                HStack {
+                    Text("Sensitivity").font(.system(size: 14, weight: .medium))
+                    Slider(value: $settings.sensitivity, in: 0.5...2, step: 0.1).tint(.white)
+                    Text(String(format: "%.1f", settings.sensitivity)).font(HUDStyle.metric(14)).frame(width: 32)
+                }
+                Toggle("Invert pitch", isOn: $settings.invertPitch)
+                    .font(.system(size: 14, weight: .medium))
+                    .tint(HUDStyle.engaged)
+            }
+            VStack(alignment: .leading, spacing: 6) {
                 Text("Upscaling")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(HUDStyle.secondaryText)
-                Picker("Upscaling", selection: $engine.upscaler) {
-                    Text("MetalFX").tag(UpscalerMode.temporal)
-                    Text("Spatial").tag(UpscalerMode.spatial)
-                    Text("Off").tag(UpscalerMode.off)
+                Picker("Upscaling", selection: $settings.upscaler) {
+                    Text("MetalFX").tag("temporal")
+                    Text("Spatial").tag("spatial")
+                    Text("Off").tag("off")
                 }
                 .pickerStyle(.segmented)
                 .disabled(!engine.temporalSupported)
@@ -260,12 +279,12 @@ struct SettingsPanel: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            Toggle("Frame statistics", isOn: $engine.showStats)
+            Toggle("Frame statistics", isOn: $settings.showStats)
                 .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(.white)
                 .tint(HUDStyle.engaged)
             #endif
-            Text("More control and realism settings arrive in M3.")
+            Text("Realism and failure settings arrive with the systems they control.")
                 .font(.system(size: 13))
                 .foregroundStyle(HUDStyle.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)

@@ -1,4 +1,5 @@
 import FlightModel
+import Renderer
 public import SwiftUI
 import Foundation
 
@@ -17,9 +18,11 @@ public struct FlightHUDView: View {
     @State private var engine = WorldEngine()
     @State private var session: FlightSession?
     #endif
+    @Bindable private var settings: AppSettings
     private let onExit: () -> Void
 
-    public init(onExit: @escaping () -> Void = {}) {
+    public init(settings: AppSettings = AppSettings(), onExit: @escaping () -> Void = {}) {
+        self.settings = settings
         self.onExit = onExit
     }
 
@@ -102,11 +105,27 @@ public struct FlightHUDView: View {
                     .padding(.bottom, 10)
                 }
 
+            // On-screen stick (stick mode): right thumb, above the button bar, inside the
+            // right-hand levers.
+            if settings.controlMode == .stick {
+                VirtualStick { pitch, roll in
+                    model.stickPitch = pitch
+                    model.stickRoll = roll
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                .padding(.trailing, HUDStyle.edge + Self.rightEdgeWidth + HUDStyle.gap)
+                .padding(.bottom, 10 + 48 + HUDStyle.gap)
+            }
+
             if model.paused { pausedOverlay }
         }
         .preferredColorScheme(.dark)
         .animation(.spring(duration: 0.35, bounce: 0.15), value: model.apMaster)
         #if os(iOS)
+        .onChange(of: settings.upscaler, initial: true) { _, mode in
+            engine.upscaler = UpscalerMode(rawValue: mode) ?? .temporal
+        }
+        .onChange(of: settings.showStats, initial: true) { _, show in engine.showStats = show }
         .onChange(of: model.camera, initial: true) { _, camera in
             engine.rig.mode = switch camera {
             case .cockpit: .cockpit
@@ -136,18 +155,20 @@ public struct FlightHUDView: View {
 
     #if os(iOS)
     private func startSession() {
-        let s = FlightSession(profile: model.profile, origin: engine.scene.origin)
+        model.profile = AircraftProfile.all.first { $0.id == settings.aircraftID } ?? .c172
+        let s = FlightSession(profile: model.profile, origin: engine.scene.origin, start: settings.start, settings: settings)
+        s.configureHUD(model)
         session = s
         let hud = model
+        let settings = self.settings
+        engine.dateProvider = { settings.flightDate() }
         engine.frameHook = { dt, scene in s.tick(dt: dt, hud: hud, scene: &scene) }
         engine.physicsProbe = { s.physics?.state }
     }
 
     private func switchAircraft(to profile: AircraftProfile) {
         guard profile != model.profile else { return }
-        model.profile = profile
-        model.setThrottle(0)
-        model.parkingBrake = true
+        settings.aircraftID = profile.id
         engine.frameHook = nil
         session = nil
         startSession()
@@ -175,13 +196,16 @@ public struct FlightHUDView: View {
                 accessibilityLabel: model.reverse ? "Reverse thrust" : "Thrust"
             )
             .frame(maxHeight: 250)
-            GlassCircleToggle(
-                isOn: model.reverse, onColor: HUDStyle.caution, size: 48,
-                accessibilityLabel: "Reverse thrust"
-            ) {
-                withAnimation(.spring(duration: 0.3)) { model.toggleReverse() }
-            } label: {
-                Text("REV").font(.system(size: 12, weight: .heavy, design: .rounded))
+            HStack(spacing: 8) {
+                GlassCircleToggle(
+                    isOn: model.reverse, onColor: HUDStyle.caution, size: 48,
+                    accessibilityLabel: "Reverse thrust"
+                ) {
+                    withAnimation(.spring(duration: 0.3)) { model.toggleReverse() }
+                } label: {
+                    Text("REV").font(.system(size: 12, weight: .heavy, design: .rounded))
+                }
+                HoldToBrake(isHeld: $model.wheelBrakes)
             }
         }
     }
@@ -246,9 +270,9 @@ public struct FlightHUDView: View {
                     GlassPanel(title: "Settings", onClose: close) {
                         #if os(iOS)
                         SettingsPanel(
-                            engine: engine, profile: model.profile,
+                            engine: engine, profile: model.profile, settings: settings,
                             onSelectAircraft: { switchAircraft(to: $0) },
-                            onReset: { session?.resetToRunway(hud: model) },
+                            onReset: { session?.resetToStart(hud: model) },
                             onCalibrateTilt: { session?.tilt.calibrate() },
                             onEndFlight: onExit
                         )

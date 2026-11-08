@@ -187,3 +187,32 @@ struct GlassCircleToggle<Label: View>: View {
         .accessibilityValue(isOn ? "On" : "Off")
     }
 }
+
+/// Wheel brakes: on while the thumb holds the button, orange like every caution state.
+struct HoldToBrake: View {
+    @Binding var isHeld: Bool
+    var size: CGFloat = 48
+
+    var body: some View {
+        Text("BRK")
+            .font(.system(size: 12, weight: .heavy, design: .rounded))
+            .foregroundStyle(isHeld ? Color.black : Color.white)
+            .frame(width: size, height: size)
+            .background {
+                ZStack {
+                    Color.clear.glassEffect(HUDStyle.glassInteractive, in: .circle)
+                    if isHeld { Circle().fill(HUDStyle.caution) }
+                }
+            }
+            .contentShape(.circle)
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { _ in if !isHeld { isHeld = true } }
+                    .onEnded { _ in isHeld = false }
+            )
+            .sensoryFeedback(.impact(weight: .medium), trigger: isHeld)
+            .accessibilityLabel("Wheel brakes, hold")
+            .accessibilityAddTraits(.isButton)
+            .accessibilityValue(isHeld ? "Braking" : "Released")
+    }
+}

@@ -90,6 +90,14 @@ final class HUDModel {
     var n1 = 0.0
     var stallWarning = false
 
+    // MARK: Pilot inputs from on-screen controls
+
+    /// On-screen stick, -1...1 (pitch + is nose up).
+    var stickPitch = 0.0
+    var stickRoll = 0.0
+    /// Wheel brakes held.
+    var wheelBrakes = false
+
     // MARK: Behavior
 
     func setThrottle(_ value: Double) {

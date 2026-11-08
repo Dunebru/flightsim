@@ -16,13 +16,17 @@ public struct AircraftProfile: Sendable, Hashable, Identifiable {
     /// Angle of attack (degrees) where the stall warning sounds: about 3 degrees below the
     /// model's lift peak (measured by the test pilot: C172P 16.0, A320 17.2).
     public let stallWarningAlpha: Double
+    /// Airborne starts on final: calibrated airspeed (knots) and flap lever detent.
+    public let approachKnots: Double
+    public let approachFlapIndex: Int
 
     public static let c172 = AircraftProfile(
         id: "c172p", name: "Cessna 172P",
         flapLabels: ["UP", "10", "20", "30"], flapCommands: [0, 1.0 / 3, 2.0 / 3, 1],
         hasSpoilers: false, retractableGear: false, isTurbine: false, visualIsStandIn: false,
         fidelityNote: "JSBSim's reference C172P: the best-validated model in the JSBSim library.",
-        stallWarningAlpha: 13
+        stallWarningAlpha: 13,
+        approachKnots: 65, approachFlapIndex: 2
     )
 
     /// The JSBSim library A320 is a generic 2002-era model: flaps 0 to 40 degrees and no slats,
@@ -32,7 +36,8 @@ public struct AircraftProfile: Sendable, Hashable, Identifiable {
         flapLabels: ["0", "1", "2", "3", "FULL"], flapCommands: [0, 10.0 / 40, 15.0 / 40, 20.0 / 40, 1],
         hasSpoilers: true, retractableGear: true, isTurbine: true, visualIsStandIn: true,
         fidelityNote: "Generic JSBSim A320, tuned (see TUNING.md): no slats, no fly-by-wire. Drawn with the C172 until the fleet arrives in M6.",
-        stallWarningAlpha: 14
+        stallWarningAlpha: 14,
+        approachKnots: 140, approachFlapIndex: 4
     )
 
     public static let all: [AircraftProfile] = [.c172, .a320]
