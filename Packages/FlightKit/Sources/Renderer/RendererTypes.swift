@@ -79,12 +79,36 @@ public struct OrbitCamera: Sendable, Equatable {
     }
 }
 
+/// A camera with full orientation (the cockpit and wing views bank with the aircraft).
+public struct CameraPose: Sendable, Equatable {
+    /// World metres (ENU from the scene origin).
+    public var position: SIMD3<Double>
+    /// Unit view direction.
+    public var forward: SIMD3<Double>
+    /// Unit up direction (perpendicular to forward).
+    public var up: SIMD3<Double>
+    public var fovY: Double
+
+    public init(position: SIMD3<Double>, forward: SIMD3<Double>, up: SIMD3<Double> = SIMD3(0, 0, 1), fovY: Double) {
+        self.position = position
+        self.forward = forward
+        self.up = up
+        self.fovY = fovY
+    }
+}
+
+extension OrbitCamera {
+    public var pose: CameraPose { CameraPose(position: position, forward: forward, up: SIMD3(0, 0, 1), fovY: fovY) }
+}
+
 /// Everything the renderer needs to draw one frame.
 public struct SceneDescription: Sendable {
     /// Geodetic position of the scene origin (drives the sun and the atmosphere).
     public var origin: Geodetic
     public var date: Date
     public var camera: OrbitCamera
+    /// When set, overrides `camera` (cockpit, wing and tower views).
+    public var cameraPose: CameraPose?
     /// Aircraft reference point on the ground, world metres, and heading (radians from north).
     public var aircraftPosition: SIMD3<Double>
     public var aircraftHeading: Double

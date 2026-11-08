@@ -159,7 +159,9 @@ step "Generate Xcode project"
 run_logged xcodegen xcodegen generate --quiet
 
 step "FlightKit tests (macOS host)"
-run_logged flightkit-tests swift test --package-path Packages/FlightKit
+# Serial: the physics loop tests measure real time and must not share the CPU or the
+# JSBSim engine lock with other simulations.
+run_logged flightkit-tests swift test --package-path Packages/FlightKit --no-parallel
 test_summary "$OUT/flightkit-tests.log"
 
 step "Tools tests (macOS host)"

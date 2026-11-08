@@ -220,15 +220,16 @@ public final class SceneRenderer {
 
         // Camera and jitter
         let offset = scene.worldOffset
-        let camera = scene.camera.position + offset
-        let forward = SIMD3<Float>(scene.camera.forward)
+        let pose = scene.cameraPose ?? scene.camera.pose
+        let camera = pose.position + offset
+        let forward = SIMD3<Float>(pose.forward)
         let jitter: SIMD2<Float> = temporal
             ? SIMD2(MatrixMath.halton(frameIndex % 16 + 1, base: 2) - 0.5, MatrixMath.halton(frameIndex % 16 + 1, base: 3) - 0.5)
             : .zero
         let ndcJitter = SIMD2(2 * jitter.x / Float(renderSize.x), -2 * jitter.y / Float(renderSize.y))
         let aspect = Float(renderSize.x) / Float(renderSize.y)
-        let view = MatrixMath.lookDirection(forward)
-        let fov = Float(scene.camera.fovY)
+        let view = MatrixMath.lookDirection(forward, up: SIMD3<Float>(pose.up))
+        let fov = Float(pose.fovY)
         let projection = MatrixMath.perspectiveReverseZ(fovY: fov, aspect: aspect, near: 0.1, jitter: ndcJitter)
         let projectionNoJitter = MatrixMath.perspectiveReverseZ(fovY: fov, aspect: aspect, near: 0.1)
         let viewProjNoJitter = projectionNoJitter * view

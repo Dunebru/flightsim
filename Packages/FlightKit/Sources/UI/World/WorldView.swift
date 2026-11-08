@@ -29,11 +29,8 @@ final class WorldEngine: NSObject {
     @ObservationIgnored var frameHook: ((Double, inout SceneDescription) -> Void)?
     /// Latest flight state, for the stats log.
     @ObservationIgnored var physicsProbe: (() -> FlightState?)?
-    /// Chase camera relative to the aircraft: yaw offset from its heading, look-down angle,
-    /// distance. Drag and pinch change these.
-    @ObservationIgnored var orbitYawOffset: Double = -25 * .pi / 180
-    @ObservationIgnored var orbitPitch: Double = 8 * .pi / 180
-    @ObservationIgnored var orbitDistance: Double = 15
+    /// Cockpit, chase, tower, wing and free-orbit views; drag and pinch adjust the current one.
+    @ObservationIgnored var rig = CameraRig()
 
     private(set) var framesPerSecond: Double = 0
     private(set) var startupError: String?
@@ -129,12 +126,9 @@ final class WorldEngine: NSObject {
         lastPresentation = t
         scene.date = timeOverride ?? Date()
         frameHook?(dt, &scene)
-        scene.camera = OrbitCamera(
-            target: scene.aircraftPosition + SIMD3(0, 0, 1.2),
-            yaw: scene.aircraftHeading + orbitYawOffset,
-            pitch: orbitPitch,
-            distance: orbitDistance
-        )
+        scene.cameraPose = rig.pose(aircraftPosition: scene.aircraftPosition, heading: scene.aircraftHeading,
+                                    pitch: scene.aircraftPitch, roll: scene.aircraftRoll, dt: dt)
+        scene.showAircraft = rig.drawsAircraft
         renderer.render(scene, to: update.drawable.texture, drawable: update.drawable)
         renderer.exposureAdaptation = 0.05
         if logStats {
@@ -161,12 +155,11 @@ final class WorldEngine: NSObject {
     // MARK: Camera
 
     func orbit(byPoints delta: CGSize) {
-        orbitYawOffset += Double(delta.width) * 0.008
-        orbitPitch = min(max(orbitPitch + Double(delta.height) * 0.006, -0.15), 1.4)
+        rig.drag(Double(delta.width), Double(delta.height))
     }
 
     func zoom(by factor: Double) {
-        orbitDistance = min(max(orbitDistance / factor, 6), 400)
+        rig.pinch(factor)
     }
 }
 

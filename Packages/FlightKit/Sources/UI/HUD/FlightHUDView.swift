@@ -106,6 +106,17 @@ public struct FlightHUDView: View {
         }
         .preferredColorScheme(.dark)
         .animation(.spring(duration: 0.35, bounce: 0.15), value: model.apMaster)
+        #if os(iOS)
+        .onChange(of: model.camera, initial: true) { _, camera in
+            engine.rig.mode = switch camera {
+            case .cockpit: .cockpit
+            case .chase: .chase
+            case .tower: .tower
+            case .wing: .wing
+            case .orbit: .orbit
+            }
+        }
+        #endif
         .onAppear {
             #if os(iOS)
             startSession()
