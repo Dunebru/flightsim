@@ -155,6 +155,24 @@ inline float shadowFactor(float3 worldPos, constant FrameUniforms &u, depth2d<fl
     return sum / 9.0;
 }
 
+/// Shadows from buildings (the world shadow map around the view): 3x3 PCF, a small normal
+/// offset against acne, faded out toward the map's edges.
+inline float worldShadowFactor(float3 worldPos, float3 N, constant FrameUniforms &u, depth2d<float> map) {
+    if (u.worldShadowParams.x < 0.5) return 1.0;
+    float4 sc = u.worldShadowViewProj * float4(worldPos + N * u.worldShadowParams.w, 1.0);
+    float3 p = sc.xyz / sc.w;
+    float2 uv = float2(p.x * 0.5 + 0.5, 0.5 - p.y * 0.5);
+    if (any(uv < 0.0) || any(uv > 1.0) || p.z > 1.0 || p.z < 0.0) return 1.0;
+    float edge = smoothstep(0.0, 0.08, min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y)));
+    constexpr sampler cmp(filter::linear, address::clamp_to_edge, compare_func::less_equal);
+    float texel = u.worldShadowParams.z;
+    float sum = 0.0;
+    for (int y = -1; y <= 1; y++)
+        for (int x = -1; x <= 1; x++)
+            sum += map.sample_compare(cmp, uv + float2(x, y) * texel, p.z - u.worldShadowParams.y);
+    return mix(1.0, sum / 9.0, edge);
+}
+
 inline float3 fresnelSchlick(float cosTheta, float3 f0) {
     return f0 + (1.0 - f0) * pow(1.0 - saturate(cosTheta), 5.0);
 }
@@ -306,8 +324,11 @@ inline float3 facadeAlbedo(float code, float2 uv, float3 N, thread float &roughn
         // City buildings: Phoenix and Los Angeles stucco, tile and membrane roofs, small windows.
         if (N.z > 0.7) {
             roughness = 0.85;
-            float3 roofs[4] = { float3(0.55, 0.53, 0.50), float3(0.42, 0.22, 0.15), float3(0.30, 0.30, 0.30), float3(0.62, 0.60, 0.56) };
-            return roofs[int(seed * 3.99)] * (0.88 + 0.24 * fbm(uv * 0.3, 2));
+            // White and light grey membranes (most commercial roofs), sand-coloured and
+            // terracotta concrete tile, the odd dark shingle roof.
+            float3 roofs[6] = { float3(0.70, 0.70, 0.68), float3(0.58, 0.57, 0.54), float3(0.62, 0.52, 0.40),
+                                float3(0.52, 0.30, 0.20), float3(0.66, 0.60, 0.50), float3(0.32, 0.31, 0.30) };
+            return roofs[int(seed * 5.99)] * (0.9 + 0.2 * fbm(uv * 0.3, 2));
         }
         float3 walls[4] = { float3(0.62, 0.55, 0.45), float3(0.70, 0.67, 0.60), float3(0.55, 0.47, 0.38), float3(0.66, 0.62, 0.58) };
         float3 wall = walls[int(fract(seed * 7.13) * 3.99)];
@@ -416,13 +437,15 @@ fragment GBufferOut sceneFragment(VertexOut in [[stage_in]],
                                   texture2d<float> skyView [[texture(1)]],
                                   texture3d<float> aerial [[texture(2)]],
                                   depth2d<float> shadowMap [[texture(3)]],
-                                  texture2d<float> nightLights [[texture(5)]])
+                                  texture2d<float> nightLights [[texture(5)]],
+                                  depth2d<float> worldShadowMap [[texture(6)]])
 {
     float kind = d.material.w;
     float3 N = normalize(in.normal);
-    // Two-sided meshes (the aircraft) face the viewer; terrain normals (skirts included) are
-    // authored pointing up and are used as they are.
-    if (!frontFacing && kind != kKindTerrain) N = -N;
+    // Two-sided meshes (the aircraft) face the viewer. Everything else (terrain and its skirts,
+    // buildings, roofs, signs) has authored normals used as they are: flipping by winding once
+    // turned every counter-clockwise roof into a downward-facing wall full of windows.
+    if (!frontFacing && kind == kKindAircraft) N = -N;
     float roughness = d.material.x;
     float3 albedo = d.baseColor.rgb;
     float3 windowGlow = float3(0.0);
@@ -472,7 +495,7 @@ fragment GBufferOut sceneFragment(VertexOut in [[stage_in]],
         albedo *= t.rgb;
     }
 
-    float shadow = shadowFactor(in.worldPos, u, shadowMap);
+    float shadow = min(shadowFactor(in.worldPos, u, shadowMap), worldShadowFactor(in.worldPos, N, u, worldShadowMap));
     float3 color = shadeSurface(albedo, roughness, d.material.y, N, in.worldPos, shadow, u, light, skyView);
     color += d.emissive.rgb * (kind == kKindAircraft ? 1.0 : 0.0);
     float night = smoothstep(0.05, -0.08, u.sunDirection.z);
@@ -579,6 +602,15 @@ fragment GBufferOut skyFragment(SkyOut in [[stage_in]],
 }
 
 // MARK: - Shadow map
+
+vertex float4 shadowCompactVertex(uint vid [[vertex_id]],
+                                  const device CompactVertex *vertices [[buffer(0)]],
+                                  constant FrameUniforms &u [[buffer(1)]],
+                                  constant DrawUniforms &d [[buffer(2)]])
+{
+    float4 world = d.model * float4(float3(vertices[vid].position), 1.0);
+    return u.shadowViewProj * world;
+}
 
 vertex float4 shadowVertex(uint vid [[vertex_id]],
                            const device MeshVertex *vertices [[buffer(0)]],

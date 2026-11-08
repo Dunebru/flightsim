@@ -106,6 +106,13 @@ struct AirportRenderTests {
             views.append(("kphx-gate-night", gateNight))
         }
 
+        // The city north of the field from 250 m, looking north: shadows fall to the right.
+        var city = base
+        city.showAircraft = false
+        city.cameraPose = CameraPose(position: SIMD3(-1_500, 1_800, 250), forward: simd_normalize(SIMD3(0.15, 1, -0.45)),
+                                     up: SIMD3(0, 0, 1), fovY: 60 * .pi / 180)
+        views.append(("kphx-city-north", city))
+
         // At a holding position north of 08/26, looking south at the runway and its signs.
         let hold = site.layout.holdPositions.first { h in
             h.runway == "08/26" && h.kind == .runway && abs(h.towardRunway - 180) < 20 && f.local(site.xy(h.position)).x > 600

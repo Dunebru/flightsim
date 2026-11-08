@@ -10,6 +10,7 @@ struct FrameUniforms {
     var prevViewProjNoJitter = matrix_identity_float4x4
     var invViewProjNoJitter = matrix_identity_float4x4
     var shadowViewProj = matrix_identity_float4x4
+    var worldShadowViewProj = matrix_identity_float4x4
     var cameraDelta = SIMD4<Float>.zero
     var sunDirection = SIMD4<Float>.zero
     var sunIlluminance = SIMD4<Float>.zero
@@ -18,6 +19,7 @@ struct FrameUniforms {
     var renderSize = SIMD4<Float>.zero
     var jitter = SIMD4<Float>.zero
     var shadowParams = SIMD4<Float>.zero
+    var worldShadowParams = SIMD4<Float>.zero
     var debug = SIMD4<Float>.zero
 }
 

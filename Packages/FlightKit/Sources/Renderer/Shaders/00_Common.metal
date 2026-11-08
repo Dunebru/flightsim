@@ -12,6 +12,7 @@ struct FrameUniforms {
     float4x4 prevViewProjNoJitter;  // previous frame, relative to the previous camera
     float4x4 invViewProjNoJitter;   // clip -> camera-relative direction (for sky rays)
     float4x4 shadowViewProj;        // camera-relative world -> shadow clip
+    float4x4 worldShadowViewProj;   // camera-relative world -> world (buildings) shadow clip
     float4 cameraDelta;             // xyz: camera position change since last frame (m, world)
     float4 sunDirection;            // xyz: unit vector to the sun (world ENU, z up)
     float4 sunIlluminance;          // rgb: sun illuminance outside the atmosphere (relative units)
@@ -21,6 +22,7 @@ struct FrameUniforms {
     float4 renderSize;              // xy: render target size (px), zw: 1/size
     float4 jitter;                  // xy: sub-pixel jitter applied this frame (px)
     float4 shadowParams;            // x: enabled, y: depth bias, z: 1/shadow map size
+    float4 worldShadowParams;       // x: enabled, y: depth bias, z: 1/map size, w: texel size (m)
     float4 debug;                   // x: show ground (1/0)
 };
 

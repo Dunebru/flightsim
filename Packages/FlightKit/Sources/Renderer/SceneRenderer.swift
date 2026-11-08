@@ -52,6 +52,11 @@ public final class SceneRenderer {
     // Scene resources
     private let shadowMap: any MTLTexture
     private let shadowSize = 2048
+    /// Building shadows around the view: 2048 texels over 1.2 km on the ground (0.6 m each),
+    /// widening with height to 4.8 km (2.3 m each) so a final approach shows the city's shadows.
+    private let worldShadowMap: any MTLTexture
+    private let shadowCompactPipeline: any MTLRenderPipelineState
+    public var worldShadows = true
     private let dummyTexture: any MTLTexture
     private let blackTexture: any MTLTexture
     private let markingAtlas: any MTLTexture
@@ -157,6 +162,7 @@ public final class SceneRenderer {
             d.colorAttachments[1].writeMask = []
         }
         shadowPipeline = try render("shadowVertex", nil, colors: [], depth: Self.depthFormat)
+        shadowCompactPipeline = try render("shadowCompactVertex", nil, colors: [], depth: Self.depthFormat)
         tonemapPipeline = try render("fullscreenVertex", "tonemapFragment", colors: [Upscaler.colorFormat], depth: nil)
 
         func depthState(_ compare: MTLCompareFunction, write: Bool) throws -> any MTLDepthStencilState {
@@ -197,6 +203,7 @@ public final class SceneRenderer {
         memset(lb.contents(), 0, lightingStateSize)
         lightingBuffer = lb
         shadowMap = try texture2D(Self.depthFormat, shadowSize, shadowSize, [.renderTarget, .shaderRead])
+        worldShadowMap = try texture2D(Self.depthFormat, shadowSize, shadowSize, [.renderTarget, .shaderRead])
 
         let dd = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba8Unorm, width: 1, height: 1, mipmapped: false)
         dd.usage = .shaderRead
@@ -377,6 +384,72 @@ public final class SceneRenderer {
         cbAtmosphere.commit()
         signposter.endInterval("Encode atmosphere", encodeAtmosphere)
 
+        // World shadows: buildings cast onto the ground and each other in a square around the
+        // view, centred 450 m ahead of the camera and snapped to whole texels so edges hold still.
+        var worldShadowOn = false
+        var worldShadowUniforms = u
+        if worldShadows && sunDir.z > 0.03 && !airports.isEmpty {
+            let half = min(max(600 + 3.5 * cameraAboveGround, 600), 2_400)
+            let halfF = Float(half)
+            var fwd = SIMD2<Double>(pose.forward.x, pose.forward.y)
+            let fl = simd_length(fwd)
+            fwd = fl > 1e-3 ? fwd / fl : .zero
+            let lightDir = SIMD3<Double>(sunDir)
+            let upHint = abs(lightDir.z) > 0.98 ? SIMD3<Double>(0, 1, 0) : SIMD3<Double>(0, 0, 1)
+            let f = -lightDir
+            let r = simd_normalize(simd_cross(f, upHint)), v = simd_cross(r, f)
+            var centre = camera + SIMD3(fwd.x * half * 0.7, fwd.y * half * 0.7, offset.z - camera.z)
+            let texel = 2 * half / Double(shadowSize)
+            let a = simd_dot(centre, r), b = simd_dot(centre, v)
+            centre += r * ((a / texel).rounded() * texel - a) + v * ((b / texel).rounded() * texel - b)
+            let c = SIMD3<Float>(centre - camera)
+            let lightView = MatrixMath.lookAt(eye: c + sunDir * 3_000, target: c, up: SIMD3<Float>(upHint))
+            u.worldShadowViewProj = MatrixMath.orthographic(halfWidth: halfF, halfHeight: halfF, near: 1, far: 6_000) * lightView
+            // Bias and normal offset scale with the texel (0.6 to 2.3 m): a fixed bias left acne
+            // on roofs once the map widened. Depth spans 6 km.
+            let texelMetres = Float(texel)
+            u.worldShadowParams = SIMD4(1, texelMetres * 1.5 / 6_000, 1 / Float(shadowSize), texelMetres)
+            worldShadowUniforms = u
+            worldShadowUniforms.shadowViewProj = u.worldShadowViewProj
+            worldShadowOn = true
+        }
+        if worldShadowOn {
+            let cbWorld = makeCommandBuffer(label: "World shadow")
+            let pass = MTLRenderPassDescriptor()
+            pass.depthAttachment.texture = worldShadowMap
+            pass.depthAttachment.loadAction = .clear
+            pass.depthAttachment.clearDepth = 1
+            pass.depthAttachment.storeAction = .store
+            if let e = cbWorld.makeRenderCommandEncoder(descriptor: pass) {
+                e.setDepthStencilState(shadowDepth)
+                e.setCullMode(.none)
+                e.setDepthBias(1, slopeScale: 2.5, clamp: 0.01)
+                e.setVertexBytes(&worldShadowUniforms, length: MemoryLayout<FrameUniforms>.stride, index: 1)
+                let reach = Double(u.worldShadowParams.w) * 1.6
+                for airport in airports {
+                    let model = airport.model(relativeTo: camera, offset: offset)
+                    var d = DrawUniforms()
+                    d.model = model
+                    e.setRenderPipelineState(shadowPipeline)
+                    e.setVertexBytes(&d, length: MemoryLayout<DrawUniforms>.stride, index: 2)
+                    for item in airport.draws where item.uniforms.material.w == SurfaceKind.building.rawValue {
+                        e.setVertexBuffer(item.vertices, offset: 0, index: 0)
+                        e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: item.count)
+                    }
+                    e.setRenderPipelineState(shadowCompactPipeline)
+                    for chunk in airport.city {
+                        let c4 = model * SIMD4<Float>(SIMD3<Float>(chunk.centre), 1)
+                        guard Double(simd_length(SIMD2(c4.x, c4.y))) - chunk.radius < reach * 1.5 else { continue }
+                        e.setVertexBuffer(chunk.vertices, offset: 0, index: 0)
+                        e.drawIndexedPrimitives(type: .triangle, indexCount: chunk.indexCount, indexType: .uint32,
+                                                indexBuffer: chunk.indices, indexBufferOffset: 0)
+                    }
+                }
+                e.endEncoding()
+            }
+            cbWorld.commit()
+        }
+
         if shadowOn, let aircraft {
             let cbShadow = makeCommandBuffer(label: "Shadow")
             let pass = MTLRenderPassDescriptor()
@@ -426,6 +499,7 @@ public final class SceneRenderer {
             e.setFragmentTexture(shadowMap, index: 3)
             e.setFragmentTexture(transmittanceLUT, index: 4)
             e.setFragmentTexture(blackTexture, index: 5)
+            e.setFragmentTexture(worldShadowMap, index: 6)
             e.setRenderPipelineState(scenePipeline)
             e.setDepthStencilState(depthWrite)
             e.setCullMode(.none)
