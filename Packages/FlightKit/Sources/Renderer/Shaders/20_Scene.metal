@@ -456,13 +456,22 @@ inline float3 groundNormal(texture2d<float> t, float2 uvMetres, float distance) 
 
 inline float3 pavementAlbedo(float2 uv, bool asphalt, float distance) {
     if (asphalt) {
+        // Laid in different years: fresh dark mats beside grey, aged ones, with sealed cracks.
         float g = fbm(uv * 0.3, 3), p = fbm(uv * 0.01, 3);
-        return float3(0.12, 0.118, 0.112) * (0.85 + 0.3 * p) * (0.92 + 0.16 * g);
+        float age = smoothstep(0.35, 0.65, fbm(uv * 0.0045 + 3.7, 3));
+        float3 a = mix(float3(0.075, 0.074, 0.072), float3(0.15, 0.147, 0.14), age);
+        float crack = 1.0 - smoothstep(0.0, 0.02, abs(fbm(uv * 0.06 + 11.0, 3) - 0.5));
+        a *= 1.0 - 0.45 * crack * saturate(1.0 - distance / 180.0);
+        return a * (0.88 + 0.24 * p) * (0.92 + 0.16 * g);
     }
-    // Taxiway and apron concrete: 6 m slabs, each a slightly different tone, oil staining.
+    // Taxiway and apron concrete: 6 m slabs, each a slightly different tone; some replaced
+    // (lighter, newer), some stained; broad weathering across the apron; oil staining.
     float2 slab = float2(6.0, 6.0);
-    float tone = 0.96 + 0.08 * hash21(floor(uv / slab));
-    float3 c = float3(0.36, 0.35, 0.33) * tone * (0.9 + 0.2 * fbm(uv * 0.015, 3));
+    float hs = hash21(floor(uv / slab));
+    float tone = 0.92 + 0.12 * hash21(floor(uv / slab) + 17.0);
+    tone *= hs > 0.94 ? 1.13 : (hs < 0.05 ? 0.84 : 1.0);
+    float weather = 0.86 + 0.24 * fbm(uv * 0.0035 + 1.3, 3);
+    float3 c = float3(0.36, 0.35, 0.33) * tone * weather * (0.9 + 0.2 * fbm(uv * 0.015, 3));
     float stains = smoothstep(0.62, 0.8, fbm(uv * 0.08 + 7.0, 3));
     c = mix(c, c * 0.55, stains * 0.6);
     float joint = (1.0 - smoothstep(0.012, 0.03, jointDistance(uv, slab))) * saturate(1.0 - distance / 140.0);
