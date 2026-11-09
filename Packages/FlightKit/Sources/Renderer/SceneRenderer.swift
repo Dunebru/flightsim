@@ -82,11 +82,15 @@ public final class SceneRenderer {
     private var trafficLightRing: [any MTLBuffer] = []
     /// The A320 for parked and moving airliners, once loaded (the generic shapes until then),
     /// and per-frame instance buffers for it.
-    private var fleet: AirlinerFleet?
+    /// Traffic models by `TrafficType`: the A320, the 777, the E175 (nil until loaded).
+    private var fleets: [AirlinerFleet?] = [nil, nil, nil]
+    private var fleet: AirlinerFleet? { fleets[0] }
     private var fleetRing: [any MTLBuffer] = []
     /// Airliners nearer than this (m) get the full model; the rest the simplified one.
     public var fleetDetailDistance: Double = 300
-    public var fleetTriangles: (full: Int, distant: Int) { (fleet?.fullTriangles ?? 0, fleet?.distantTriangles ?? 0) }
+    public var fleetTriangles: (full: Int, distant: Int) {
+        (fleets.reduce(0) { $0 + ($1?.fullTriangles ?? 0) }, fleets.reduce(0) { $0 + ($1?.distantTriangles ?? 0) })
+    }
     // Stars
     private let starPipeline: any MTLRenderPipelineState
     private var stars: (buffer: any MTLBuffer, count: Int)?
@@ -476,6 +480,11 @@ public final class SceneRenderer {
         u.moonDirection = SIMD4(SIMD3<Float>(moon.direction), Float(0.272_5 * .pi / 180 * 384_400 / moon.distanceKm))
         let moonLux = 0.27 * pow(moon.illuminated, 3.5) * max(moon.direction.z, 0)
         u.moonLight = SIMD4(Float(moonLux / 120_000) * moonlightBoost, 0, 0, 0)
+        // The player's landing, taxi and logo lights as spot lights on the scene.
+        if let pl = scene.playerLights {
+            u.setSpots(Self.playerSpots(pl, small: scene.playerLightsSmall, relativeTo: { relative($0 + offset, to: camera) }),
+                       scale: spotIntensity)
+        }
 
         // Draws. With terrain loaded the procedural ground is only a fallback past the scenery's
         // edge, so it sits just below sea level (under all the terrain, whose heights are clamped
@@ -690,14 +699,15 @@ public final class SceneRenderer {
                 }
                 // Parked airliners cast.
                 e.setRenderPipelineState(shadowParkedPipeline)
-                if let fleet {
-                    for f in fleetFrames {
-                        var d = DrawUniforms()
-                        d.model = f.airport.model(relativeTo: camera, offset: offset)
-                        e.setVertexBytes(&d, length: MemoryLayout<DrawUniforms>.stride, index: 2)
-                        e.setVertexBuffer(fleet.shadow.buffer, offset: 0, index: 0)
-                        e.setVertexBuffer(f.buffer, offset: f.first * MemoryLayout<SIMD8<Float>>.stride, index: 3)
-                        e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: fleet.shadow.count, instanceCount: f.total)
+                for f in fleetFrames {
+                    var d = DrawUniforms()
+                    d.model = f.airport.model(relativeTo: camera, offset: offset)
+                    e.setVertexBytes(&d, length: MemoryLayout<DrawUniforms>.stride, index: 2)
+                    for t in f.types {
+                        guard let fl = fleets[t.type] else { continue }
+                        e.setVertexBuffer(fl.shadow.buffer, offset: 0, index: 0)
+                        e.setVertexBuffer(f.buffer, offset: t.start * MemoryLayout<SIMD8<Float>>.stride, index: 3)
+                        e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: fl.shadow.count, instanceCount: t.count)
                     }
                 }
                 for airport in airports where fleet == nil {
@@ -894,12 +904,13 @@ public final class SceneRenderer {
             var parked = 0
             e.setRenderPipelineState(parkedPipeline)
             e.setFragmentTexture(dummyTexture, index: 0)
-            if let fleet {
+            do {
                 for f in fleetFrames {
                     let model = f.airport.model(relativeTo: camera, offset: offset)
                     let prev = f.airport.model(relativeTo: previousCam, offset: offset)
                     for run in f.runs {
                         e.setVertexBuffer(f.buffer, offset: run.start * MemoryLayout<SIMD8<Float>>.stride, index: 3)
+                        guard let fleet = fleets[run.type] else { continue }
                         for g in [fleet.full, fleet.distant, fleet.far][run.lod] {
                             var d = g.draw
                             d.model = model
@@ -997,12 +1008,20 @@ public final class SceneRenderer {
                         d.material = SIMD4(0.12, 0, 0, SurfaceKind.aircraft.rawValue)
                     }
                     var texture = part.texture
+                    // Night factor: 0 by day, 1 once the sun is 8 degrees down.
+                    let t = min(max((0.05 - sunDir.z) / 0.13, 0), 1)
+                    let night = t * t * (3 - 2 * t)
+                    // AC3D emission stands for panel lighting set to suit daylight; at night
+                    // pilots turn it right down (it would otherwise light the deck like noon).
+                    d.emissive = SIMD4(d.emissive.x * (1 - 0.995 * night), d.emissive.y * (1 - 0.995 * night), d.emissive.z * (1 - 0.995 * night), d.emissive.w)
                     if !part.display.isEmpty {
                         // A screen: its live image, lit from within.
                         texture = displayTextures[part.display]
                         d.baseColor = texture == nil ? SIMD4(0.01, 0.01, 0.015, 1) : SIMD4(1, 1, 1, 1)
                         d.material = SIMD4(0.25, 0, texture == nil ? 0 : 1, SurfaceKind.aircraft.rawValue)
-                        d.emissive = SIMD4(displayBrightness, displayBrightness, displayBrightness, 0.3)
+                        // Dimmed at night, as pilots set them (exposure would otherwise burn them out).
+                        let b = displayBrightness * (1 - 0.95 * night)
+                        d.emissive = SIMD4(b, b, b, 0.3)
                     }
                     let pt = part.animated.isEmpty ? matrix_identity_float4x4 : (partTransforms[part.animated] ?? matrix_identity_float4x4)
                     // Parts out of view are skipped (from the flight deck, most of the airframe
@@ -1063,6 +1082,18 @@ public final class SceneRenderer {
                 let lights = moving.narrow.flatMap { AircraftLights.lights($0, spec: ParkedAircraftMesh.narrowbody) }
                     + moving.wide.flatMap { AircraftLights.lights($0, spec: ParkedAircraftMesh.widebody) }
                 if !lights.isEmpty { trafficLights.append((airport, lights)) }
+            }
+            if let pl = scene.playerLights {
+                let lights = AircraftLights.lights(pl, spec: scene.playerLightsSmall ? ParkedAircraftMesh.lightAircraft : ParkedAircraftMesh.narrowbody)
+                if !lights.isEmpty, let buffer = playerLightRing(lights) {
+                    var l = LightUniforms()
+                    l.model = MatrixMath.translation(relative(offset, to: camera))
+                    l.up = SIMD4(0, 0, 1, 0)
+                    l.params = SIMD4(Float(scene.date.timeIntervalSince1970.truncatingRemainder(dividingBy: 3_600)), pixelAngle, 1.3, 0)
+                    e.setVertexBuffer(buffer, offset: 0, index: 0)
+                    e.setVertexBytes(&l, length: MemoryLayout<LightUniforms>.stride, index: 2)
+                    e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: lights.count)
+                }
             }
             if !trafficLights.isEmpty {
                 if trafficLightRing.isEmpty {
@@ -1280,7 +1311,14 @@ public final class SceneRenderer {
     /// Replaces the aircraft (models load in the background after the first frame).
     /// Draws every parked and moving airliner with this model (the A320) and its liveries.
     public func setAirliners(_ model: AC3DModel, directory: URL) throws {
-        fleet = try AirlinerFleet(model: model, directory: directory, device: device)
+        // Traffic uses the smaller fuselage sheets.
+        let liveries = A320Model.liveries.map { $0.textures.mapValues { $0.hasSuffix("fuselage.png") ? $0.replacingOccurrences(of: ".png", with: "-1k.png") : $0 } }
+        fleets[0] = try AirlinerFleet(model: model, directory: directory, liveries: liveries, device: device)
+    }
+
+    /// Adds a traffic type (the 777 for widebody stands, the E175 for some of the rest).
+    public func setTraffic(_ traffic: TrafficModel, model: AC3DModel, directory: URL) throws {
+        fleets[traffic.type.rawValue] = try AirlinerFleet(model: model, directory: directory, liveries: traffic.liveries, device: device)
     }
 
     /// This frame's airliners at each airport, sorted into (level of detail, livery) runs in a
@@ -1290,7 +1328,9 @@ public final class SceneRenderer {
         let buffer: any MTLBuffer
         let first: Int
         let total: Int
-        var runs: [(lod: Int, livery: Int, start: Int, count: Int)]
+        var runs: [(type: Int, lod: Int, livery: Int, start: Int, count: Int)]
+        /// Per type, its instances' range (for the shadow pass).
+        var types: [(type: Int, start: Int, count: Int)]
     }
 
     private func fleetFrame(_ scene: SceneDescription, camera: SIMD3<Double>, offset: SIMD3<Double>) -> [FleetFrame] {
@@ -1305,28 +1345,39 @@ public final class SceneRenderer {
         var frames: [FleetFrame] = []
         for airport in airports {
             let distance = simd_distance(airport.origin + offset, camera)
-            var all: [SIMD8<Float>] = distance < 12_000 ? airport.parkedInstances : []
-            if let moving = scene.traffic[airport.name], distance < 40_000 { all += moving.narrow + moving.wide }
-            guard !all.isEmpty else { continue }
-            var buckets = [[SIMD8<Float>]](repeating: [], count: 3 * fleet.liveryCount)
-            for inst in all {
-                let local = SIMD3<Double>(Double(inst[0]), Double(inst[1]), Double(inst[2]))
-                let world = airport.origin + offset + airport.rotation * local
-                let d = simd_distance(world, camera)
-                let lod = d < fleetDetailDistance ? 0 : (d < 1_200 ? 1 : 2)
-                let livery = min(Int(inst[4] * Float(fleet.liveryCount)), fleet.liveryCount - 1)
-                buckets[lod * fleet.liveryCount + livery].append(inst)
+            // (instances, widebody list?)
+            var lists: [([SIMD8<Float>], Bool)] = distance < 12_000 ? [(airport.parkedNarrowInstances, false), (airport.parkedWideInstances, true)] : []
+            if let moving = scene.traffic[airport.name], distance < 40_000 { lists += [(moving.narrow, false), (moving.wide, true)] }
+            guard lists.contains(where: { !$0.0.isEmpty }) else { continue }
+            // Buckets by type, then level of detail, then livery: one draw per run.
+            let maxLiveries = fleets.reduce(1) { max($0, $1?.liveryCount ?? 0) }
+            var buckets = [[SIMD8<Float>]](repeating: [], count: 3 * 3 * maxLiveries)
+            for (list, wide) in lists {
+                for inst in list {
+                    var type = TrafficType.of(seed: inst[4], widebody: wide).rawValue
+                    if fleets[type] == nil { type = 0 }
+                    let fl = fleets[type]!
+                    let local = SIMD3<Double>(Double(inst[0]), Double(inst[1]), Double(inst[2]))
+                    let world = airport.origin + offset + airport.rotation * local
+                    let d = simd_distance(world, camera)
+                    let lod = d < fleetDetailDistance ? 0 : (d < 1_200 ? 1 : 2)
+                    let livery = min(Int(inst[4] * Float(fl.liveryCount)), fl.liveryCount - 1)
+                    buckets[(type * 3 + lod) * maxLiveries + livery].append(inst)
+                }
             }
             let first = cursor
-            var runs: [(Int, Int, Int, Int)] = []
+            var runs: [(Int, Int, Int, Int, Int)] = []
+            var types: [(Int, Int, Int)] = []
             for (k, bucket) in buckets.enumerated() where !bucket.isEmpty {
                 let n = min(bucket.count, 4_096 - cursor)
                 guard n > 0 else { break }
                 bucket.withUnsafeBufferPointer { (base + cursor).update(from: $0.baseAddress!, count: n) }
-                runs.append((k / fleet.liveryCount, k % fleet.liveryCount, cursor, n))
+                let type = k / (3 * maxLiveries)
+                runs.append((type, (k / maxLiveries) % 3, k % maxLiveries, cursor, n))
+                if let last = types.last, last.0 == type { types[types.count - 1].2 += n } else { types.append((type, cursor, n)) }
                 cursor += n
             }
-            frames.append(FleetFrame(airport: airport, buffer: ring, first: first, total: cursor - first, runs: runs))
+            frames.append(FleetFrame(airport: airport, buffer: ring, first: first, total: cursor - first, runs: runs, types: types))
         }
         return frames
     }
@@ -1532,6 +1583,56 @@ public final class SceneRenderer {
             e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
             e.endEncoding()
         }
+    }
+
+    /// Spot light strength per candela. One lux is 1/120000 in scene units; like the apron
+    /// floods, lamps get about four times that so they read to a dark-adapted eye.
+    public var spotIntensity: Float = 3e-5
+
+    /// The player's lamps that light the scene: (position in the scene frame, beam axis, cosine
+    /// of the half angle, candela). Landing lights in the wing roots, the taxi light on the
+    /// nose gear, logo lights on the stabilisers lighting the fin.
+    static func playerSpots(_ i: SIMD8<Float>, small: Bool, relativeTo: (SIMD3<Double>) -> SIMD3<Float>)
+        -> [(SIMD3<Float>, SIMD3<Float>, Float, Float)] {
+        let flags = Int(i[7])
+        let pos = SIMD3(Double(i[0]), Double(i[1]), Double(i[2]))
+        let heading = Double(i[3]), pitch = Double(i[5]), roll = Double(i[6])
+        let s = small ? ParkedAircraftMesh.lightAircraft : ParkedAircraftMesh.narrowbody
+        func at(_ p: SIMD3<Double>) -> SIMD3<Float> { relativeTo(AircraftLights.place(p, at: pos, heading: heading, pitch: pitch, roll: roll)) }
+        func dir(_ d: SIMD3<Double>) -> SIMD3<Float> {
+            SIMD3<Float>(simd_normalize(AircraftLights.place(d, at: .zero, heading: heading, pitch: pitch, roll: roll)))
+        }
+        let bodyZ = s.gearHeight + s.diameter / 2
+        var out: [(SIMD3<Float>, SIMD3<Float>, Float, Float)] = []
+        if flags & 1 != 0 {
+            let rootX = s.noseToGear - s.wingX + 0.2
+            for side in [-1.0, 1.0] {
+                out.append((at(SIMD3(rootX, side * (s.diameter / 2 + 1.0), bodyZ + s.wingZ)), dir(SIMD3(1, 0, -0.06)), cos(10 * .pi / 180), 150_000))
+            }
+        }
+        if flags & 2 != 0 {
+            out.append((at(SIMD3(s.noseToGear - 0.3, 0, s.gearHeight + 0.6)), dir(SIMD3(1, 0, -0.12)), cos(18 * .pi / 180), 40_000))
+        }
+        if flags & 8 != 0 && !small {
+            // Logo lights: from the tailplane up onto the fin.
+            let tailX = s.noseToGear - s.length + 4
+            out.append((at(SIMD3(tailX, s.tailSpan / 2 - 1, bodyZ + 0.6)), dir(SIMD3(-0.2, -0.45, 1)), cos(30 * .pi / 180), 2_500))
+            out.append((at(SIMD3(tailX, -s.tailSpan / 2 + 1, bodyZ + 0.6)), dir(SIMD3(-0.2, 0.45, 1)), cos(30 * .pi / 180), 2_500))
+        }
+        return Array(out.prefix(4))
+    }
+
+    private var playerLightBuffers: [any MTLBuffer] = []
+    /// This frame's buffer (of three, as the GPU may still read the last two) for the player's lights.
+    private func playerLightRing(_ lights: [GPULight]) -> (any MTLBuffer)? {
+        if playerLightBuffers.isEmpty {
+            playerLightBuffers = (0..<3).compactMap { _ in device.makeBuffer(length: 32 * MemoryLayout<GPULight>.stride, options: .storageModeShared) }
+        }
+        guard !playerLightBuffers.isEmpty else { return nil }
+        let b = playerLightBuffers[frameIndex % playerLightBuffers.count]
+        let n = min(lights.count, 32)
+        lights.withUnsafeBytes { _ = memcpy(b.contents(), $0.baseAddress!, n * MemoryLayout<GPULight>.stride) }
+        return b
     }
 
     private func uploadDisplay(_ name: String, _ image: DisplayImage) {

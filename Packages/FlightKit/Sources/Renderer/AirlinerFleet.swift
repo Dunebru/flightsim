@@ -4,8 +4,8 @@ import Metal
 import MetalKit
 import simd
 
-/// The A320 model for every parked and moving airliner: drawn instanced, in four liveries, at two
-/// levels of detail. Vertices are in the instance body frame the parked shader expects: x forward,
+/// One airliner type (the A320, the 777 or the E175) for the parked and moving traffic: drawn
+/// instanced, in its liveries, at three levels of detail. Vertices are in the instance body frame the parked shader expects: x forward,
 /// y left, z up, origin at the nose wheel on the ground.
 final class AirlinerFleet {
     struct Group {
@@ -28,9 +28,12 @@ final class AirlinerFleet {
     let liveryCount: Int
     let fullTriangles: Int, distantTriangles: Int, farTriangles: Int
 
-    init(model: AC3DModel, directory: URL, device: any MTLDevice) throws {
-        // FlightGear axes (x aft, y up, z right) to the body frame, nose wheel at the origin.
-        let noseWheels = model.groups.filter { $0.part == "gear" }.flatMap(\.positions).filter { $0.x < -8 }
+    /// `liveries`: per livery, base texture name to the livery's file.
+    init(model: AC3DModel, directory: URL, liveries: [[String: String]], device: any MTLDevice) throws {
+        // FlightGear axes (x aft, y up, z right) to the body frame, nose wheel at the origin: the
+        // part marked "nosewheel", or (the A320) the gear forward of 8 m.
+        let marked = model.groups.filter { $0.part == "nosewheel" }.flatMap(\.positions)
+        let noseWheels = marked.isEmpty ? model.groups.filter { $0.part == "gear" }.flatMap(\.positions).filter { $0.x < -8 } : marked
         let noseX = noseWheels.isEmpty ? -13.6 : noseWheels.map(\.x).reduce(0, +) / Float(noseWheels.count)
         let ground = model.boundsMin.y
         func body(_ p: SIMD3<Float>) -> SIMD3<Float> { SIMD3(-(p.x - noseX), p.z, p.y - ground) }
@@ -39,7 +42,7 @@ final class AirlinerFleet {
         var full: [Group] = [], distant: [Group] = [], far: [Group] = []
         var shadowVerts: [MeshVertex] = []
         var fullTris = 0, distantTris = 0, farTris = 0
-        for g in model.groups where g.part == "airframe" || g.part == "gear" || g.part == "windshield" {
+        for g in model.groups where ["airframe", "gear", "nosewheel", "windshield"].contains(g.part) {
             guard !g.positions.isEmpty else { continue }
             let material = g.materialIndex < model.materials.count ? model.materials[g.materialIndex] : nil
             let isGlass = (material?.transparency ?? 0) > 0.05 || g.part == "windshield"
@@ -98,17 +101,15 @@ final class AirlinerFleet {
             return t
         }
         let baseNames = Set(full.compactMap(\.textureName))
-        textures = A320Model.liveries.map { livery in
+        let paints = liveries.isEmpty ? [[:]] : liveries
+        textures = paints.map { livery in
             var map: [String: any MTLTexture] = [:]
             for base in baseNames {
-                var file = livery.textures[base] ?? base
-                // Traffic uses the smaller fuselage sheets.
-                if base == "Fuse-Main.png" { file = file.replacingOccurrences(of: ".png", with: "-1k.png") }
-                if let t = load(file) { map[base] = t }
+                if let t = load(livery[base] ?? base) { map[base] = t }
             }
             return map
         }
-        liveryCount = A320Model.liveries.count
+        liveryCount = paints.count
     }
 
     /// Vertex clustering: snaps triangle corners to a grid of `cell` metres (and to coarse texture

@@ -20,6 +20,10 @@ enum ParkedAircraftMesh {
     static let narrowbody = Spec(length: 37.6, diameter: 3.95, span: 35.8, sweep: 25, rootChord: 6.1, tipChord: 1.5,
                                  wingZ: -0.9, wingX: 15.5, finHeight: 6.3, finChord: 5.0, tailSpan: 12.5,
                                  engineDiameter: 2.0, engineLength: 4.4, engineY: [5.8], noseToGear: 5.1, gearHeight: 1.75)
+    /// A high-wing four-seater (C172): for its lights.
+    static let lightAircraft = Spec(length: 8.3, diameter: 1.2, span: 11.0, sweep: 0, rootChord: 1.6, tipChord: 1.1,
+                                    wingZ: 0.65, wingX: 1.5, finHeight: 1.5, finChord: 1.2, tailSpan: 3.4,
+                                    engineDiameter: 0.9, engineLength: 1.0, engineY: [0], noseToGear: 1.4, gearHeight: 0.9)
     /// About the size of a 300 to 400 seat twin.
     static let widebody = Spec(length: 66.0, diameter: 6.0, span: 62.0, sweep: 31, rootChord: 11.0, tipChord: 2.4,
                                wingZ: -1.4, wingX: 26.0, finHeight: 10.0, finChord: 8.5, tailSpan: 21.0,

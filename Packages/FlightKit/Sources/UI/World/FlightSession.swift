@@ -449,6 +449,18 @@ final class FlightSession {
         }
         scene.aircraftRoll = s.roll
         scene.aircraftPitch = s.pitch
+        // Exterior lights from the lights panel, at the nose wheel (where the light layouts are
+        // measured from).
+        var flags = 0
+        if hud.lights.contains(.nav) || hud.lights.contains(.beacon) { flags |= 8 }
+        if hud.lights.contains(.strobe) { flags |= 4 }
+        if hud.lights.contains(.landing) { flags |= 1 }
+        if hud.lights.contains(.taxi) { flags |= 2 }
+        let nose = scene.aircraftPosition + SIMD3(sin(s.heading), cos(s.heading), 0) * profile.noseWheelAheadOfCG
+        let lightHeading = Float(s.heading)
+        scene.playerLights = flags == 0 ? nil : SIMD8<Float>(Float(nose.x), Float(nose.y), Float(nose.z), lightHeading, 0.37,
+                                                             Float(s.pitch), Float(s.roll), Float(flags))
+        scene.playerLightsSmall = !s.engineIsTurbine
 
         let now = Date.timeIntervalSinceReferenceDate
         if now - lastHUDUpdate > 0.1 {

@@ -361,6 +361,23 @@ inline float3 shadeSurface(float3 albedo, float roughness, float metallic, float
     return direct + (ambientDiffuse + ambientSpecular) * occlusion;
 }
 
+/// Light from the aircraft's own lamps (landing, taxi, logo): spot cones with inverse-square
+/// falloff and a soft edge.
+inline float3 spotLighting(float3 albedo, float3 N, float3 worldPos, constant FrameUniforms &u) {
+    float3 sum = float3(0.0);
+    for (int i = 0; i < 4; i++) {
+        float4 sp = u.spotPosition[i];
+        if (sp.w <= 0.0) continue;
+        float3 toLight = sp.xyz - worldPos;
+        float d2 = max(dot(toLight, toLight), 1.0);
+        float3 L = toLight * rsqrt(d2);
+        float4 sd = u.spotDirection[i];
+        float cone = smoothstep(sd.w, sd.w + (1.0 - sd.w) * 0.35, dot(-L, sd.xyz));
+        sum += albedo / kPi * saturate(dot(N, L)) * sp.w * cone / d2 * float3(1.0, 0.96, 0.88);
+    }
+    return sum;
+}
+
 inline float3 applyAerialPerspective(float3 color, float3 worldPos, float4 screenPos,
                                      constant FrameUniforms &u, texture3d<float> aerial,
                                      const device LightingState &light)
@@ -765,12 +782,18 @@ fragment GBufferOut sceneFragment(VertexOut in [[stage_in]],
 
     float shadow = min(shadowFactor(in.worldPos, u, shadowMap), worldShadowFactor(in.worldPos, N, u, worldShadowMap));
     shadow *= cloudShadowFactor(in.worldPos, u, cloudShadowMap);
-    // Aircraft interiors carry their sky occlusion in emissive.w (0 means open air).
-    float occlusion = (kind == kKindAircraft && d.emissive.w > 0.0) ? d.emissive.w : 1.0;
+    // Aircraft interiors carry their sky occlusion in emissive.w (0 means open air). At night
+    // the cabin is dark but for a dim warm flood (exposure would otherwise lift its sliver of
+    // sky to daylight).
+    float nightness = smoothstep(0.05, -0.08, u.sunDirection.z);
+    bool interior = kind == kKindAircraft && d.emissive.w > 0.0;
+    float occlusion = interior ? d.emissive.w * mix(1.0, 0.08, nightness) : 1.0;
     float3 color = shadeSurface(albedo, roughness, d.material.y, N, in.worldPos, shadow, u, light, skyView, occlusion);
     // Aircraft emission (AC3D materials) lights the surface's own colour, as OpenGL's
     // modulate does, rather than adding flat white.
     color += d.emissive.rgb * albedo * (kind == kKindAircraft ? 1.0 : 0.0);
+    if (interior) color += albedo * float3(1.0, 0.82, 0.62) * 4e-5 * nightness;
+    color += spotLighting(albedo, N, in.worldPos, u);
     float night = smoothstep(0.05, -0.08, u.sunDirection.z);
     color += windowGlow * night;
     if (kind == kKindPavement && d.emissive.y > 0.5) {

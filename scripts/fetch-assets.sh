@@ -311,4 +311,37 @@ done
 for f in LandingGears.png Static-Elements.png placards.png AAL-engine.png DAL-engine.png SWR-engine.png CFM56-white.png; do
   cook "$f" "$f" 1024
 done
+# Traffic beside the A320: FlightGear's Embraer 175 (E-jet family, GPL-2.0) and Boeing 777-200ER
+# (Syd Adams and others, FGAddon, GPL-2.0), from the FGMEMBERS mirrors of FGAddon. Textures for
+# traffic at 1024 px.
+EJET_COMMIT="45be9f83c479c5df6a03b117513aae740ffe9cc3"
+EJET_RAW="$ROOT/Data/raw/e175"
+EJET_DIR="$ROOT/Data/Bundle/Aircraft/E175"
+fetch_set "https://raw.githubusercontent.com/FGMEMBERS/E-jet-family/$EJET_COMMIT/Models" "$EJET_RAW" \
+  "erj175.ac 578ecd8e5dac5cd492e8486b3cb47530470ffea01d9d115e14cdea33546eff40" \
+  "ERJ-wing.png de22d20bec3526d2235a2f8d71ff03d598cf5820cf740835be3d2f5033fd8834" \
+  "blank.png e024755a441e992abb55e963032ca59ab56544038e48b4d0b96e4de34e715183" \
+  "blank175.png 673d61f038ea7d10bb92dbd6f7c1314764512c8b083d6a91afc0c459df0b7a94" \
+  "door.png 0b38e872ad0175f97f2b1831a99e6f37c8d80384a2cff865787dff27683651c2" \
+  "Liveries/ERJ175/Delta.png 6fb0c7203db0817cde85c7b268e4146c36c7da72e47d5292f3ce836dc41dfd06" \
+  "Liveries/ERJ175/UnitedExpress.png 65c88e0e0ca437e88b9b89054c6d48d03c20a44e5531e7b95a6094356a4ec822" \
+  "Liveries/ERJ175/AirCanada.png 3a026ea8a7c976dc618bd6d6f0ae1044abb93c2d8ca0463796a6d40a2c8cf02d"
+B777_COMMIT="371a354e5805c3c54afac926fea16bb19ea71fda"
+B777_RAW="$ROOT/Data/raw/b777"
+B777_DIR="$ROOT/Data/Bundle/Aircraft/B777"
+fetch_set "https://raw.githubusercontent.com/FGMEMBERS/777/$B777_COMMIT/Models" "$B777_RAW" \
+  "777-200ER.ac d9bfc30194ff21fefc3d673b2afea2ac1d9ce45041538d592b5679a5e597b3bb" \
+  "Liveries-200/AAL.png 5ef475c360149a7108ab661ba42a0764bdd342bfb1b1a78ba9a6c0925d8f034f" \
+  "Liveries-200/UAL.png dfe03503e9c41daa6d3b47c76fcc331642b1c276418b981ff99d2abe9a699426" \
+  "Liveries-200/DAL.png 3a89dc7b7da4afa093ad796df1494cbcf29c34dd1268839138f4ec87cec19370" \
+  "Liveries-200/ANA.png d52bacbd28a79a5a6a512cb77664ef0c972291342ce5c7c495d4e4e1ba114047"
+mkdir -p "$EJET_DIR" "$B777_DIR"
+cmp -s "$EJET_RAW/erj175.ac" "$EJET_DIR/erj175.ac" || cp "$EJET_RAW/erj175.ac" "$EJET_DIR/erj175.ac"
+cmp -s "$B777_RAW/777-200ER.ac" "$B777_DIR/777-200ER.ac" || cp "$B777_RAW/777-200ER.ac" "$B777_DIR/777-200ER.ac"
+shrink() {  # shrink <source> <dest> <pixels>
+  if [ ! -f "$2" ] || [ "$1" -nt "$2" ]; then sips -Z "$3" "$1" --out "$2" >/dev/null; fi
+}
+for f in ERJ-wing.png blank.png blank175.png door.png; do shrink "$EJET_RAW/$f" "$EJET_DIR/$f" 1024; done
+for f in Delta UnitedExpress AirCanada; do shrink "$EJET_RAW/Liveries/ERJ175/$f.png" "$EJET_DIR/$f.png" 1024; done
+for f in AAL UAL DAL ANA; do shrink "$B777_RAW/Liveries-200/$f.png" "$B777_DIR/$f.png" 1024; done
 echo "assets ok"

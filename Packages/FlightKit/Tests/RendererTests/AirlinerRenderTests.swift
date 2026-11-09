@@ -215,6 +215,56 @@ struct AirlinerRenderTests {
         }
     }
 
+    /// At night: the A320 on the runway with every light on, from outside and from the seat.
+    @Test func a320Night() throws {
+        let site = try AirportSite.load(AirportRenderTests.airportsURL.appendingPathComponent("KPHX.json"))
+        let (r, base) = try AirportRenderTests.scene(site, aircraft: false)
+        let m = try A320Model.loadAnimated(from: Self.a320)
+        let nose = try #require(m.centre(ofObject: "NLGWheels"))
+        try r.setAircraft(m.model, textures: Self.a320, textureMap: A320Model.liveries[0].textures, hiddenParts: ["hidden"],
+                          animation: m, cullsBackFaces: true, noseWheel: (nose, 12.088))
+        let rw08 = site.layout.runways.first { $0.name == "08/26" }!
+        let f = site.runwayFrame(rw08)
+        let h = f.heading * .pi / 180
+        let fwd = SIMD3(sin(h), cos(h), 0.0), left = SIMD3(-cos(h), sin(h), 0.0)
+        var s = base
+        s.date = RendererTests.time(whenSunAt: -12, afternoon: true)
+        s.showAircraft = true
+        s.aircraftHeading = h
+        s.aircraftPivotHeight = 2.59
+        s.aircraftPosition = site.onSurface(f.point(rw08.ends[0].displacedThreshold + 200, 0))
+        s.instrumentValues = A320Model.readings(leftAileron: 0, rightAileron: 0, elevator: 0, rudder: 0, flaps: 0.25, speedbrake: 0,
+                                                steering: 0, gear: 1, compression: .zero, wheelSpeed: .zero, n1: 25, reverser: 0)
+        let p = s.aircraftPosition
+        let n = p + fwd * 12.09
+        s.playerLights = SIMD8<Float>(Float(n.x), Float(n.y), Float(n.z), Float(h), 0.3, 0, 0, 15)
+        let renders = RendererTests.repoRoot.appendingPathComponent("artifacts/renders")
+        for (screen, page) in [("pfd1", "pfd"), ("pfd2", "pfd"), ("nd1", "nd"), ("nd2", "nd"), ("ewd", "ewd"), ("sd", "sd"), ("mcdu", "mcdu"), ("isis", "isis")] {
+            guard let src = CGImageSourceCreateWithURL(renders.appendingPathComponent("display-\(page).png") as CFURL, nil),
+                  let img = CGImageSourceCreateImageAtIndex(src, 0, nil) else { continue }
+            let w = img.width
+            var px = [UInt8](repeating: 0, count: w * w * 4)
+            px.withUnsafeMutableBytes { b in
+                CGContext(data: b.baseAddress, width: w, height: w, bitsPerComponent: 8, bytesPerRow: w * 4, space: CGColorSpaceCreateDeviceRGB(),
+                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)?.draw(img, in: CGRect(x: 0, y: 0, width: w, height: w))
+            }
+            s.displays[screen] = DisplayImage(pixels: px, size: w, version: 1)
+        }
+        for (name, pose, cockpit) in [
+            ("a320-night-outside", CameraPose(position: p + fwd * 40 + left * 25 + SIMD3(0, 0, 6), forward: simd_normalize(-fwd * 40 - left * 25 - SIMD3(0, 0, 3)),
+                                              up: SIMD3(0, 0, 1), fovY: 50 * .pi / 180), false),
+            ("a320-night-cockpit", CameraPose(position: p + fwd * 14.7 + left * 0.53 + SIMD3(0, 0, 4.85),
+                                              forward: simd_normalize(fwd - SIMD3(0, 0, 0.25)), up: SIMD3(0, 0, 1), fovY: 68 * .pi / 180), true),
+        ] {
+            s.cameraPose = pose
+            s.cockpitView = cockpit
+            r.exposureAdaptation = 1
+            try TerrainRenderTests.settle(r, s, limit: .seconds(60))
+            r.resetHistory()
+            try RendererTests.savePNG(try r.renderImage(s, width: 1600, height: 900), 1600, 900, name: name)
+        }
+    }
+
     /// The C172 outside and from the pilot's seat, after hiding FlightGear's helper objects.
     @Test func c172Views() throws {
         let aircraft = try C172Model.loadAircraft(directory: RendererTests.c172Dir)

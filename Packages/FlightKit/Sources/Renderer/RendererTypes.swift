@@ -29,6 +29,9 @@ struct FrameUniforms {
     var weather = SIMD4<Float>.zero
     var moonDirection = SIMD4<Float>.zero
     var moonLight = SIMD4<Float>.zero
+    /// The aircraft's landing, taxi and logo lights (see the shader's FrameUniforms).
+    var spotPosition: (SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>) = (.zero, .zero, .zero, .zero)
+    var spotDirection: (SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>) = (.zero, .zero, .zero, .zero)
 }
 
 /// Matches StarGPU and StarUniforms in 26_Stars.metal.
@@ -247,6 +250,11 @@ public struct SceneDescription: Sendable {
     /// The camera is the pilot's eye: the windscreen is clear and the flight deck drawn.
     /// Otherwise an airliner's windscreen is dark glass, as it looks from outside by day.
     public var cockpitView = false
+    /// The player aircraft's exterior lights: nose-wheel point (scene frame), heading, a seed,
+    /// pitch, roll, and flags (1 landing, 2 taxi, 4 strobes, 8 navigation and beacons);
+    /// `playerLightsSmall` for a light aircraft's layout.
+    public var playerLights: SIMD8<Float>?
+    public var playerLightsSmall = false
     /// The aircraft's digital readouts (from its model): what each "display:text:<name>" shows.
     public var textLabels: [String: AnimatedModel.TextLabel] = [:]
     /// Readings for the aircraft's animated parts (instrument needles, yoke, pedals), by
@@ -446,5 +454,17 @@ public struct DisplayImage: Sendable {
     }
     public init(pixels: [UInt8], size: Int, version: Int) {
         self.init(pixels: pixels, width: size, height: size, version: version)
+    }
+}
+
+extension FrameUniforms {
+    mutating func setSpots(_ spots: [(SIMD3<Float>, SIMD3<Float>, Float, Float)], scale: Float) {
+        var p: [SIMD4<Float>] = [.zero, .zero, .zero, .zero], d: [SIMD4<Float>] = [.zero, .zero, .zero, .zero]
+        for (k, sp) in spots.prefix(4).enumerated() {
+            p[k] = SIMD4(sp.0, sp.3 * scale)
+            d[k] = SIMD4(simd_normalize(sp.1), sp.2)
+        }
+        spotPosition = (p[0], p[1], p[2], p[3])
+        spotDirection = (d[0], d[1], d[2], d[3])
     }
 }

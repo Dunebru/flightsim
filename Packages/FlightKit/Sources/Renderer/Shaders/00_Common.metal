@@ -34,6 +34,9 @@ struct FrameUniforms {
     float4 weather;                 // x: how wet the ground is (0-1)
     float4 moonDirection;           // xyz: unit vector to the Moon (world), w: its angular radius (rad)
     float4 moonLight;               // x: moonlight on level ground (scene units, perceptually scaled)
+    float4 spotPosition[4];         // the aircraft's landing, taxi and logo lights: camera-relative
+                                    // position, w intensity (0 off)
+    float4 spotDirection[4];        // beam axis, w cosine of the half angle
 };
 
 /// Optical depth of low-level fog, mist or haze from the camera along a unit direction to a

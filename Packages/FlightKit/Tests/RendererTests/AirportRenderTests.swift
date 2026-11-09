@@ -35,9 +35,13 @@ struct AirportRenderTests {
             let city = CityGeometry.build(surroundings, site: s) { p in ground.groundZ(atENU: SIMD3(p.x, p.y, 0)) }
             return AirportAssets(site: s, geometry: AirportGeometry.build(s), lights: AirportLights.build(s), city: city)
         }, sceneOrigin: site.frame.origin, excludeStand: excludeStand)
-        // Every airliner as the A320 model.
+        // The traffic: A320s, 777s on widebody stands, E175s.
         let a320 = RendererTests.repoRoot.appendingPathComponent("Data/Bundle/Aircraft/A320")
         try r.setAirliners(try A320Model.load(from: a320), directory: a320)
+        for (traffic, folder) in [(TrafficModel.b777, "B777"), (TrafficModel.e175, "E175")] {
+            let dir = RendererTests.repoRoot.appendingPathComponent("Data/Bundle/Aircraft/\(folder)")
+            try r.setTraffic(traffic, model: try traffic.load(from: dir), directory: dir)
+        }
         var s = SceneDescription.phoenixTest(date: TerrainRenderTests.afternoon)
         s.origin = site.frame.origin
         s.showAircraft = aircraft
@@ -228,6 +232,32 @@ struct AirportRenderTests {
         r.resetHistory()
         let img = try r.renderImage(s, width: 1600, height: 900)
         try RendererTests.savePNG(img, 1600, 900, name: "kphx-gates-above")
+    }
+
+    /// A 777 on a widebody stand and an E175 on a narrow one, from the apron at eye height.
+    @Test func trafficTypesUpClose() throws {
+        let site = try AirportSite.load(Self.airportsURL.appendingPathComponent("KPHX.json"))
+        let (r, base) = try Self.scene(site, aircraft: false)
+        let parked = ParkedTraffic.placements(site, excluding: nil)
+        let wide = try #require(parked.wide.first)
+        let regional = try #require(parked.narrow.first { TrafficType.of(seed: $0[4], widebody: false) == .regional })
+        for (name, inst, back) in [("traffic-777", wide, 75.0), ("traffic-e175", regional, 40.0)] {
+            let nose = SIMD2(Double(inst[0]), Double(inst[1]))
+            let h = Double(inst[3])
+            // Body forward in the airport frame (heading clockwise from north).
+            let fwd = SIMD2(sin(h), cos(h)), left = SIMD2(-cos(h), sin(h))
+            let centre = nose - fwd * back * 0.35
+            let eye = centre - fwd * back * 0.2 + left * back * 0.9
+            var s = base
+            let target = site.onSurface(centre) + SIMD3(0, 0, 3)
+            let from = site.onSurface(eye) + SIMD3(0, 0, 2)
+            s.cameraPose = CameraPose(position: from, forward: simd_normalize(target - from), up: SIMD3(0, 0, 1), fovY: 55 * .pi / 180)
+            r.exposureAdaptation = 1
+            try TerrainRenderTests.settle(r, s, limit: .seconds(60))
+            r.resetHistory()
+            let img = try r.renderImage(s, width: 1600, height: 900)
+            try RendererTests.savePNG(img, 1600, 900, name: name)
+        }
     }
 
     /// KPHX with its traffic running: an arrival on short final over the city, aircraft taxiing

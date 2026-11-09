@@ -123,6 +123,7 @@ final class WorldEngine: NSObject {
         }
         applyRenderSettings()
         loadAircraft()
+        loadTraffic()
         loadAirports()
     }
 
@@ -237,6 +238,31 @@ final class WorldEngine: NSObject {
             self?.a320 = model
             if self?.aircraftID == "A320" { self?.applyAircraft() }
         }
+    }
+
+    /// The parked and moving airliners: the A320 (static), the 777 and the E175, each in its
+    /// liveries. Parsed off the main thread; until they load, the generic shapes stand in.
+    private func loadTraffic() {
+        guard let aircraft = Bundle.main.resourceURL?.appendingPathComponent("Bundle/Aircraft") else { return }
+        Task { [weak self] in
+            let start = Date()
+            let a320 = aircraft.appendingPathComponent("A320")
+            if let model = await Self.parseStatic({ try A320Model.load(from: a320) }) {
+                try? self?.renderer?.setAirliners(model, directory: a320)
+            }
+            for (traffic, folder) in [(TrafficModel.b777, "B777"), (TrafficModel.e175, "E175")] {
+                let dir = aircraft.appendingPathComponent(folder)
+                if let model = await Self.parseStatic({ try traffic.load(from: dir) }) {
+                    try? self?.renderer?.setTraffic(traffic, model: model, directory: dir)
+                }
+            }
+            if self?.logStats == true { print(String(format: "AIRCRAFTLOAD traffic %.2f s", Date().timeIntervalSince(start))) }
+        }
+    }
+
+    @concurrent
+    private nonisolated static func parseStatic(_ load: @Sendable () throws -> AC3DModel) async -> AC3DModel? {
+        try? load()
     }
 
     @concurrent
