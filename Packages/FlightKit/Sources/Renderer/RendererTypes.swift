@@ -255,6 +255,15 @@ public struct SceneDescription: Sendable {
     /// `playerLightsSmall` for a light aircraft's layout.
     public var playerLights: SIMD8<Float>?
     public var playerLightsSmall = false
+    /// A pushback tug at the nose: position (scene frame, on the ground) and heading (radians,
+    /// clockwise from north, the way its front faces).
+    public var tugPose: SIMD4<Double>?
+    /// Rain on the windscreen as seen from the flight deck (0 none ... 1 heavy), and the
+    /// airspeed that streaks it, knots.
+    public var windscreenRain: Float = 0
+    public var airspeedKnots: Float = 0
+    /// A lightning flash in progress, 0 ... 1.
+    public var lightningFlash: Float = 0
     /// The aircraft's digital readouts (from its model): what each "display:text:<name>" shows.
     public var textLabels: [String: AnimatedModel.TextLabel] = [:]
     /// Readings for the aircraft's animated parts (instrument needles, yoke, pedals), by

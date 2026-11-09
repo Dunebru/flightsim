@@ -48,6 +48,11 @@ struct MapPanel: View {
                             .allowsHitTesting(false)
                     }
                 }
+                // The cleared taxi route, in taxiway yellow.
+                if model.taxiRoute.count >= 2 {
+                    MapPolyline(coordinates: model.taxiRoute.map(coordinate))
+                        .stroke(Color(red: 1, green: 0.8, blue: 0.1), style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
+                }
                 let route = model.route
                 if !route.isEmpty {
                     if active > 0 {
@@ -98,7 +103,11 @@ struct MapPanel: View {
         .clipShape(.rect(cornerRadius: 24, style: .continuous))
         .overlay(alignment: .top) { header }
         .overlay(alignment: .bottom) { controls }
-        .onAppear { centre(animated: false) }
+        .onAppear {
+            // Taxiing with a cleared route: open close enough to read the taxiways.
+            if model.taxiRoute.count >= 2 && model.groundSpeed < 40 { distance = 2_500 }
+            centre(animated: false)
+        }
         .onChange(of: model.latitude) { if follow { centre(animated: false) } }
     }
 

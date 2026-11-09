@@ -1,3 +1,5 @@
+import Aircraft
+import Airports
 import ATC
 import Autopilot
 import Nav
@@ -100,10 +102,47 @@ final class HUDModel {
     /// The point NAV is flying to and how far it is (metres); nil past the end of the route.
     var activeWaypoint: Int?
     var distanceToActive: Double?
+    /// The taxi route ATC cleared, for the map (yellow); empty when none.
+    var taxiRoute: [NavPoint] = []
     /// Airports to fly direct to.
     var airports: [NavPoint] = []
     /// Navaids and fixes for the map.
     var navData: NavData?
+
+    // MARK: Pushback
+
+    /// A push the pilot asked for (the session hands it to the tug), a stop asked for, whether a
+    /// push is under way, and whether one can start (an airliner stopped on the ground).
+    var pushbackRequest: PushbackTug.Direction?
+    var pushbackStopRequested = false
+    var pushingBack = false
+    var canPushBack = false
+
+    // MARK: Replay
+
+    /// Watching the flight back: playing or held, where in it (seconds from the start of what
+    /// was kept) and how long that is; a seek the pilot asked for.
+    var replaying = false
+    var replayPlaying = true
+    var replayPosition = 0.0
+    var replayDuration = 0.0
+    var replaySeek: Double?
+
+    // MARK: Landing report
+
+    /// The last landing, shown for a while after touchdown (and updated with the rollout).
+    var landingReport: LandingReport?
+    private var landingTask: Task<Void, Never>?
+
+    func showLanding(_ report: LandingReport) {
+        landingReport = report
+        landingTask?.cancel()
+        landingTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(25))
+            guard !Task.isCancelled else { return }
+            self?.landingReport = nil
+        }
+    }
 
     // MARK: ATC
 
@@ -175,6 +214,30 @@ final class HUDModel {
 
     func toggle(_ light: Light) {
         if lights.contains(light) { lights.remove(light) } else { lights.insert(light) }
+    }
+
+    /// What touching the flight deck does: buttons and switches toggle (`steps` 0); knobs turn
+    /// by `steps` detents (1 kt, 1 degree, 100 ft, 100 fpm); the flap lever moves by detents.
+    func applyDeck(_ action: A320Model.DeckAction, steps: Int) {
+        switch action {
+        case .autopilot: if steps == 0 { apMaster.toggle() }
+        case .autothrust: if steps == 0 { autothrottle.toggle() }
+        case .localizer: if steps == 0 { locArmed.toggle() }
+        case .approach: if steps == 0 { approachArmed.toggle() }
+        case .gearLever: if steps == 0 { toggleGear() }
+        case .parkingBrake: if steps == 0 { parkingBrake.toggle() }
+        case .landingLights: if steps == 0 { toggle(.landing) }
+        case .navLights: if steps == 0 { toggle(.nav); toggle(.logo) }
+        case .strobeLights: if steps == 0 { toggle(.strobe) }
+        case .flapsLever: flapIndex = min(max(flapIndex + steps, 0), flapDetents.count - 1)
+        case .knob(let k):
+            switch k {
+            case .speed: targetSpeed = min(max(targetSpeed + steps, 100), 399)
+            case .heading: targetHeading = ((targetHeading + steps - 1) % 360 + 360) % 360 + 1
+            case .altitude: targetAltitude = min(max(targetAltitude + steps * 100, 0), 45_000)
+            case .verticalSpeed: targetVerticalSpeed = min(max(targetVerticalSpeed + steps * 100, -6_000), 6_000)
+            }
+        }
     }
 
     func nudgeTrim(_ delta: Double) {

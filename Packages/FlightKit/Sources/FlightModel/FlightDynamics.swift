@@ -23,6 +23,11 @@ public struct ControlInputs: Sendable, Equatable {
     public var parkingBrake = false
     /// Elevator trim, -1 nose down ... +1 nose up.
     public var pitchTrim: Double = 0
+    /// Nose wheel steering (tiller, or the pedals' share), -1 full left ... +1 full right, as a
+    /// fraction of the aircraft's maximum nose wheel angle.
+    public var steering: Double = 0
+    /// A pushback tug's force at the nose gear, pounds (aircraft with a tug attach point).
+    public var pushbackPounds: Double = 0
 
     public init() {}
 }
@@ -76,6 +81,10 @@ public struct FlightState: Sendable, Equatable {
     public var indicatedAirspeedKnots: Double = 0 // calibrated airspeed (no instrument error modelled)
     public var trueAirspeedKnots: Double = 0
     public var groundSpeedKnots: Double = 0
+    /// Speed along the body's nose axis, knots: negative when rolling backwards.
+    public var forwardSpeedKnots: Double = 0
+    /// Gross weight, pounds.
+    public var weightPounds: Double = 0
     public var verticalSpeedFPM: Double = 0
     public var angleOfAttackDegrees: Double = 0
     public var sideslipDegrees: Double = 0
@@ -237,6 +246,11 @@ public final class FlightDynamics {
         set("fcs/elevator-cmd-norm", -c.pitch)
         set("fcs/aileron-cmd-norm", c.roll)
         set("fcs/rudder-cmd-norm", c.yaw)
+        set("fcs/steer-cmd-norm", max(-1, min(1, c.steering)))
+        if c.pushbackPounds > 0 || pushbackApplied {
+            setPushback(pounds: c.pushbackPounds)
+            pushbackApplied = c.pushbackPounds > 0
+        }
         set("fcs/pitch-trim-cmd-norm", c.pitchTrim)
         for i in 0..<engineCount {
             set("fcs/throttle-cmd-norm[\(i)]", c.throttle)
@@ -250,6 +264,16 @@ public final class FlightDynamics {
         set("fcs/left-brake-cmd-norm", brake)
         set("fcs/right-brake-cmd-norm", brake)
         set("fcs/center-brake-cmd-norm", brake)
+    }
+
+    private var pushbackApplied = false
+
+    /// Whether this aircraft has a tug attach point (an `external_reactions` force "pushback").
+    public var canPushBack: Bool { has("external_reactions/pushback/magnitude") }
+
+    /// Tug force pushing the aircraft backwards, pounds (0 when no tug).
+    public func setPushback(pounds: Double) {
+        set("external_reactions/pushback/magnitude", max(0, pounds))
     }
 
     /// Ground height under the aircraft, feet above mean sea level. JSBSim treats the ground
@@ -296,6 +320,8 @@ public final class FlightDynamics {
         s.indicatedAirspeedKnots = get("velocities/vc-kts")
         s.trueAirspeedKnots = get("velocities/vtrue-kts")
         s.groundSpeedKnots = get("velocities/vg-fps") * 0.592_484
+        s.forwardSpeedKnots = get("velocities/u-fps") * 0.592_484
+        s.weightPounds = get("inertia/weight-lbs")
         s.verticalSpeedFPM = get("velocities/h-dot-fps") * 60
         s.angleOfAttackDegrees = get("aero/alpha-deg")
         s.sideslipDegrees = get("aero/beta-deg")

@@ -70,12 +70,15 @@
                 <y> 0 </y>
                 <z> -138.2 </z>
             </location>
-            <static_friction> 0.5 </static_friction>
-            <dynamic_friction> 0.8 </dynamic_friction>
+            <!-- Dry concrete (the original 0.5 static, 0.8 sliding saturated the nose tyre in
+                 any taxi turn, and sliding friction above static is unphysical). -->
+            <static_friction> 0.8 </static_friction>
+            <dynamic_friction> 0.5 </dynamic_friction>
             <rolling_friction> 0.02 </rolling_friction>
             <spring_coeff unit="LBS/FT"> 100000 </spring_coeff>
             <damping_coeff unit="LBS/FT/SEC"> 5000 </damping_coeff>
-            <max_steer unit="DEG"> 5 </max_steer>
+            <!-- 75 degrees by the tiller (the app limits it to the pedals' 6 above taxi speed). -->
+            <max_steer unit="DEG"> 75 </max_steer>
             <brake_group> NONE </brake_group>
             <retractable>1</retractable>
         </contact>
@@ -245,6 +248,23 @@
             <retractable>0</retractable>
         </contact>
     </ground_reactions>
+
+    <!-- A pushback tug at the nose gear: pushes aft (body -x) with external_reactions/pushback/
+         magnitude pounds; the app drives it to a walking pace and steers the nose wheel. -->
+    <external_reactions>
+        <force name="pushback" frame="BODY" unit="LBS">
+            <location unit="IN">
+                <x> 196.1 </x>
+                <y> 0 </y>
+                <z> -138.2 </z>
+            </location>
+            <direction>
+                <x> -1 </x>
+                <y> 0 </y>
+                <z> 0 </z>
+            </direction>
+        </force>
+    </external_reactions>
     <propulsion>
         <engine file="CFM56_5">
             <feed>0</feed>

@@ -14,6 +14,11 @@ struct CockpitDisplayTests {
         d.pitch = 8; d.roll = 15; d.groundSpeed = 238; d.trueAirspeed = 226; d.n1 = 84.2; d.flaps = 0.25
         d.gearDown = 0; d.onGround = false; d.windFrom = 260; d.windKnots = 12; d.selectedAltitude = 7_000
         d.fma = ["SPEED", "CLB", "HDG", "", "AP1"]
+        d.origin = "KPHX"
+        d.route = [("BXK", 95, 14), ("TFD", 120, 31), ("KLAX", 260, 300)]
+        d.activeWaypoint = 0
+        d.weather = [(70, 22, 3, 0.3), (70, 22, 1.4, 0.6), (110, 30, 2.5, 0.5), (110, 30, 1, 0.9)]
+        d.rangeNM = 40
         let dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../../../artifacts/renders").standardized
         for page in ["pfd", "nd", "ewd", "sd", "mcdu", "dcdu", "isis", "clock", "atc", "batt"] {
             let px = CockpitDisplays.draw(page, d)

@@ -170,6 +170,9 @@ extension WeatherConditions {
         return nil
     }
 
+    /// A thunderstorm at or near the field (TS in the present weather, VCTS included).
+    public var thunderstorm: Bool { weather.contains { $0.contains("TS") } }
+
     /// The wind at a height above the ground, metres per second toward (east, north).
     public func windVectorMetresPerSecond(atHeightFeet h: Double) -> SIMD2<Double> {
         let w = wind(atHeightFeet: h)

@@ -62,6 +62,10 @@ struct ATCControllerTests {
         #expect(reply.text.contains("taxi via") && reply.text.contains("hold short of runway"))
         let route = try #require(traffic.routeToRunway(from: gate.line[0]))
         let hold = try #require(route.path.last)
+        // The cleared route is kept for the map: from the aircraft to the hold.
+        #expect(atc.taxiPath.first == gate.line[0])
+        #expect(atc.taxiPath.last == hold)
+        #expect(atc.taxiPath.count >= 3)
         let atHold = ATCSituation(position: hold, heightAboveGroundFeet: 0, altitudeFeet: 1_135, groundSpeedKnots: 0,
                                   onGround: true, approachRunway: nil)
         #expect(atc.requests(atHold, traffic: traffic).contains(.readyForDeparture))

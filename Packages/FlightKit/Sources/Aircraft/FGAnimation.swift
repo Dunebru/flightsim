@@ -24,6 +24,11 @@ public struct FGAnimation: Sendable, Equatable {
     public var table: [SIMD2<Double>] = []
     public var axis = SIMD3<Double>(0, 1, 0)
     public var center = SIMD3<Double>.zero
+    /// An axis given as a line object in the model (`<axis><object-name>`), resolved to
+    /// `center` and `axis` once the model is read.
+    public var axisObject: String?
+    /// `<swap-axis-direction/>`: the line's direction reversed.
+    public var axisSwapped = false
 
     /// Degrees (rotate) or metres (translate) for a property value.
     public func output(_ input: Double) -> Double {
@@ -93,7 +98,8 @@ public struct FGAnimation: Sendable, Equatable {
         root.children(named: "animation").compactMap { a -> FGAnimation? in
             let kind: Kind
             switch a.text(of: "type") {
-            case "rotate": kind = .rotate
+            // A knob is a rotate the pilot can drag (the dragging is the app's business).
+            case "rotate", "knob": kind = .rotate
             case "translate": kind = .translate
             case "spin": kind = .spin
             case "select": kind = .select
@@ -124,7 +130,10 @@ public struct FGAnimation: Sendable, Equatable {
             }
             if let ax = a.child(named: "axis") {
                 func c(_ n: String) -> Double { ax.text(of: n).flatMap(Double.init) ?? 0 }
-                if ax.child(named: "x1-m") != nil {
+                if let line = ax.text(of: "object-name") {
+                    anim.axisObject = line
+                    anim.axisSwapped = ax.child(named: "swap-axis-direction") != nil
+                } else if ax.child(named: "x1-m") != nil {
                     let p1 = SIMD3(c("x1-m"), c("y1-m"), c("z1-m")), p2 = SIMD3(c("x2-m"), c("y2-m"), c("z2-m"))
                     anim.center = acFrame(p1)
                     anim.axis = acFrame(p2 - p1)
@@ -133,6 +142,10 @@ public struct FGAnimation: Sendable, Equatable {
                 } else {
                     anim.axis = acFrame(SIMD3(c("x"), c("y"), c("z")))
                 }
+            }
+            // With no <axis>, SimGear uses a line object named "<object>-axis" when there is one.
+            if a.child(named: "axis") == nil, kind == .rotate || kind == .spin, let first = objects.first {
+                anim.axisObject = first + "-axis"
             }
             if let ce = a.child(named: "center") {
                 func c(_ n: String) -> Double { ce.text(of: n).flatMap(Double.init) ?? 0 }
@@ -210,6 +223,8 @@ public struct AnimatedModel: Sendable {
     public var root = ""
     /// Values used for properties the caller does not supply.
     public var defaults: [String: Double] = [:]
+    /// Objects the pilot can touch (`picks` when loading): centre and radius in the model frame.
+    public var pickTargets: [String: SIMD4<Float>] = [:]
     /// Objects left out (their part becomes "hidden"), by name, in every sub-model.
     public var hiddenObjects: Set<String> = []
     /// FlightGear `<text>` readouts turned into screen quads (parts "display:text:<name>"):
@@ -320,7 +335,7 @@ public struct AnimatedModel: Sendable {
                               excluding: [String] = [], staticPart: String = "cabin",
                               special: (String) -> String? = { _ in nil },
                               animate: (FGAnimation) -> Bool = { _ in true }, fixedSelects: Bool = false,
-                              texts: Set<String> = []) throws {
+                              texts: Set<String> = [], picks: Set<String> = []) throws {
         let root = try XMLElementNode.parse(contentsOf: directory.appendingPathComponent(file))
         let name = (file as NSString).deletingPathExtension
         if self.root.isEmpty { self.root = name }
@@ -359,6 +374,25 @@ public struct AnimatedModel: Sendable {
                 if parent.hasPrefix("anim:\(name)|") { return parent.hasSuffix("|") ? parent + object : parent + "/" + object }
                 return "anim:\(name)|" + object
             })
+            // Touchable objects, carried into the aircraft's frame by this model's placement.
+            for name in picks {
+                guard let b = parsed.objectBounds[name], pickTargets[name] == nil else { continue }
+                let c = placement * SIMD4<Double>(Double(b.x), Double(b.y), Double(b.z), 1)
+                pickTargets[name] = SIMD4(Float(c.x), Float(c.y), Float(c.z), b.w)
+            }
+            // Axes given by line objects in this model.
+            for key in animations.keys where key.hasPrefix("\(name)|") {
+                for i in animations[key]!.indices {
+                    guard let line = animations[key]![i].axisObject, let p = parsed.axisLines[line], p.count == 2 else { continue }
+                    // SimGear's default order (models may opt into another; the A320's do not):
+                    // the end with the larger x first, and on a tie the file's second vertex
+                    // first. The axis runs from the first end to the other.
+                    var (start, end) = p[0].x > p[1].x ? (p[0], p[1]) : (p[1], p[0])
+                    if animations[key]![i].axisSwapped { swap(&start, &end) }
+                    animations[key]![i].center = SIMD3<Double>((start + end) / 2)
+                    animations[key]![i].axis = SIMD3<Double>(end - start)
+                }
+            }
             // Fixed geometry is "cabin" (a model inside the airframe); placed sub-models are
             // moved as a whole.
             for i in parsed.groups.indices where parsed.groups[i].part.isEmpty { parsed.groups[i].part = base.isEmpty ? staticPart : base }
@@ -427,7 +461,7 @@ public struct AnimatedModel: Sendable {
                 m = m * FGAnimation.translation(FGAnimation.acFrame(SIMD3(c("x-m"), c("y-m"), c("z-m"))))
             }
             try load(xml: subFile, directory: directory, placement: m, excluding: excluding, special: special,
-                     animate: animate, fixedSelects: fixedSelects)
+                     animate: animate, fixedSelects: fixedSelects, picks: picks)
         }
     }
 }

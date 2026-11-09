@@ -55,7 +55,10 @@ public struct FlightHUDView: View {
             #endif
 
             // `-FlightHideHUD YES` draws the world alone (for measuring what the HUD costs).
-            if !Self.hideHUD {
+            if model.replaying {
+                ReplayOverlay(model: model)
+                    .transition(.opacity)
+            } else if !Self.hideHUD {
             ZStack {
             // Thumb columns.
             HStack(alignment: .bottom, spacing: 0) {
@@ -92,6 +95,14 @@ public struct FlightHUDView: View {
                     VStack(spacing: 8) {
                         MetricsBar(model: model)
                         if model.stallWarning { StallWarning() }
+                        if let report = model.landingReport, model.openPanel == nil {
+                            LandingCard(report: report) { model.landingReport = nil }
+                                .transition(.move(edge: .top).combined(with: .opacity))
+                        }
+                        if model.pushingBack || (model.canPushBack && model.parkingBrake && model.openPanel == nil) {
+                            PushbackBar(model: model)
+                                .transition(.move(edge: .top).combined(with: .opacity))
+                        }
                         // The status is redundant while the autopilot panel itself is open.
                         if model.apMaster && model.openPanel != .autopilot && model.openPanel != .map {
                             AutopilotStatus(model: model)
@@ -139,6 +150,7 @@ public struct FlightHUDView: View {
             } else if model.paused {
                 pausedOverlay
             }
+
             }
             }
         }
@@ -238,6 +250,7 @@ public struct FlightHUDView: View {
             s.tick(dt: dt, hud: hud, scene: &scene, holdForScenery: engine?.loadingScenery ?? false)
         }
         engine.physicsProbe = { s.physics?.state }
+        engine.deckHandler = { [weak model] action, steps in model?.applyDeck(action, steps: steps) }
         // Live weather: the departure airport's METAR, when it can be fetched.
         if let raw = settings.forcedMetar, let m = MetarParser.parse(raw) {
             s.weather = WeatherConditions(metar: m)
@@ -434,6 +447,19 @@ public struct FlightHUDView: View {
                 Text("Paused")
                     .font(.system(size: 34, weight: .bold, design: .rounded))
                     .foregroundStyle(.white)
+                Button {
+                    withAnimation(.spring(duration: 0.3)) {
+                        model.paused = false
+                        model.replaying = true
+                    }
+                } label: {
+                    Label("Replay", systemImage: "gobackward")
+                        .font(.system(size: 17, weight: .semibold))
+                        .padding(.horizontal, 12)
+                        .frame(height: 44)
+                }
+                .buttonStyle(.glass)
+                .tint(.white)
                 Button {
                     withAnimation(.spring(duration: 0.3)) { model.paused = false }
                 } label: {

@@ -13,6 +13,15 @@ nonisolated struct DisplayInputs: Sendable {
     /// Flight mode annunciations: thrust, vertical, lateral, approach capability, engagement.
     var fma = ["", "", "", "", ""]
     var selectedAltitude = 0.0, selectedSpeed = 0.0
+    /// The flight plan: the departure, and each route point's magnetic bearing (degrees) and
+    /// distance (nautical miles) from the aircraft; the point NAV flies to.
+    var origin = ""
+    var route: [(name: String, bearing: Double, distance: Double)] = []
+    var activeWaypoint = 0
+    /// Weather radar returns: magnetic bearing, distance and radius (nm), level 0 ... 1.
+    var weather: [(bearing: Double, distance: Double, radius: Double, level: Double)] = []
+    /// ND range (the outer arc), nautical miles.
+    var rangeNM = 40.0
 }
 
 nonisolated enum CockpitDisplays {
@@ -210,7 +219,59 @@ nonisolated enum CockpitDisplays {
                 text(ctx, "\(deg / 10)", c.x + cos(a) * (radius - 65), c.y + sin(a) * (radius - 65) + 12, size: 32, align: 0.5)
             }
         }
-        // Range ring.
+        // Everything plotted lies inside the compass arc.
+        func plot(_ bearing: Double, _ distance: Double) -> CGPoint {
+            let a = CGFloat((bearing - d.heading) * .pi / 180) - .pi / 2
+            let r = CGFloat(distance / d.rangeNM) * radius
+            return CGPoint(x: c.x + cos(a) * r, y: c.y + sin(a) * r)
+        }
+        ctx.saveGState()
+        ctx.addArc(center: c, radius: radius, startAngle: 0, endAngle: 2 * .pi, clockwise: false)
+        ctx.clip()
+        // Weather radar: green, amber, red by intensity.
+        for (i, w) in d.weather.enumerated() {
+            let p = plot(w.bearing, w.distance)
+            let r = CGFloat(w.radius / d.rangeNM) * radius
+            let colour = w.level > 0.75 ? CGColor(red: 0.95, green: 0.1, blue: 0.1, alpha: 0.85)
+                : w.level > 0.45 ? CGColor(red: 0.95, green: 0.8, blue: 0.1, alpha: 0.8) : CGColor(red: 0.1, green: 0.75, blue: 0.2, alpha: 0.7)
+            ctx.setFillColor(colour)
+            // A ragged patch rather than a disc: overlapping blobs around the cell's centre.
+            for k in 0..<7 {
+                let fk = CGFloat(k), fi = CGFloat(i)
+                let o = CGPoint(x: p.x + sin(fk * 2.4 + fi * 1.3) * r * 0.55, y: p.y + cos(fk * 1.7 + fi * 0.7) * r * 0.45)
+                let rr = r * (0.45 + 0.3 * abs(sin(fk * 3.1 + fi)))
+                ctx.fillEllipse(in: CGRect(x: o.x - rr, y: o.y - rr * 0.8, width: 2 * rr, height: 1.6 * rr))
+            }
+        }
+        // The flight plan: the leg being flown and the point ahead in white, the rest green.
+        if !d.route.isEmpty {
+            let active = min(max(d.activeWaypoint, 0), d.route.count - 1)
+            var previous = c
+            for (i, w) in d.route.enumerated() where i >= active {
+                let p = plot(w.bearing, w.distance)
+                line(ctx, previous, p, i == active ? white : green, 4)
+                previous = p
+            }
+            for (i, w) in d.route.enumerated() where i >= active {
+                let p = plot(w.bearing, w.distance)
+                ctx.setStrokeColor(i == active ? white : green)
+                ctx.setLineWidth(4)
+                ctx.strokeLineSegments(between: [CGPoint(x: p.x, y: p.y - 14), CGPoint(x: p.x + 14, y: p.y), CGPoint(x: p.x + 14, y: p.y),
+                                                 CGPoint(x: p.x, y: p.y + 14), CGPoint(x: p.x, y: p.y + 14), CGPoint(x: p.x - 14, y: p.y),
+                                                 CGPoint(x: p.x - 14, y: p.y), CGPoint(x: p.x, y: p.y - 14)])
+                text(ctx, w.name, p.x + 22, p.y + 10, size: 28, colour: i == active ? white : green)
+            }
+        }
+        ctx.restoreGState()
+        // The point ahead: name, track to it and distance, top right as on the A320.
+        if !d.route.isEmpty {
+            let w = d.route[min(max(d.activeWaypoint, 0), d.route.count - 1)]
+            text(ctx, w.name, 700, 60, size: 32, colour: white)
+            text(ctx, String(format: "%03d°", Int(w.bearing.rounded()) % 360), 860, 60, size: 30, colour: green)
+            text(ctx, String(format: "%.0f NM", w.distance), 700, 105, size: 30, colour: green)
+        }
+        // Range ring and its label.
+        text(ctx, "\(Int(d.rangeNM / 2))", c.x - radius / 2 * 0.64 - 20, c.y - radius / 2 * 0.77, size: 26, colour: cyan)
         ctx.setStrokeColor(grey)
         ctx.setLineDash(phase: 0, lengths: [12, 12])
         ctx.addArc(center: c, radius: radius / 2, startAngle: CGFloat(-.pi / 2 - 0.85), endAngle: CGFloat(-.pi / 2 + 0.85), clockwise: false)
@@ -302,19 +363,40 @@ nonisolated enum CockpitDisplays {
     // MARK: Small screens
 
     /// The MCDU's flight plan page.
+    /// The flight plan page: the departure, then the route's points ahead with the track and
+    /// distance to each (from the aircraft), the active one white; the last as the destination
+    /// with the distance along the route and the time at the present ground speed.
     static func mcdu(_ ctx: CGContext, _ d: DisplayInputs) {
         text(ctx, "FROM", 60, 90, size: 44)
-        text(ctx, "KPHX", 500, 90, size: 52, align: 0.5)
-        let rows: [(String, String, String)] = [("RW08", "  ---", "/1135"), ("C090°", " 0420", "/ 3500"),
-                                                ("BXK", " 0438", "/FL240"), ("(T/C)", " 0441", "/FL340"), ("-----", "", "")]
-        for (i, r) in rows.enumerated() {
-            let y = CGFloat(200 + i * 140)
-            text(ctx, r.0, 40, y, size: 56, colour: i == 0 ? white : green)
-            text(ctx, r.1, 420, y, size: 52, colour: green)
-            text(ctx, r.2, 960, y, size: 52, colour: green, align: 1)
+        text(ctx, d.origin.isEmpty ? "----" : d.origin, 500, 90, size: 52, align: 0.5)
+        let active = min(max(d.activeWaypoint, 0), max(d.route.count - 1, 0))
+        let ahead = Array(d.route.enumerated()).filter { $0.offset >= active }.prefix(5)
+        if ahead.isEmpty {
+            text(ctx, "NO FLIGHT PLAN", 500, 420, size: 56, colour: white, align: 0.5)
+            text(ctx, "DRAW A ROUTE ON THE MAP", 500, 500, size: 40, colour: cyan, align: 0.5)
         }
-        text(ctx, "DEST   TIME  DIST  EFOB", 40, 900, size: 40)
-        text(ctx, "KLAX   0538   306   5.9", 40, 960, size: 44, colour: green)
+        for (row, (i, w)) in ahead.enumerated() {
+            let y = CGFloat(200 + row * 140)
+            text(ctx, w.name, 40, y, size: 56, colour: i == active ? white : green)
+            text(ctx, String(format: "%03d°", Int(w.bearing.rounded()) % 360), 470, y, size: 48, colour: green)
+            text(ctx, String(format: "%.0f", w.distance), 960, y, size: 52, colour: green, align: 1)
+        }
+        text(ctx, "DEST         DIST    TIME", 40, 900, size: 40)
+        if let last = d.route.last {
+            // Along the route: to the active point, then leg by leg (legs from the bearings and
+            // distances of consecutive points).
+            var total = d.route[active].distance
+            for k in active..<(d.route.count - 1) {
+                let a = d.route[k], b = d.route[k + 1]
+                let ax = a.distance * sin(a.bearing * .pi / 180), ay = a.distance * cos(a.bearing * .pi / 180)
+                let bx = b.distance * sin(b.bearing * .pi / 180), by = b.distance * cos(b.bearing * .pi / 180)
+                total += ((bx - ax) * (bx - ax) + (by - ay) * (by - ay)).squareRoot()
+            }
+            let minutes = d.groundSpeed > 30 ? Int(total / d.groundSpeed * 60) : 0
+            text(ctx, last.name, 40, 960, size: 44, colour: green)
+            text(ctx, String(format: "%.0f", total), 640, 960, size: 44, colour: green, align: 1)
+            text(ctx, minutes > 0 ? String(format: "%02d%02d", minutes / 60, minutes % 60) : "----", 960, 960, size: 44, colour: green, align: 1)
+        }
     }
 
     static func dcdu(_ ctx: CGContext, _ d: DisplayInputs) {

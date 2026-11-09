@@ -142,6 +142,72 @@ struct AirlinerRenderTests {
             let img = try r.renderImage(s, width: 1600, height: 900)
             try RendererTests.savePNG(img, 1600, 900, name: name)
         }
+        // Touchable objects marked where they were drawn (red), on the glareshield and the
+        // pedestal; each picks itself at its own centre.
+        for view in ["a320-fcu", "a320-pedestal"] {
+            s.cameraPose = views.first { $0.0 == view }!.1
+            s.cockpitView = true
+            r.exposureAdaptation = 1
+            try TerrainRenderTests.settle(r, s, limit: .seconds(60))
+            r.resetHistory()
+            var img = try r.renderImage(s, width: 1600, height: 900)
+            for (name, t) in m.pickTargets {
+                guard let q = r.project(SIMD3(t.x, t.y, t.z)), q.x > 0, q.x < 1, q.y > 0, q.y < 1 else { continue }
+                #expect(r.pick(m.pickTargets, at: q) == name, "\(name) in \(view) picks \(r.pick(m.pickTargets, at: q) ?? "nothing")")
+                let cx = Int(q.x * 1600), cy = Int(q.y * 900)
+                for dy in -5...5 { for dx in -5...5 where dx * dx + dy * dy <= 25 {
+                    let x = cx + dx, y = cy + dy
+                    guard x >= 0, x < 1600, y >= 0, y < 900 else { continue }
+                    let i = (y * 1600 + x) * 4
+                    img[i] = 0; img[i + 1] = 0; img[i + 2] = 255
+                } }
+            }
+            try RendererTests.savePNG(img, 1600, 900, name: view + "-picks")
+        }
+        // The pedestal with the thrust levers at TOGA, full flap, speedbrake full, gear up: the
+        // levers must sit forward, the flap lever aft, the gear lever up.
+        do {
+            typealias D = A320Model.DeckControl
+            let saved = s.instrumentValues
+            s.instrumentValues.merge([D.throttle[0]: 1, D.throttle[1]: 1, D.flaps: 4, D.speedbrake: 1, D.gear: 0]) { _, n in n }
+            s.cameraPose = views.first { $0.0 == "a320-pedestal" }!.1
+            s.cockpitView = true
+            r.exposureAdaptation = 1
+            try TerrainRenderTests.settle(r, s, limit: .seconds(60))
+            r.resetHistory()
+            try RendererTests.savePNG(try r.renderImage(s, width: 1600, height: 900), 1600, 900, name: "a320-pedestal-toga")
+            s.cameraPose = views.first { $0.0 == "a320-centre-panel" }!.1
+            try TerrainRenderTests.settle(r, s, limit: .seconds(60))
+            r.resetHistory()
+            try RendererTests.savePNG(try r.renderImage(s, width: 1600, height: 900), 1600, 900, name: "a320-centre-panel-gearup")
+            s.instrumentValues = saved
+        }
+        // Rain on the windscreen from the captain's seat: parked, then at 140 kt.
+        for (name, speed) in [("a320-rain-parked", Float(0)), ("a320-rain-140kt", Float(140))] {
+            s.cameraPose = views.first { $0.0 == "a320-flightdeck" }!.1
+            s.cockpitView = true
+            s.windscreenRain = 0.8
+            s.airspeedKnots = speed
+            r.exposureAdaptation = 1
+            try TerrainRenderTests.settle(r, s, limit: .seconds(60))
+            r.resetHistory()
+            try RendererTests.savePNG(try r.renderImage(s, width: 1600, height: 900), 1600, 900, name: name)
+            s.windscreenRain = 0
+        }
+        // A pushback tug at the nose, its tow bar on the nose wheel.
+        do {
+            let nose = SIMD2(p.x, p.y) + SIMD2(fwd.x, fwd.y) * 12.088     // the nose wheel, ahead of the CG
+            let tugAt = nose + SIMD2(fwd.x, fwd.y) * 7.5
+            s.tugPose = SIMD4(tugAt.x, tugAt.y, p.z, atan2(fwd.x, fwd.y) + .pi)
+            let eye = p + fwd * 4 + left * 13 + SIMD3(0, 0, 3), look = p + fwd * 17 + SIMD3(0, 0, 1)
+            s.cameraPose = CameraPose(position: eye, forward: simd_normalize(look - eye), up: SIMD3(0, 0, 1), fovY: 50 * .pi / 180)
+            s.cockpitView = false
+            r.exposureAdaptation = 1
+            try TerrainRenderTests.settle(r, s, limit: .seconds(60))
+            r.resetHistory()
+            try RendererTests.savePNG(try r.renderImage(s, width: 1600, height: 900), 1600, 900, name: "a320-tug")
+            s.tugPose = nil
+        }
         // The nearest parked neighbour from its right side: its ground equipment.
         if let other = site.airlinerStands.filter({ $0.occupied && $0.ref != ref })
             .min(by: { simd_distance($0.position, slot.position) < simd_distance($1.position, slot.position) }) {

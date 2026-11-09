@@ -53,7 +53,39 @@ fragment float4 tonemapFragment(FullscreenOut in [[stage_in]],
 
 /// Copies the (possibly lower-resolution) display-encoded image to the drawable. When no
 /// MetalFX scaler ran, the linear sampler does the upscale.
-fragment float4 finalFragment(FullscreenOut in [[stage_in]], texture2d<float> source [[texture(0)]]) {
+/// Final-pass settings: rain on the windscreen (0 none ... 1 heavy, from the flight deck only),
+/// seconds, airspeed in knots, and a lightning flash (0 ... 1).
+struct FinalUniforms {
+    float rain;
+    float time;
+    float airspeed;
+    float flash;
+};
+
+/// One layer of drops on the windscreen: beads at rest on the glass, and at speed streaks the
+/// airflow drags up the glass. Returns the refraction offset (xy) and coverage (z).
+inline float3 windscreenDrops(float2 uv, float aspect, float scale, float rain, float time, float airspeed, float seed) {
+    float flow = saturate(airspeed / 120.0);
+    float2 p = uv * float2(aspect, 1.0) * scale;
+    // At speed the drops run up and back across the glass.
+    p.y += time * mix(0.05, 1.8, flow);
+    float2 cell = floor(p);
+    float2 f = fract(p) - 0.5;
+    float h1 = fract(sin(dot(cell + seed, float2(127.1, 311.7))) * 43758.5453);
+    float h2 = fract(sin(dot(cell + seed, float2(269.5, 183.3))) * 43758.5453);
+    float h3 = fract(sin(dot(cell + seed, float2(419.2, 371.9))) * 43758.5453);
+    // Fewer drops in light rain; each lives a while then is blown or wiped away.
+    float alive = step(h3, rain * 0.85) * step(0.25, fract(time * 0.15 + h1));
+    float2 centre = (float2(h1, h2) - 0.5) * 0.6;
+    float2 d = f - centre;
+    d.y *= mix(1.0, 0.25, flow);                       // stretched into streaks at speed
+    float r = mix(0.08, 0.2, h2);
+    float drop = smoothstep(r, r * 0.55, length(d)) * alive;
+    return float3(-d * drop * 0.035 / scale * 9.0, drop);
+}
+
+fragment float4 finalFragment(FullscreenOut in [[stage_in]], texture2d<float> source [[texture(0)]],
+                              depth2d<float> depth [[texture(1)]], constant FinalUniforms &fu [[buffer(0)]]) {
     // Contrast-adaptive sharpening (after AMD's CAS): restores the edge crispness upscaling
     // and temporal anti-aliasing soften, less where the neighbourhood already has contrast.
     float2 texel = 1.0 / float2(source.get_width(), source.get_height());
@@ -64,7 +96,32 @@ fragment float4 finalFragment(FullscreenOut in [[stage_in]], texture2d<float> so
     float3 e = source.sample(kLinearClamp, in.uv + float2(texel.x, 0)).rgb;
     float3 mn = min(c, min(min(n, sth), min(w, e))), mx = max(c, max(max(n, sth), max(w, e)));
     float3 amp = sqrt(saturate(min(mn, 1.0 - mx) / max(mx, 1e-4)));
-    float3 wgt = -amp * 0.16;
+    // Full strength up close (the deck, aircraft, the airport); a quarter beyond 8 km, where
+    // sharpening would mostly amplify terrain detail changing level (measured: LOD pops 2.6 to
+    // 4.0 of 255 at cruise with full strength everywhere). Reverse-Z depth, near plane 0.1 m.
+    uint2 dp = uint2(in.uv * float2(depth.get_width(), depth.get_height()));
+    float z = depth.read(min(dp, uint2(depth.get_width() - 1, depth.get_height() - 1)));
+    float dist = 0.1 / max(z, 1e-7);
+    // The sky (nothing drawn, depth 0) keeps full strength: it has no levels to pop, and the
+    // stars want the crispness.
+    float3 wgt = -amp * 0.16 * (z <= 0.0 ? 1.0 : 1.0 - 0.75 * smoothstep(1500.0, 8000.0, dist));
     float3 sharp = (c + (n + sth + w + e) * wgt) / (1.0 + 4.0 * wgt);
-    return float4(saturate(sharp), 1.0);
+    float3 outColor = saturate(sharp);
+    // Rain on the windscreen: only where the view passes through the glass (beyond the deck).
+    if (fu.rain > 0.0 && dist > 4.0) {
+        float aspect = float(source.get_width()) / float(source.get_height());
+        float3 a = windscreenDrops(in.uv, aspect, 9.0, fu.rain, fu.time, fu.airspeed, 0.0);
+        float3 b = windscreenDrops(in.uv, aspect, 17.0, fu.rain, fu.time * 1.3, fu.airspeed, 7.0);
+        float cover = saturate(a.z + b.z);
+        if (cover > 0.0) {
+            // Each drop is a tiny lens: it shows the world from a little away, flipped and soft,
+            // with a darker rim.
+            float3 refracted = source.sample(kLinearClamp, in.uv + a.xy + b.xy).rgb;
+            float rim = smoothstep(0.2, 0.9, cover) * (1.0 - smoothstep(0.9, 1.0, cover));
+            outColor = mix(outColor, refracted * (1.0 - 0.25 * rim) + 0.04, cover * 0.85);
+        }
+    }
+    // Lightning: the whole view washed toward white for a moment.
+    outColor += fu.flash * (1.0 - outColor) * 0.55;
+    return float4(outColor, 1.0);
 }

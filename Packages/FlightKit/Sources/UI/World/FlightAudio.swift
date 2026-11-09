@@ -14,6 +14,11 @@ final class FlightAudio {
     private let box: Box
     private var source: AVAudioSourceNode?
     private var started = false
+    /// Recordings played whole (callouts, chimes, thunder) or looped (rain, the tug), by name.
+    private var cues: [String: AVAudioPCMBuffer] = [:]
+    private var cuePlayers: [AVAudioPlayerNode] = []
+    private var nextCuePlayer = 0
+    private var loops: [String: AVAudioPlayerNode] = [:]
 
     init() {
         let rate = engine.outputNode.outputFormat(forBus: 0).sampleRate
@@ -36,6 +41,7 @@ final class FlightAudio {
         engine.mainMixerNode.outputVolume = 0.8
         do {
             try engine.connectNode(node, to: engine.mainMixerNode, format: format)
+            loadCues()
             try engine.start()
             source = node
             started = true
@@ -68,6 +74,53 @@ final class FlightAudio {
             loop.name = url.deletingPathExtension().lastPathComponent
             return loop
         }
+    }
+
+    /// Reads Bundle/Sounds/Cues and sets up four voices for one-shot sounds.
+    private func loadCues() {
+        guard let dir = Bundle.main.resourceURL?.appendingPathComponent("Bundle/Sounds/Cues"),
+              let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { return }
+        for url in files where url.pathExtension == "caf" {
+            guard let file = try? AVAudioFile(forReading: url),
+                  let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(file.length)),
+                  (try? file.read(into: buffer)) != nil else { continue }
+            cues[url.deletingPathExtension().lastPathComponent] = buffer
+        }
+        guard let format = cues.values.first?.format else { return }
+        for _ in 0..<4 {
+            let p = AVAudioPlayerNode()
+            engine.attach(p)
+            engine.connect(p, to: engine.mainMixerNode, format: format)
+            cuePlayers.append(p)
+        }
+    }
+
+    /// Plays a recording once (a callout talks over nothing: the voice it takes is cut).
+    func play(_ name: String, volume: Float = 1) {
+        guard started, let buffer = cues[name], !cuePlayers.isEmpty else { return }
+        let p = cuePlayers[nextCuePlayer % cuePlayers.count]
+        nextCuePlayer += 1
+        p.stop()
+        p.volume = volume
+        p.scheduleBuffer(buffer, at: nil, options: [])
+        p.play()
+    }
+
+    /// Keeps a recording looping at a volume (0 silences it).
+    func setLoop(_ name: String, volume: Float) {
+        guard started else { return }
+        if let p = loops[name] {
+            if abs(p.volume - volume) > 0.01 { p.volume = volume }
+            return
+        }
+        guard volume > 0.01, let buffer = cues[name] else { return }
+        let p = AVAudioPlayerNode()
+        engine.attach(p)
+        engine.connect(p, to: engine.mainMixerNode, format: buffer.format)
+        p.volume = volume
+        p.scheduleBuffer(buffer, at: nil, options: [.loops])
+        p.play()
+        loops[name] = p
     }
 
     func stop() {

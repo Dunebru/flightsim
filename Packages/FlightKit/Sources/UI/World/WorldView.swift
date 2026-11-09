@@ -413,6 +413,19 @@ final class WorldEngine: NSObject {
     func zoom(by factor: Double) {
         rig.pinch(factor)
     }
+
+    // MARK: The flight deck by touch
+
+    /// Applies what touching the flight deck asked for (set by the HUD, which owns the levers
+    /// and the autopilot panel): an action, and for knobs and the flap lever how far (detents).
+    @ObservationIgnored var deckHandler: ((A320Model.DeckAction, Int) -> Void)?
+
+    /// The touchable flight deck object under a point of the view, in the A320's cockpit view.
+    func deckAction(at point: CGPoint, in size: CGSize) -> A320Model.DeckAction? {
+        guard rig.mode == .cockpit, aircraftID == "A320", let targets = a320?.pickTargets, size.width > 0, size.height > 0,
+              let name = renderer?.pick(targets, at: SIMD2(Float(point.x / size.width), Float(point.y / size.height))) else { return nil }
+        return A320Model.deckActions[name]
+    }
 }
 
 extension WorldEngine: @preconcurrency CAMetalDisplayLinkDelegate {
@@ -433,17 +446,47 @@ struct WorldView: View {
     let engine: WorldEngine
     @State private var lastDrag: CGSize = .zero
     @State private var lastMagnification: CGFloat = 1
+    /// A knob or lever being dragged on the flight deck, and the drag already turned into detents.
+    @State private var dragging: A320Model.DeckAction?
+    @State private var applied = 0
+    @State private var decided = false
 
     var body: some View {
+        GeometryReader { geo in
         MetalLayerView(engine: engine)
             .gesture(
                 DragGesture(minimumDistance: 2)
                     .onChanged { value in
+                        if !decided {
+                            decided = true
+                            if let a = engine.deckAction(at: value.startLocation, in: geo.size) {
+                                if case .knob = a { dragging = a } else if a == .flapsLever { dragging = a }
+                            }
+                        }
+                        if let a = dragging {
+                            // Knobs: a detent per 8 points across (right turns up); the flap
+                            // lever: one per 30 points down.
+                            let steps = a == .flapsLever ? Int(value.translation.height / 30) : Int(value.translation.width / 8)
+                            if steps != applied { engine.deckHandler?(a, steps - applied); applied = steps }
+                            return
+                        }
                         engine.orbit(byPoints: CGSize(width: value.translation.width - lastDrag.width,
                                                       height: value.translation.height - lastDrag.height))
                         lastDrag = value.translation
                     }
-                    .onEnded { _ in lastDrag = .zero }
+                    .onEnded { _ in
+                        lastDrag = .zero
+                        dragging = nil
+                        applied = 0
+                        decided = false
+                    }
+            )
+            .simultaneousGesture(
+                SpatialTapGesture()
+                    .onEnded { value in
+                        guard let a = engine.deckAction(at: value.location, in: geo.size) else { return }
+                        engine.deckHandler?(a, 0)
+                    }
             )
             .simultaneousGesture(
                 MagnifyGesture()
@@ -454,6 +497,7 @@ struct WorldView: View {
                     .onEnded { _ in lastMagnification = 1 }
             )
             .accessibilityLabel("Outside view. Drag to look around the aircraft, pinch to zoom.")
+        }
     }
 }
 

@@ -47,6 +47,12 @@ public struct AC3DModel: Sendable {
     public var boundsMax = SIMD3<Float>(repeating: -.greatestFiniteMagnitude)
 
     public var triangleCount: Int { groups.reduce(0) { $0 + $1.triangleCount } }
+    /// Axis lines (objects named "...axis..."): their first two vertices, in the model frame.
+    /// FlightGear animations name them as a rotation axis.
+    public var axisLines: [String: [SIMD3<Float>]] = [:]
+    /// Each named object's centre and radius (xyz, w) in the model frame (the first object of a
+    /// name), for picking.
+    public var objectBounds: [String: SIMD4<Float>] = [:]
 
     public init() {}
 
@@ -168,6 +174,7 @@ public enum AC3DParser {
         var vertices: [SIMD3<Float>] = []
         var surfaces: [Surface] = []
         var objectPart = parentPart
+        var objectName = ""
 
         while let line = reader.next() {
             let tokens = line.split(separator: " ")
@@ -175,6 +182,7 @@ public enum AC3DParser {
             switch keyword {
             case "name":
                 let name = line.split(separator: "\"", omittingEmptySubsequences: false).dropFirst().first.map(String.init) ?? ""
+                objectName = name
                 let p = part(name, parentPart)
                 if !p.isEmpty { objectPart = p }
             case "url", "subdiv", "hidden", "locked", "folded":
@@ -222,6 +230,20 @@ public enum AC3DParser {
             case "kids":
                 let local = transform(rotation: rotation, location: location)
                 let world = parent * local
+                if vertices.count >= 3, !objectName.isEmpty, model.objectBounds[objectName] == nil {
+                    var lo = SIMD3<Float>(repeating: .greatestFiniteMagnitude), hi = -lo
+                    for v in vertices {
+                        let w = world * SIMD4(v, 1)
+                        lo = simd_min(lo, SIMD3(w.x, w.y, w.z)); hi = simd_max(hi, SIMD3(w.x, w.y, w.z))
+                    }
+                    model.objectBounds[objectName] = SIMD4((lo + hi) / 2, simd_length(hi - lo) / 2)
+                }
+                if vertices.count >= 2, objectName.lowercased().contains("axis") {
+                    model.axisLines[objectName] = vertices.prefix(2).map { v in
+                        let w = world * SIMD4(v, 1)
+                        return SIMD3(w.x, w.y, w.z)
+                    }
+                }
                 emit(vertices: vertices, surfaces: surfaces, transform: world, texture: texture, part: objectPart,
                      texrep: texrep, texoff: texoff, crease: crease, model: &model, groupIndex: &groupIndex)
                 let kids = tokens.count > 1 ? Int(tokens[1]) ?? 0 : 0

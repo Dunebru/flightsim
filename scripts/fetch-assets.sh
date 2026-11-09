@@ -287,6 +287,43 @@ fetch_set "https://raw.githubusercontent.com/legoboyvdlp/A320-family/$A320_COMMI
   "external/cfm-reverse.wav 0d3228728f5d3f638575568ef4745bb0d32e816905cbf5d03a693365ce8fb1ed" \
   "external/cfm-rumble.wav 2859ed2b8a9efc023f7c2b6c088fe22d549d81e02b501985ffe8ad4df20ccc87" \
   "external/cfm-spool.wav 5907c059ff9eecae2567c8d9fa87cb3b9e956f393b6fcb44d06aeb4f519e7124"
+# Callouts, chimes and effects from the same repository (Sounds/GPWS, Cockpit, Effects; GPL-2.0):
+# radio height callouts and "retard", the autopilot disconnect, altitude alert and cabin chimes,
+# rain on the windscreen, thunder, the pushback tug, tyre screech. The app gets mono copies.
+fetch_set "https://raw.githubusercontent.com/legoboyvdlp/A320-family/$A320_COMMIT/Sounds" "$A320_RAW/cues" \
+  "Cockpit/c-chord.wav 96b951e67f5888b9f094b23efa99dd83069e7522cf7b9f0d11f07a6bab662e2a" \
+  "Cockpit/cabin-chime.wav 40c620f1d270762573764fcc7b29715c380d98420c01e3d877e1d630fae2e0e0" \
+  "Cockpit/cavalry-charge-once.wav 4f18e00bbce00a937eb9d0816a09fc113201c8dbae2b24184c73b1935c768cbb" \
+  "Cockpit/chime.wav c77260060ccfdd1e1db804001434bb3491155cb849cd5cd335039d70a586cf0e" \
+  "Effects/pushback.wav 0f562ac677e376f93476cb7cf9a5cd16b993a6706ea669f588af69a6dcb08dcb" \
+  "Effects/rain-windshield.wav b47571eab48f3cd01d89b2b638f345d4d26c7f16287a11678e0bbb55bdca3948" \
+  "Effects/thunder1.wav d195ed5c839a5fba53519b669ffb33520cb7640e75dcdc14332cd87e822b51a6" \
+  "Effects/thunder2.wav d4e9f8d749a67bd29537fb227da38283e09aba13615d9325136efbb943923203" \
+  "Effects/thunder3.wav 29e41c93ac6137e517352673a9f7872cdc139ebf188e2edfaa385d75cbaf94e3" \
+  "Effects/tires-screech-asphalt.wav b7d2a8b7a4480d5927fa6d2554a948203e0e2da13177298aabd9ff04afaf654b" \
+  "GPWS/10.wav db20598915197c69dc26cf5ff23a6f4c339927f0ce2b37bbd4918ce40e12e2ab" \
+  "GPWS/100.wav 572e9595eafe2c253465dab65cc8ed99924d81d221a908f8c5252ef5fcdacd49" \
+  "GPWS/1000.wav 50bd4680d4957f4dd8a20f07233e5f9066c4376123d6729007c81f5d78701ef6" \
+  "GPWS/20.wav 0c648e437f1419578e40368f1c41ff38928831226ca1c949d43f7bae03e23495" \
+  "GPWS/200.wav 95e519339462ebb6e9a7d598afc8a6a954a9ea527b1029a89bc68c8264a718bd" \
+  "GPWS/2500.wav 4976724aed4265ecdf3bf3fd9c6d99e864269968a70ab4b2de12af7090d6bf73" \
+  "GPWS/30.wav ed2878e2d1bd53a465ec7d67bda4a381396ab2e0e4f43eac51d73b7357cba17a" \
+  "GPWS/300.wav 55ddafbe08b074084ddbcb3eca0061199df435bc678f3ca9d379c8d06e2bf475" \
+  "GPWS/40.wav c532ed9ed5de132bf80c6cde7d8b43a0ae52d32f402b596ec36e98a1480a5fb3" \
+  "GPWS/400.wav a982797822c6fcf139be07cf0dde1e090428945da087393fa0c5ae259980a383" \
+  "GPWS/50.wav 36d65d921f64f86ae94631f7b26514b2f0afc161ef15ec5fd39af9c85714830d" \
+  "GPWS/500.wav 7ac89bf03b01d7a2119759f6ec90150a4f17ac4b6cd06a5224b88fdf54cf42f5" \
+  "GPWS/retard.wav d67cda42c591519307ca61df404db06cb399f62b7b072a0ef6a383540c9a5722"
+CUE_DIR="$ROOT/Data/Bundle/Sounds/Cues"
+mkdir -p "$CUE_DIR"
+# Kept apart from the CFM56 set: on a case-insensitive disk its cockpit/ and Cockpit/ are one folder.
+for name in GPWS/2500 GPWS/1000 GPWS/500 GPWS/400 GPWS/300 GPWS/200 GPWS/100 GPWS/50 GPWS/40 GPWS/30 GPWS/20 GPWS/10 \
+            GPWS/retard Cockpit/chime Cockpit/cabin-chime Cockpit/cavalry-charge-once Cockpit/c-chord \
+            Effects/rain-windshield Effects/thunder1 Effects/thunder2 Effects/thunder3 Effects/pushback Effects/tires-screech-asphalt; do
+  f="$A320_RAW/cues/$name.wav"
+  out="$CUE_DIR/$(basename "$name").caf"
+  if [ ! -f "$out" ] || [ "$f" -nt "$out" ]; then afconvert -f caff -d LEI16@32000 -c 1 "$f" "$out"; fi
+done
 SOUND_DIR="$ROOT/Data/Bundle/Sounds/CFM56"
 mkdir -p "$SOUND_DIR"
 for f in "$A320_RAW"/sounds/external/*.wav "$A320_RAW"/sounds/cockpit/*.wav; do

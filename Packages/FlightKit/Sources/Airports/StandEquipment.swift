@@ -7,6 +7,36 @@ public import simd
 public enum StandEquipment {
     public static let white = 0.0, yellow = 1.0, black = 2.0, tarp = 3.0, orange = 4.0, steel = 5.0
 
+    /// A pushback tug in its own frame (x forward, y left, z up, origin at its centre on the
+    /// ground): a low yellow body, a raised cab at the back, the tow bar ahead.
+    public static func tug() -> MeshData {
+        var m = MeshData()
+        func box(_ x: Double, _ y: Double, length: Double, width: Double, height: Double, base: Double = 0, paint: Double) {
+            let corners = [SIMD2(x + length / 2, y + width / 2), SIMD2(x - length / 2, y + width / 2),
+                           SIMD2(x - length / 2, y - width / 2), SIMD2(x + length / 2, y - width / 2)]
+            for i in 0..<4 {
+                let c0 = corners[i], c1 = corners[(i + 1) % 4]
+                let mid = (c0 + c1) / 2 - SIMD2(x, y)
+                let n = simd_normalize(SIMD3(mid.x, mid.y, 0))
+                let span = simd_distance(c0, c1)
+                m.add(SIMD3(c0, base), n, SIMD2(0, paint)); m.add(SIMD3(c1, base), n, SIMD2(span, paint))
+                m.add(SIMD3(c1, base + height), n, SIMD2(span, paint))
+                m.add(SIMD3(c0, base), n, SIMD2(0, paint)); m.add(SIMD3(c1, base + height), n, SIMD2(span, paint))
+                m.add(SIMD3(c0, base + height), n, SIMD2(0, paint))
+            }
+            let up = SIMD3<Double>(0, 0, 1)
+            for k in [0, 1, 2, 0, 2, 3] { m.add(SIMD3(corners[k], base + height), up, SIMD2(0, paint)) }
+        }
+        box(0, 0, length: 6.0, width: 2.7, height: 1.0, base: 0.4, paint: yellow)
+        box(-2.0, 0, length: 1.6, width: 2.2, height: 1.3, base: 1.4, paint: black)        // cab
+        box(-2.0, 0, length: 1.7, width: 2.3, height: 0.12, base: 2.7, paint: yellow)      // cab roof
+        for (dx, dy) in [(2.0, 1.2), (2.0, -1.2), (-2.0, 1.2), (-2.0, -1.2)] {
+            box(dx, dy, length: 1.0, width: 0.45, height: 1.0, paint: black)
+        }
+        box(5.25, 0, length: 4.5, width: 0.18, height: 0.15, base: 0.45, paint: steel)      // tow bar to the nose wheel
+        return m
+    }
+
     /// Equipment at every occupied airliner stand except `excluding` (the one the flight
     /// starts at), in the airport frame.
     public static func build(_ site: AirportSite, excluding: String?) -> MeshData {

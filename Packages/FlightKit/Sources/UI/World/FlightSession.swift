@@ -9,6 +9,7 @@ import SimCore
 import Terrain
 import Weather
 import ATC
+import Nav
 import Autopilot
 import Nav
 import Traffic
@@ -54,6 +55,7 @@ final class FlightSession {
     /// The weather the flight uses (clear until a METAR arrives).
     var weather: WeatherConditions = .clear {
         didSet {
+            radarCells = Self.radarCells(weather, around: frame.geodetic(SIMD3(0, 0, 0)))
             traffic?.setWind(fromDegrees: weather.windFromDegrees, knots: weather.windKnots)
             cloudLayers = weather.cloudVolumes(fieldElevationMetres: site.layout.elevation).map { v in
                 let kind: CloudLayer.Kind = switch v.kind {
@@ -82,6 +84,43 @@ final class FlightSession {
     }
     private var clock = 0.0
     private var lastState: FlightState?
+    /// The pushback tug while one is attached.
+    private var tug: PushbackTug?
+    /// Watches for touchdowns and reports them.
+    private lazy var landing = LandingMonitor(site: site)
+    private var callouts = CalloutMonitor()
+    private var replay = ReplayBuffer()
+    private var replayActive = false, replayTime = 0.0
+    /// Weather radar returns: (latitude, longitude, radius nm, level 0 ... 1).
+    private var radarCells: [(Double, Double, Double, Double)] = []
+
+    /// Returns for the weather radar from the METAR at the field. The report says what falls and
+    /// how hard, not where: the cells are placed (repeatably, from the report) within 20 nm of
+    /// the field, more and stronger for heavier rain, with red cores in thunderstorms.
+    static func radarCells(_ w: WeatherConditions, around field: Geodetic) -> [(Double, Double, Double, Double)] {
+        let intensity = w.precipitation.flatMap { $0.kind == .snow ? nil : $0.intensity } ?? 0
+        guard intensity > 0 || w.thunderstorm else { return [] }
+        // FNV-1a of the report's weather groups (String.hashValue changes every launch).
+        var rng: UInt64 = w.weather.joined(separator: " ").utf8.reduce(14_695_981_039_346_656_037) { ($0 ^ UInt64($1)) &* 1_099_511_628_211 } | 1
+        func next() -> Double {
+            rng = rng &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+            return Double(rng >> 11) / Double(1 << 53)
+        }
+        let count = Int(6 + 14 * max(intensity, w.thunderstorm ? 0.8 : 0))
+        var cells: [(Double, Double, Double, Double)] = []
+        for _ in 0..<count {
+            let bearing = next() * 2 * .pi, dist = 2 + next() * 18
+            let lat = field.latitude + dist / 60 * cos(bearing)
+            let lon = field.longitude + dist / 60 * sin(bearing) / cos(field.latitude * .pi / 180)
+            let level = min(1, intensity * (0.4 + 0.6 * next()) + (w.thunderstorm ? 0.3 * next() : 0))
+            cells.append((lat, lon, 1.5 + next() * 3, level * 0.5))       // the outer, weaker part
+            cells.append((lat, lon, 0.8 + next() * 1.2, level))           // its core
+        }
+        return cells
+    }
+    private var nextLightning = 5.0, flashStart: Double?, thunderAt: Double?
+    /// A push has been completed and the aircraft has not taxied since (no second push offered).
+    private var pushedBack = false
     private var crash: CrashCheck?
     private var crashCheckAfter = 1.5
 
@@ -127,6 +166,19 @@ final class FlightSession {
         d.windFrom = Double(hud.windFrom)
         d.windKnots = Double(hud.windKnots)
         d.selectedAltitude = Double(hud.targetAltitude)
+        // Bearing (magnetic) and distance (nm) from the aircraft to a point, flat-earth (fine
+        // within a few hundred miles).
+        func relative(_ lat: Double, _ lon: Double) -> (Double, Double) {
+            let north = (lat - s.latitude) * 60, east = (lon - s.longitude) * 60 * cos(s.latitude * .pi / 180)
+            let bearing = (atan2(east, north) * 180 / .pi - declination + 720).truncatingRemainder(dividingBy: 360)
+            return (bearing, (north * north + east * east).squareRoot())
+        }
+        d.origin = site.layout.icao
+        d.route = hud.route.map { p in let r = relative(p.latitude, p.longitude); return (p.name, r.0, r.1) }
+        d.activeWaypoint = hud.navEngaged ? (hud.activeWaypoint ?? hud.route.count) : 0
+        d.weather = radarCells.map { c in let r = relative(c.0, c.1); return (r.0, r.1, c.2, c.3) }
+        let agl = s.heightAboveGroundFeet
+        d.rangeNM = s.onGround ? 10 : (agl < 5_000 ? 20 : (s.altitudeFeet < 20_000 ? 40 : 80))
         d.fma = [hud.autothrottle ? "SPEED" : "", hud.apVertical, hud.apLateral, hud.apApproach == nil ? "" : "CAT 1",
                  hud.apMaster ? "AP1" : ""]
         // The digital readouts: their values, formatted as the model's XML says.
@@ -373,6 +425,34 @@ final class FlightSession {
         }
         scene.wetness = scene.precipitation.map { $0.kind == .snow ? 0.3 : min(1, 0.5 + $0.intensity) } ?? 0
 
+        // Replay: the flight model holds while the recording plays into the scene.
+        if hud.replaying {
+            if !replayActive {
+                replayActive = true
+                replayTime = max(replay.start, replay.start + replay.duration - 120)
+                hud.replayPlaying = true
+            }
+            physics.setPaused(true)
+            if let seek = hud.replaySeek { replayTime = replay.start + seek; hud.replaySeek = nil }
+            if hud.replayPlaying { replayTime += dt }
+            if replayTime >= replay.start + replay.duration { replayTime = replay.start + replay.duration; hud.replayPlaying = false }
+            if let f = replay.frame(at: replayTime) {
+                scene.aircraftPosition = f.position
+                scene.aircraftHeading = f.heading
+                scene.aircraftPitch = f.pitch
+                scene.aircraftRoll = f.roll
+                scene.aircraftGearDown = f.gearDown
+                scene.instrumentValues = f.values
+                scene.playerLights = f.lights
+                scene.tugPose = nil
+            }
+            hud.replayPosition = replayTime - replay.start
+            hud.replayDuration = replay.duration
+            audio.update(SoundParameters())
+            return
+        }
+        replayActive = false
+
         var inputs = ControlInputs()
         if let pad = gamepad.read() {
             inputs.pitch = pad.pitch
@@ -396,6 +476,17 @@ final class FlightSession {
             let blend = max(0, 1 - last.groundSpeedKnots / 60)
             inputs.yaw = max(-1, min(1, inputs.yaw + inputs.roll * blend))
         }
+        // Nose wheel steering from the same input. The A320's tiller turns the wheel 75 degrees
+        // at taxi speeds; above 20 kt only the pedals steer it, 6 degrees, gone by 130 kt. The
+        // C172's pedals steer it 10 degrees at any speed on the ground.
+        if profile.isTurbine {
+            let gs = lastState?.groundSpeedKnots ?? 0
+            let pedals = 6.0 / 75 * max(0, min(1, (130 - gs) / 60))
+            let authority = gs < 20 ? 1 : max(pedals, 1 - (gs - 20) / 50)
+            inputs.steering = inputs.yaw * authority
+        } else {
+            inputs.steering = inputs.yaw
+        }
         inputs.throttle = hud.throttle
         inputs.reverse = hud.reverse
         flyAutopilot(hud: hud)
@@ -407,8 +498,35 @@ final class FlightSession {
         case .transit(let toDown): inputs.gearDown = toDown
         }
         if !profile.retractableGear { inputs.gearDown = true }
+        // Pushback: the tug takes the nose wheel, releases the parking brake to start and sets
+        // it when the push is done; the pilot's steering and thrust are set aside meanwhile.
+        if let direction = hud.pushbackRequest {
+            hud.pushbackRequest = nil
+            if hud.canPushBack {
+                tug = PushbackTug(direction: direction)
+                hud.parkingBrake = false
+                hud.setThrottle(0)
+                hud.reverse = false
+            }
+        }
+        if hud.pushbackStopRequested { hud.pushbackStopRequested = false; tug?.stop() }
+        var tugBrakes = 0.0
+        if var t = tug, let s = lastState {
+            let cmd = t.update(dt: min(dt, 0.1), heading: s.heading, forwardKnots: s.forwardSpeedKnots, weightPounds: s.weightPounds)
+            inputs.pushbackPounds = cmd.pounds
+            inputs.steering = cmd.steering
+            inputs.throttle = 0
+            tugBrakes = cmd.brakes
+            if t.phase == .done { tug = nil; hud.parkingBrake = true; pushedBack = true } else { tug = t }
+        }
+        if let s = lastState {
+            if s.groundSpeedKnots > 5 { pushedBack = false }
+            let ready = tug == nil && !pushedBack && profile.isTurbine && s.onGround && s.groundSpeedKnots < 1
+            if hud.canPushBack != ready { hud.canPushBack = ready }
+        }
+        if hud.pushingBack != (tug != nil) { hud.pushingBack = tug != nil }
         inputs.parkingBrake = hud.parkingBrake
-        inputs.brakes = hud.wheelBrakes ? 1 : 0
+        inputs.brakes = max(hud.wheelBrakes ? 1 : 0, tugBrakes)
         inputs.pitchTrim = hud.trim
         physics.setInputs(inputs)
         physics.setPaused(hud.paused || holdForScenery || hud.crashMessage != nil)
@@ -417,6 +535,47 @@ final class FlightSession {
 
         let s = physics.state
         lastState = s
+        if hud.crashMessage == nil, let report = landing.update(LandingMonitor.Sample(
+            time: clock, position: lastPosition, heightAboveGroundFeet: s.heightAboveGroundFeet, verticalSpeedFPM: s.verticalSpeedFPM,
+            onGround: s.onGround, groundSpeedKnots: s.groundSpeedKnots, airspeedKnots: s.indicatedAirspeedKnots, loadFactor: s.loadFactor,
+            pitch: s.pitch, roll: s.roll, heading: s.heading, track: s.track)) {
+            hud.showLanding(report)
+        }
+        // Callouts and alerts (the A320's), rain on the windscreen, the tug's engine.
+        let inside = hud.camera == .cockpit
+        if s.engineIsTurbine {
+            let gearDown: Bool = { if case .down = hud.gear { return true }; return false }()
+            for cue in callouts.update(.init(radioHeightFeet: s.heightAboveGroundFeet - profile.cgAboveMainGear / 0.3048,
+                                             verticalSpeedFPM: s.verticalSpeedFPM, onGround: s.onGround, gearDown: gearDown,
+                                             throttle: hud.throttle, autopilot: hud.apMaster, altitudeFeet: s.altitudeFeet,
+                                             selectedAltitudeFeet: Double(hud.targetAltitude))) {
+                audio.play(cue, volume: inside ? 1 : 0.45)
+            }
+        }
+        let rain = scene.precipitation.flatMap { $0.kind == .snow ? nil : $0.intensity } ?? 0
+        audio.setLoop("rain-windshield", volume: Float(rain * (inside ? 0.9 : 0.35)))
+        audio.setLoop("pushback", volume: tug == nil ? 0 : (inside ? 0.25 : 0.7))
+        scene.windscreenRain = inside ? Float(rain) : 0
+        scene.airspeedKnots = Float(s.trueAirspeedKnots)
+        // Thunderstorms: a flash every 8 to 30 seconds (a double pulse), its thunder 1 to 7
+        // seconds later, as far off as the strike.
+        if weather.thunderstorm {
+            if clock > nextLightning {
+                flashStart = clock
+                thunderAt = clock + Double.random(in: 1...7)
+                nextLightning = clock + Double.random(in: 8...30)
+            }
+        }
+        if let f = flashStart {
+            let t = clock - f
+            let pulse = t < 0.08 ? 1.0 : (t > 0.18 && t < 0.26 ? 0.7 : 0)
+            scene.lightningFlash = Float(pulse)
+            if t > 0.3 { flashStart = nil; scene.lightningFlash = 0 }
+        }
+        if let at = thunderAt, clock >= at {
+            thunderAt = nil
+            audio.play(["thunder1", "thunder2", "thunder3"].randomElement()!, volume: Float.random(in: 0.5...1) * (inside ? 0.7 : 1))
+        }
         if crash == nil, physics.restingHeightFeet > 0 { crash = CrashCheck(restingHeightFeet: physics.restingHeightFeet) }
         if hud.crashMessage == nil, clock > crashCheckAfter, let reason = crash?.update(s) { hud.crashMessage = reason }
         let warn = !s.onGround && s.angleOfAttackDegrees > profile.stallWarningAlpha && s.indicatedAirspeedKnots > 20
@@ -433,6 +592,16 @@ final class FlightSession {
         scene.aircraftPivotHeight = pivot
         scene.aircraftPosition = SIMD3(base.x, base.y, base.z + s.heightAboveGroundFeet * 0.3048 - pivot)
         scene.aircraftHeading = s.heading
+        // The tug faces the aircraft from ahead of the nose wheel, lined up with it, its tow bar
+        // on the wheel.
+        if tug != nil {
+            let wheel = s.heading + s.noseSteeringDegrees * .pi / 180
+            let nose = SIMD2(base.x, base.y) + SIMD2(sin(s.heading), cos(s.heading)) * profile.noseWheelAheadOfCG
+            let at = nose + SIMD2(sin(wheel), cos(wheel)) * 7.5
+            scene.tugPose = SIMD4(at.x, at.y, base.z, wheel + .pi)
+        } else {
+            scene.tugPose = nil
+        }
         scene.aircraftGearDown = s.gearPosition > 0.97
         scene.propellerSpinning = !s.engineIsTurbine && s.engineIndication > 400
         if s.engineIsTurbine && hud.camera == .cockpit {
@@ -444,6 +613,21 @@ final class FlightSession {
                 rudder: s.rudderDegrees, flaps: s.flapPosition, speedbrake: s.speedbrake, steering: s.noseSteeringDegrees,
                 gear: s.gearPosition, compression: s.gearCompressionFeet, wheelSpeed: s.wheelSpeed, n1: s.engineIndication,
                 reverser: s.reverser)
+            // The levers and controls the pilot moves, in FlightGear's ranges: the sidestick
+            // (+1 forward), tiller and pedals, thrust and reverse levers, gear lever (0 up,
+            // 3 down), flap lever detents, speedbrake lever (raised when armed).
+            typealias D = A320Model.DeckControl
+            let gearUp: Bool = { if case .up = hud.gear { return true }; if case .transit(let down) = hud.gear { return !down }; return false }()
+            let deck: [String: Double] = [
+                D.sidestickPitch: -inputs.pitch, D.sidestickRoll: inputs.roll,
+                D.tiller: (lastState?.groundSpeedKnots ?? 0) < 20 ? inputs.steering : 0, D.pedals: inputs.yaw,
+                D.throttle[0]: hud.reverse ? 0 : inputs.throttle, D.throttle[1]: hud.reverse ? 0 : inputs.throttle,
+                D.reverse[0]: hud.reverse ? max(0.25, inputs.throttle) : 0, D.reverse[1]: hud.reverse ? max(0.25, inputs.throttle) : 0,
+                D.gear: gearUp ? 0 : 3, D.flaps: Double(hud.flapIndex),
+                D.speedbrake: [0, 0, 0.5, 1][min(hud.spoilerIndex, 3)],
+                "controls/cockpit/spoilers-lever-translate": hud.spoilerIndex == 1 ? 1 : 0,
+            ]
+            scene.instrumentValues.merge(deck) { _, new in new }
         } else {
             scene.instrumentValues = Self.cockpitReadings(s, inputs: inputs, declination: declination, headingBug: Double(hud.targetHeading))
         }
@@ -461,6 +645,7 @@ final class FlightSession {
         scene.playerLights = flags == 0 ? nil : SIMD8<Float>(Float(nose.x), Float(nose.y), Float(nose.z), lightHeading, 0.37,
                                                              Float(s.pitch), Float(s.roll), Float(flags))
         scene.playerLightsSmall = !s.engineIsTurbine
+        if !hud.paused && hud.crashMessage == nil { replay.record(time: clock, scene) }
 
         let now = Date.timeIntervalSinceReferenceDate
         if now - lastHUDUpdate > 0.1 {
@@ -537,6 +722,10 @@ final class FlightSession {
         hud.atcLog = atc.log
         for m in messages where !m.isPilot { voice.speak(m.spoken) }
         hud.atcRequests = atc.requests(situation, traffic: traffic)
+        hud.taxiRoute = atc.taxiPath.enumerated().map { i, p in
+            let g = frame.geodetic(SIMD3(p.x, p.y, 0))
+            return NavPoint(name: "TAXI\(i)", latitude: g.latitude, longitude: g.longitude)
+        }
     }
 
     /// Hands the glareshield's settings to the autopilot (on the physics thread), with the ILS

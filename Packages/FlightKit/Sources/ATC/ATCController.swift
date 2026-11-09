@@ -89,6 +89,9 @@ public final class ATCController {
 
     // What has been cleared so far.
     private var taxiRunway: String?
+    /// The taxi route last cleared (airport frame), for the map; empty once it no longer applies
+    /// (cleared for takeoff, or a new clearance).
+    public private(set) var taxiPath: [SIMD2<Double>] = []
     private var takeoffRunway: String?
     private var checkedIn = false
     private var approachRunway: String?
@@ -149,6 +152,7 @@ public final class ATCController {
             pilot("Ground", "ready to taxi with information \(atisWord(weather.observed))")
             if let route = traffic.routeToRunway(from: s.position) {
                 taxiRunway = route.destination
+                taxiPath = [s.position] + route.path
                 let via = route.via.isEmpty ? "" : ", taxi via \(route.via.joined(separator: ", "))"
                 let viaSpoken = route.via.isEmpty ? "" : ", taxi via " + route.via.map(Phraseology.taxiway).joined(separator: ", ")
                 atc("Ground", "runway \(route.destination)\(via), hold short of runway \(route.destination).",
@@ -162,6 +166,7 @@ public final class ATCController {
             pilot("Tower", "holding short of runway \(rw), ready for departure")
             if traffic.runwayIsClear(rw) {
                 takeoffRunway = rw
+                taxiPath = []
                 traffic.playerClearance = (rw, false)
                 atc("Tower", "\(windText), runway \(rw), cleared for takeoff.", "\(windSpoken), \(Phraseology.runway(rw)), cleared for takeoff.")
             } else {
@@ -201,6 +206,7 @@ public final class ATCController {
             pilot("Ground", "clear of the runway, request taxi to parking")
             if let route = traffic.routeToGate(from: s.position) {
                 parkingCleared = true
+                taxiPath = [s.position] + route.path
                 let via = route.via.isEmpty ? "" : " via \(route.via.joined(separator: ", "))"
                 let viaSpoken = route.via.isEmpty ? "" : " via " + route.via.map(Phraseology.taxiway).joined(separator: ", ")
                 atc("Ground", "taxi to gate \(route.destination)\(via).", "taxi to gate \(Phraseology.spell(route.destination))\(viaSpoken).")

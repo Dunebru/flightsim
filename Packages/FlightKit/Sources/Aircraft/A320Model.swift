@@ -75,7 +75,8 @@ public enum A320Model {
                            "batt_voltage.canvas.L": "display:batt1", "batt_voltage.canvas.R": "display:batt2"]
             try m.load(xml: "a320.flightdeck.xml", directory: directory, placement: deck,
                        excluding: ["IESI", "Effects/"], staticPart: "cabin", special: { screens[$0] },
-                       animate: { Self.deckControls.contains($0.property) }, fixedSelects: true, texts: Self.deckReadouts)
+                       animate: { Self.deckControls.contains($0.property) }, fixedSelects: true, texts: Self.deckReadouts,
+                       picks: Set(Self.deckActions.keys))
         }
         return m
     }
@@ -95,6 +96,23 @@ public enum A320Model {
         DeckControl.tiller, DeckControl.pedals, DeckControl.gear, DeckControl.throttle[0], DeckControl.throttle[1],
         DeckControl.reverse[0], DeckControl.reverse[1], DeckControl.speedbrake, "controls/cockpit/spoilers-lever-translate",
         DeckControl.flaps, "controls/cockpit/flaps-lever-translate-pos",
+    ]
+
+    /// What touching a flight deck object does. Knobs turn by dragging across them.
+    public enum DeckAction: Sendable, Equatable {
+        case autopilot, autothrust, localizer, approach, gearLever, parkingBrake, landingLights, navLights, strobeLights
+        case flapsLever
+        case knob(Knob)
+        public enum Knob: Sendable, Equatable { case speed, heading, altitude, verticalSpeed }
+    }
+
+    /// The touchable objects of the flight deck (FlightGear's pick and knob objects) and what
+    /// each does.
+    public static let deckActions: [String: DeckAction] = [
+        "ap1": .autopilot, "ap2": .autopilot, "a-thr": .autothrust, "loc": .localizer, "appr": .approach,
+        "spd-sel": .knob(.speed), "hdg_sel": .knob(.heading), "alt-sel": .knob(.altitude), "vs-sel": .knob(.verticalSpeed),
+        "gear_lever": .gearLever, "FlapsLever": .flapsLever, "ParkBrk": .parkingBrake,
+        "LandingLtSwtch": .landingLights, "LandingLtRSwtch": .landingLights, "NavLogoLtSwtch": .navLights, "StrobeLtSwtch": .strobeLights,
     ]
 
     public enum DeckControl {

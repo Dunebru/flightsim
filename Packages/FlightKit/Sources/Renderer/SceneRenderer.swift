@@ -530,6 +530,7 @@ public final class SceneRenderer {
                 * MatrixMath.translation(-pivot)
                 * aircraft.modelToBody
             aircraftModel = MatrixMath.translation(relative(aircraftWorld, to: camera)) * orient
+            pickState = (viewProjNoJitter * aircraftModel, Float(fov), Float(aspect))
             // The cabin and flight deck show only through the windows: not worth drawing from
             // more than 35 m (the A320's deck is 440,000 triangles).
             // An airliner's flight deck shows only from the pilot's seat (its windscreen is dark
@@ -900,6 +901,21 @@ public final class SceneRenderer {
                 }
             }
             e.setDepthBias(0, slopeScale: 0, clamp: 0)
+            // The pushback tug at the nose, while one is attached.
+            if let pose = scene.tugPose, let tug = tugMesh() {
+                func model(_ p: SIMD4<Double>, _ cam: SIMD3<Double>) -> simd_float4x4 {
+                    let h = p.w, at = relative(SIMD3(p.x, p.y, p.z) + offset, to: cam)
+                    return simd_float4x4(columns: (SIMD4(Float(sin(h)), Float(cos(h)), 0, 0), SIMD4(Float(-cos(h)), Float(sin(h)), 0, 0),
+                                                   SIMD4(0, 0, 1, 0), SIMD4(at, 1)))
+                }
+                var d = DrawUniforms()
+                d.model = model(pose, camera)
+                d.prevModel = reset ? d.model : model(previousTugPose ?? pose, previousCam)
+                d.material = SIMD4(0.5, 0, 0, SurfaceKind.building.rawValue)
+                d.emissive = SIMD4(AirportRenderer.Facade.equipment.rawValue, 0, 0, 0)
+                draw(tug.buffer, count: tug.count, d, texture: nil)
+            }
+            previousTugPose = scene.tugPose
             // Parked airliners at the stands.
             var parked = 0
             e.setRenderPipelineState(parkedPipeline)
@@ -1190,6 +1206,10 @@ public final class SceneRenderer {
            let pipeline = try? finalPipeline(for: target.pixelFormat) {
             e.setRenderPipelineState(pipeline)
             e.setFragmentTexture(upscaled, index: 0)
+            e.setFragmentTexture(t.depth, index: 1)
+            var fu = SIMD4<Float>(scene.windscreenRain, Float(CACurrentMediaTime().truncatingRemainder(dividingBy: 3_600)),
+                                  scene.airspeedKnots, scene.lightningFlash)
+            e.setFragmentBytes(&fu, length: MemoryLayout<SIMD4<Float>>.stride, index: 0)
             e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
             e.endEncoding()
         }
@@ -1620,6 +1640,52 @@ public final class SceneRenderer {
             out.append((at(SIMD3(tailX, -s.tailSpan / 2 + 1, bodyZ + 0.6)), dir(SIMD3(-0.2, 0.45, 1)), cos(30 * .pi / 180), 2_500))
         }
         return Array(out.prefix(4))
+    }
+
+    /// Last frame's aircraft model-to-clip transform, vertical field of view and aspect, for
+    /// touching things on the flight deck.
+    private var pickState: (matrix: simd_float4x4, fov: Float, aspect: Float)?
+
+    /// The touchable object under a point on the screen (x right, y down, both 0 ... 1), from
+    /// objects given as centre and radius in the aircraft model's frame: the one whose drawn
+    /// size best covers the point, with a little slack for fingers.
+    /// Where a point in the aircraft model's frame was drawn last frame (x right, y down, 0 ... 1).
+    public func project(_ p: SIMD3<Float>) -> SIMD2<Float>? {
+        guard let s = pickState else { return nil }
+        let clip = s.matrix * SIMD4(p, 1)
+        guard clip.w > 0.05 else { return nil }
+        return SIMD2((clip.x / clip.w + 1) / 2, (1 - clip.y / clip.w) / 2)
+    }
+
+    public func pick(_ targets: [String: SIMD4<Float>], at point: SIMD2<Float>) -> String? {
+        guard let p = pickState else { return nil }
+        var best: (String, Float)?
+        let k = 1 / tan(p.fov / 2)
+        for (name, t) in targets {
+            let clip = p.matrix * SIMD4(t.x, t.y, t.z, 1)
+            guard clip.w > 0.05 else { continue }
+            let ndc = SIMD2(clip.x, clip.y) / clip.w
+            let screen = SIMD2((ndc.x + 1) / 2, (1 - ndc.y) / 2)
+            // In units of screen height: the object's drawn radius, plus 3% for a fingertip.
+            let radius = t.w * k / clip.w / 2 + 0.03
+            let d = simd_length((screen - point) * SIMD2(p.aspect, 1))
+            guard d < radius else { continue }
+            let score = d / radius
+            if score < (best?.1 ?? .infinity) { best = (name, score) }
+        }
+        return best?.0
+    }
+
+    private var tugBuffer: (buffer: any MTLBuffer, count: Int)?
+    private var previousTugPose: SIMD4<Double>?
+    /// The pushback tug's mesh, built on first use.
+    private func tugMesh() -> (buffer: any MTLBuffer, count: Int)? {
+        if let tugBuffer { return tugBuffer }
+        let m = StandEquipment.tug()
+        let v = (0..<m.positions.count).map { MeshVertex(position: SIMD4(m.positions[$0], 1), normal: SIMD4(m.normals[$0], 0), uv: m.uvs[$0]) }
+        guard let b = device.makeBuffer(bytes: v, length: v.count * MemoryLayout<MeshVertex>.stride, options: .storageModeShared) else { return nil }
+        tugBuffer = (b, v.count)
+        return tugBuffer
     }
 
     private var playerLightBuffers: [any MTLBuffer] = []
