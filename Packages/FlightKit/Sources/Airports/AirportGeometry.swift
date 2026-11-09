@@ -611,7 +611,62 @@ public struct AirportGeometry: Sendable {
             extrude(ring, from: z0, to: z1, into: &mesh)
             for h in holes { extrude(h.reversed(), from: z0, to: z1, into: &mesh) }
             roof(ring, holes: holes, at: z1, into: &mesh)
+            if b.kind == .terminal || b.kind == .hangar {
+                // A metal fascia standing 1.2 m above the roof (uv.y -3 marks it for the facade
+                // shader), its inner face too, so the roof reads as a roof.
+                fascia(ring, from: z1, height: 1.2, into: &mesh)
+            }
+            if b.kind == .terminal {
+                rooftopPlant(ring, holes: holes, at: z1, seed: b.outer.first.map { $0.lat * 7_919 + $0.lon * 104_729 } ?? 0, into: &g.bridges)
+            }
         }
         g.buildings[b.kind] = mesh
+    }
+
+    /// A parapet band: outer face and inner face of the roof edge, uv.y -3 throughout.
+    static func fascia(_ ring: [SIMD2<Double>], from z: Double, height: Double, into m: inout MeshData) {
+        var u = 0.0
+        for i in 0..<ring.count {
+            let p = ring[i], q = ring[(i + 1) % ring.count]
+            let d = q - p, len = simd_length(d)
+            guard len > 0.01 else { continue }
+            let n = SIMD3(d.y / len, -d.x / len, 0)
+            let a = SIMD3(p.x, p.y, z), b = SIMD3(q.x, q.y, z), c = SIMD3(q.x, q.y, z + height), e = SIMD3(p.x, p.y, z + height)
+            m.add(a, n, SIMD2(u, -3)); m.add(b, n, SIMD2(u + len, -3)); m.add(c, n, SIMD2(u + len, -3))
+            m.add(a, n, SIMD2(u, -3)); m.add(c, n, SIMD2(u + len, -3)); m.add(e, n, SIMD2(u, -3))
+            m.add(b, -n, SIMD2(u, -3)); m.add(a, -n, SIMD2(u + len, -3)); m.add(e, -n, SIMD2(u + len, -3))
+            m.add(b, -n, SIMD2(u, -3)); m.add(e, -n, SIMD2(u + len, -3)); m.add(c, -n, SIMD2(u, -3))
+            u += len
+        }
+    }
+
+    /// Air-handling units and duct runs on a large roof, about one per 900 m2 (at most 40),
+    /// clear of the edges. Painted steel (bridge facade code -1).
+    static func rooftopPlant(_ ring: [SIMD2<Double>], holes: [[SIMD2<Double>]], at z: Double, seed: Double, into m: inout MeshData) {
+        let area = abs(Polygon2D.signedArea(ring))
+        guard area > 2_500 else { return }
+        let lo = ring.reduce(SIMD2(Double.infinity, .infinity)) { simd_min($0, $1) }
+        let hi = ring.reduce(SIMD2(-Double.infinity, -.infinity)) { simd_max($0, $1) }
+        func inside(_ p: SIMD2<Double>) -> Bool {
+            var c = false
+            for i in 0..<ring.count {
+                let a = ring[i], b = ring[(i + 1) % ring.count]
+                if (a.y > p.y) != (b.y > p.y), p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x { c.toggle() }
+            }
+            return c
+        }
+        func hash(_ k: Double) -> Double { let x = sin(k * 12.9898 + seed) * 43_758.5453; return x - x.rounded(.down) }
+        let count = min(40, Int(area / 900))
+        var placed = 0, tries = 0
+        while placed < count && tries < count * 8 {
+            tries += 1
+            let p = SIMD2(lo.x + (hi.x - lo.x) * hash(Double(tries) * 1.7), lo.y + (hi.y - lo.y) * hash(Double(tries) * 3.1 + 0.4))
+            let w = 3 + 4 * hash(Double(tries) * 5.3), l = 4 + 8 * hash(Double(tries) * 7.9), h = 1.6 + 1.4 * hash(Double(tries) * 2.2)
+            let corners = [p, p + SIMD2(l, 0), p + SIMD2(l, w), p + SIMD2(0, w)]
+            // Clear of the edge: every corner and a margin inside.
+            guard corners.allSatisfy({ inside($0) && inside($0 + SIMD2(3, 3)) && inside($0 - SIMD2(3, 3)) }) else { continue }
+            prism(SIMD3(p.x, p.y + w / 2, z), SIMD3(p.x + l, p.y + w / 2, z), half: w / 2, height: h, code: steel, into: &m)
+            placed += 1
+        }
     }
 }

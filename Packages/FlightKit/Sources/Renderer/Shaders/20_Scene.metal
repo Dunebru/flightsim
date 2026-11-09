@@ -537,14 +537,30 @@ inline float3 facadeAlbedo(float code, float2 uv, float3 N, thread float &roughn
     if (code == 6.0) { roughness = 0.06; return float3(0.025, 0.035, 0.04); }   // tower cab glass
     if (code == 5.0) { roughness = 0.8; return float3(0.62, 0.60, 0.56); }      // tower shaft
     if (code == 1.0) {
-        // Terminal: glass curtain wall, 1.5 m mullions, 4.5 m floors.
-        float2 cell = fract(uv / float2(1.5, 4.5));
-        bool frame = cell.x < 0.06 || cell.y < 0.08;
-        roughness = frame ? 0.6 : 0.12;
+        // Terminal. The roof fascia (uv.y -3): light painted metal with panel joints.
+        if (uv.y < -2.5) {
+            roughness = 0.4;
+            float joint = fract(uv.x / 4.0) < 0.02 ? 0.85 : 1.0;
+            return float3(0.72, 0.73, 0.74) * joint;
+        }
+        // Glass curtain wall over 4.5 m floors: a 0.9 m opaque spandrel at each slab, 1.5 m
+        // mullions; the ground floor's glazing taller with 3 m bays. Each building a slightly
+        // different glass tint.
+        bool ground = uv.y < 5.0;
+        float2 cell = ground ? float2(fract(uv.x / 3.0), uv.y / 5.0) : fract(float2(uv.x / 1.5, (uv.y - 5.0) / 4.5));
+        bool mullion = cell.x < (ground ? 0.03 : 0.05);
+        bool spandrel = !ground && cell.y < 0.2;
+        bool transom = ground ? abs(cell.y - 0.62) < 0.012 : abs(cell.y - 0.6) < 0.015;
+        float3 tint = mix(float3(0.035, 0.06, 0.075), float3(0.06, 0.07, 0.065), seed);
+        if (spandrel) {
+            roughness = 0.45;
+            return float3(0.32, 0.34, 0.36) * (0.95 + 0.05 * hash21(floor(uv / float2(1.5, 4.5))));
+        }
+        roughness = mullion || transom ? 0.5 : 0.06;
         // Lit concourses: most panes glow warm at night, a few bays darker.
         float lit = 0.6 + 0.4 * hash21(floor(uv / float2(6.0, 4.5)));
-        glow = frame ? float3(0.0) : float3(1.0, 0.86, 0.62) * 2.2e-4 * lit;
-        return frame ? float3(0.55, 0.56, 0.57) : float3(0.05, 0.07, 0.09);
+        glow = mullion || transom ? float3(0.0) : float3(1.0, 0.86, 0.62) * 2.2e-4 * lit;
+        return mullion || transom ? float3(0.6, 0.61, 0.62) : tint;
     }
     if (code == 2.0) {
         // Hangar: ribbed metal cladding.
